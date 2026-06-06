@@ -1,0 +1,10 @@
+{
+  "id": "personal-life-system",
+  "name": "Life OS",
+  "version": "0.3.0",
+  "minAppVersion": "1.5.0",
+  "description": "Organize diary entries, tasks, knowledge, memory, and AI-assisted reviews inside your Obsidian vault.",
+  "author": "Xiaoqiang Huang",
+  "authorUrl": "https://github.com/Xiaoqiang-Huang",
+  "isDesktopOnly": true
+}
