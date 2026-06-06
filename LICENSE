@@ -1,7 +1,34 @@
-PolyForm Noncommercial License 1.0.0
+Life OS Noncommercial Source License
 
-This project is intended to use the PolyForm Noncommercial License 1.0.0.
-See: https://polyformproject.org/licenses/noncommercial/1.0.0/
+Copyright (c) Xiaoqiang Huang. All rights reserved.
 
-Commercial use, resale, SaaS wrapping, or company-internal commercial
-deployment requires prior written permission from the author.
+Permission is granted to use, copy, modify, and distribute this software for
+personal, educational, research, evaluation, and other non-commercial purposes,
+subject to the conditions below.
+
+Commercial use is not permitted without prior written permission from the
+copyright holder. Commercial use includes, but is not limited to:
+
+- Selling, sublicensing, renting, or leasing this software or a derivative work.
+- Bundling this software into a paid product, service, course, template, or
+  commercial distribution.
+- Offering this software or a derivative work as a hosted service, SaaS product,
+  paid plugin package, agency deliverable, or consulting deliverable.
+- Using this software inside a company, organization, or commercial workflow to
+  create revenue, reduce operating cost, provide services to clients, or support
+  paid business activity.
+
+Redistribution is allowed only if this license file and the copyright notice are
+included with the redistributed copy or derivative work.
+
+You may not remove or bypass license checks, payment checks, entitlement checks,
+or access-control mechanisms that are included in the software.
+
+This software is provided "as is", without warranty of any kind, express or
+implied, including but not limited to the warranties of merchantability, fitness
+for a particular purpose, and non-infringement. In no event shall the copyright
+holder be liable for any claim, damages, or other liability arising from the
+software or the use of the software.
+
+For commercial licensing, resale permission, enterprise deployment, or other
+written permission, contact the copyright holder.

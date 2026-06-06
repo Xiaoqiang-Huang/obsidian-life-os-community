@@ -96,4 +96,4 @@ For issues, feature requests, and community-plugin review feedback, use the GitH
 
 ## License
 
-This project uses the PolyForm Noncommercial License 1.0.0. Personal and non-commercial use is allowed under that license. Commercial use, resale, SaaS wrapping, or company-internal commercial deployment requires prior written permission from the author.
+This project uses the Life OS Noncommercial Source License. Personal and non-commercial use is allowed. Commercial use, resale, SaaS wrapping, paid redistribution, consulting delivery, or company-internal commercial deployment is not allowed without prior written permission from the author.

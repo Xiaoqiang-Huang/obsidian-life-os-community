@@ -92,4 +92,4 @@ npm run test:community-ready
 
 ## 许可证
 
-本项目使用 PolyForm Noncommercial License 1.0.0。个人和非商业用途可按该许可证使用。商业使用、转售、SaaS 包装或公司内部商业部署需要获得作者书面许可。
+本项目使用 Life OS Noncommercial Source License。允许个人和非商业用途使用。未经作者书面许可，不允许商业使用、转售、SaaS 包装、付费再分发、咨询交付或公司内部商业部署。
