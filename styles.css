@@ -2549,6 +2549,14 @@ body.is-mobile .lifeos-theme-swatch-desc,
   box-shadow: 0 0 0 3px var(--pls-accent-soft);
 }
 
+.pls-clickable {
+  cursor: pointer;
+}
+
+.pls-button-muted-disabled {
+  opacity: 0.4;
+}
+
 /* ── Chat action row with AI toggle ── */
 .pls-chat-action-row {
   display: flex;
@@ -11001,6 +11009,7 @@ body.lifeos-theme-minimal-warm .lifeos-setting-row > * {
 
 .lifeos-chat-composer textarea {
   min-height: 82px;
+  height: var(--lifeos-chat-composer-height, 82px);
   resize: vertical;
 }
 

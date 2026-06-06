@@ -1,4 +1,4 @@
-import { requestUrl } from "obsidian";
+import { Platform, requestUrl } from "obsidian";
 import type {
   ActivationRecordSnapshot,
   LicenseRecordSnapshot,
@@ -86,14 +86,14 @@ function requireBaseUrl(baseUrl: string): string {
 }
 
 function getPlatform(): string {
-  const navigatorPlatform = navigator.platform || "unknown";
-  const userAgent = navigator.userAgent || "";
-  if (/android/i.test(userAgent)) return "android";
-  if (/iphone|ipad|ios/i.test(userAgent)) return "ios";
-  if (/windows/i.test(userAgent) || /win/i.test(navigatorPlatform)) return "windows";
-  if (/mac/i.test(userAgent) || /mac/i.test(navigatorPlatform)) return "macos";
-  if (/linux/i.test(userAgent) || /linux/i.test(navigatorPlatform)) return "linux";
-  return navigatorPlatform;
+  if (Platform.isAndroidApp) return "android";
+  if (Platform.isIosApp) return "ios";
+  if (Platform.isWin) return "windows";
+  if (Platform.isMacOS) return "macos";
+  if (Platform.isLinux) return "linux";
+  if (Platform.isMobileApp) return "mobile";
+  if (Platform.isDesktopApp) return "desktop";
+  return "unknown";
 }
 
 async function api<T>(baseUrl: string, path: string, options: {

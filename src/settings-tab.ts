@@ -1,5 +1,6 @@
 ﻿import { App, Notice, PluginSettingTab, setIcon } from "obsidian";
 import PersonalLifeSystemPlugin from "./main";
+import { Setting } from "obsidian";
 import type { AiProviderType, AssistantStyle, AssistantVerbosity, ChatContextMode, ChatMode, ChatSendBehavior, DirectoryLanguage, DisplayLanguage, ExamProfileType, HeatmapRange, LlmWikiCompileDepth, LlmWikiLongMaterialMode, LlmWikiSensitiveDefault, ThemeStyle } from "./settings";
 import { analyzeAiConnectionTestModels, DEFAULT_SETTINGS, EXAM_PROFILE_OPTIONS, getAiProviderPreset, getExamChatModeLabel, getExamProfileLabel, getStoredAiApiKey, getStoredAiProviderConfig, getThemeStyleClasses, normalizeAiApiKeyInput, normalizeThemeStyle, setStoredAiApiKey, setStoredAiProviderConfig, THEME_STYLES, validateAiProviderConfig } from "./settings";
 import { resolveLicenseStatus } from "./licensing/entitlement";
@@ -57,7 +58,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
 
     const header = containerEl.createDiv({ cls: "lifeos-settings-hero" });
     header.createDiv({ cls: "lifeos-kicker", text: "Life OS Settings" });
-    header.createEl("h1", { text: "设置中心" });
+    new Setting(header).setName("设置中心").setHeading();
     header.createEl("p", { text: "管理本地数据、AI 模型、Chat 人格 Skill、写入确认和复盘热力图。" });
     const actions = header.createDiv({ cls: "lifeos-settings-actions" });
     this.button(actions, "测试连接", () => void this.testConnection(), true);
@@ -772,7 +773,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     const iconEl = head.createSpan({ cls: "lifeos-settings-card-icon" });
     setIcon(iconEl, icon);
     const copy = head.createDiv();
-    copy.createEl("h2", { text: title });
+    new Setting(copy).setName(title).setHeading();
     copy.createEl("p", { text: description });
     return card;
   }

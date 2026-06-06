@@ -448,18 +448,6 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     }
     this.modalTextareaObserver?.disconnect();
     this.modalTextareaObserver = null;
-    this.app.workspace.detachLeavesOfType(DASHBOARD_VIEW_TYPE);
-    this.app.workspace.detachLeavesOfType(CHAT_VIEW_TYPE);
-    this.app.workspace.detachLeavesOfType(TASKS_VIEW_TYPE);
-    this.app.workspace.detachLeavesOfType(DAILY_VIEW_TYPE);
-    this.app.workspace.detachLeavesOfType(KNOWLEDGE_VIEW_TYPE);
-    this.app.workspace.detachLeavesOfType(MEMORY_VIEW_TYPE);
-    this.app.workspace.detachLeavesOfType(REVIEW_VIEW_TYPE);
-    this.app.workspace.detachLeavesOfType(CHECKIN_VIEW_TYPE);
-    this.app.workspace.detachLeavesOfType(USER_GUIDE_VIEW_TYPE);
-    this.app.workspace.detachLeavesOfType(PRO_COMPARE_VIEW_TYPE);
-    this.app.workspace.detachLeavesOfType(PRO_LICENSE_VIEW_TYPE);
-    this.app.workspace.detachLeavesOfType(CALENDAR_VIEW_TYPE);
   }
 
   // ═══════════════════════════════════════════════════
@@ -1830,7 +1818,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   async activateDashboard(mode?: string): Promise<void> {
     const leaf = this.getLifeOsLeaf();
     await leaf.setViewState({ type: DASHBOARD_VIEW_TYPE, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
     if (mode === "interview") {
       new Notice(`已打开 Dashboard，可从${getExamProfileLabel(this.settings)}模块进入练习。`);
     }
@@ -1867,50 +1855,50 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   async activateTasks(): Promise<void> {
     const leaf = this.getLifeOsLeaf();
     await leaf.setViewState({ type: TASKS_VIEW_TYPE, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
   async activateDaily(): Promise<void> {
     const leaf = this.getLifeOsLeaf();
     await leaf.setViewState({ type: DAILY_VIEW_TYPE, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
   async activateKnowledge(): Promise<void> {
     const leaf = this.getLifeOsLeaf();
     await leaf.setViewState({ type: KNOWLEDGE_VIEW_TYPE, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
   async activateMemory(): Promise<void> {
     const leaf = this.getLifeOsLeaf();
     await leaf.setViewState({ type: MEMORY_VIEW_TYPE, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
   async activateChat(initialPrompt = ""): Promise<void> {
     if (initialPrompt.trim()) this.pendingChatPrompt = initialPrompt.trim();
     const leaf = this.getLifeOsLeaf();
     await leaf.setViewState({ type: CHAT_VIEW_TYPE, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
   async activateUserGuide(): Promise<void> {
     const leaf = this.getLifeOsLeaf();
     await leaf.setViewState({ type: USER_GUIDE_VIEW_TYPE, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
   async activateProLicense(): Promise<void> {
     const leaf = this.getLifeOsLeaf();
     await leaf.setViewState({ type: PRO_LICENSE_VIEW_TYPE, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
   async activateProCompare(): Promise<void> {
     const leaf = this.getLifeOsLeaf();
     await leaf.setViewState({ type: PRO_COMPARE_VIEW_TYPE, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
   consumePendingChatPrompt(): string {
@@ -1922,18 +1910,18 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   async activateReview(): Promise<void> {
     const leaf = this.getLifeOsLeaf();
     await leaf.setViewState({ type: REVIEW_VIEW_TYPE, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
   async activateCheckins(): Promise<void> {
     const leaf = this.getLifeOsLeaf();
     await leaf.setViewState({ type: CHECKIN_VIEW_TYPE, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
   async activateCalendar(): Promise<void> {
     const leaf = this.getLifeOsLeaf();
     await leaf.setViewState({ type: CALENDAR_VIEW_TYPE, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 }

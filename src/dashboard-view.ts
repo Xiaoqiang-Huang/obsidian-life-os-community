@@ -714,7 +714,7 @@ export class DashboardView extends ItemView {
     if (undoEl) {
       const undoBtn = undoEl.querySelector("span");
       if (undoBtn) {
-        undoBtn.style.cursor = "pointer";
+        undoBtn.addClass("pls-clickable");
       }
     }
 

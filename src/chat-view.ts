@@ -210,10 +210,10 @@ export class ChatView extends ItemView {
     if (!this.writebackBtn) return;
     if (this.hasAiReplied) {
       this.writebackBtn.disabled = false;
-      this.writebackBtn.style.opacity = "";
+      this.writebackBtn.removeClass("pls-button-muted-disabled");
     } else {
       this.writebackBtn.disabled = true;
-      this.writebackBtn.style.opacity = "0.4";
+      this.writebackBtn.addClass("pls-button-muted-disabled");
     }
   }
 

@@ -1675,8 +1675,9 @@ export class LifeOSChatView extends ItemView {
 
   private resizeComposer(): void {
     if (!this.inputEl) return;
-    this.inputEl.style.height = "auto";
-    this.inputEl.style.height = `${Math.min(160, Math.max(64, this.inputEl.scrollHeight))}px`;
+    this.inputEl.setCssProps({
+      "--lifeos-chat-composer-height": `${Math.min(160, Math.max(64, this.inputEl.scrollHeight))}px`
+    });
   }
 
   private async previewLlmWikiSave(text: string, overrides?: Partial<LlmWikiSaveInput>): Promise<void> {
