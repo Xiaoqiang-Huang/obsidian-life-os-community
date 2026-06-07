@@ -21,6 +21,8 @@ Life OS includes free local-first features and Pro features. Pro activation is h
 
 The client-side source can be inspected, but paid access is not granted by local settings alone. A valid server-issued entitlement is required for normal Pro access.
 
+Installing this community plugin from GitHub or Obsidian Community Plugins does not grant commercial-use permission and does not grant access to Pro-only features. Pro access requires a valid Life OS license key, trial code, activation code, or server-issued entitlement token.
+
 ## Account or license requirement
 
 Some Pro workflows require a license key, email-based order lookup, trial code, or activation code. These checks contact the Life OS license service only when you use activation, order lookup, trial, redeem, or account-related Pro actions.
@@ -96,4 +98,10 @@ For issues, feature requests, and community-plugin review feedback, use the GitH
 
 ## License
 
-This project uses the Life OS Noncommercial Source License. Personal and non-commercial use is allowed. Commercial use, resale, SaaS wrapping, paid redistribution, consulting delivery, or company-internal commercial deployment is not allowed without prior written permission from the author.
+This repository is distributed under the PolyForm Noncommercial License 1.0.0 (`PolyForm-Noncommercial-1.0.0`). Personal, educational, research, evaluation, and other noncommercial use is allowed under the license.
+
+Commercial use is not allowed unless Xiaoqiang Huang gives prior written permission. Commercial use includes resale, sublicensing, paid redistribution, SaaS wrapping, consulting delivery, agency delivery, company-internal commercial deployment, or bundling Life OS into any paid product, service, course, template, or workflow.
+
+The repository license is separate from Pro feature access. You may inspect the client-side source, but you may not remove, bypass, disable, or misrepresent Life OS license checks, payment checks, entitlement checks, account checks, or access-control mechanisms.
+
+See [`LICENSE`](LICENSE) for the license text and [`NOTICE`](NOTICE) for Life OS-specific copyright, commercial-permission, and Pro-access notices.
