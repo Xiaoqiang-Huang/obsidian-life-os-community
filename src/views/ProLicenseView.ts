@@ -7,6 +7,7 @@ import { resolveLicenseStatus } from "../licensing/entitlement";
 import { verifyLicenseEntitlementToken } from "../licensing/entitlement-token";
 import type PersonalLifeSystemPlugin from "../main";
 import { createLifeOSShell } from "../components/LifeOSComponent";
+import { localizeLifeOsPathParts, normalizeDirectoryLanguage } from "../settings";
 import { ensureFile } from "../utils";
 
 const ORDER_POLL_INTERVAL_MS = 8000;
@@ -705,7 +706,7 @@ export class ProLicenseView extends ItemView {
       "",
       "Life OS 的 Markdown 数据保存在当前 Vault 中。授权状态不会阻止你查看、导出或迁移这些文件。"
     ].join("\n");
-    const file = await ensureFile(this.app, `${this.plugin.getRoot()}/Exports/license-backup-${stamp}.md`, content);
+    const file = await ensureFile(this.app, `${this.localizedLifeOsPath("Exports")}/license-backup-${stamp}.md`, content);
     await this.openFile(file);
     new Notice("授权备份已生成。");
   }
@@ -721,8 +722,13 @@ export class ProLicenseView extends ItemView {
       "",
       "Markdown 数据与 Pro 授权分离保存，未授权状态也可以查看和迁移本地数据。"
     ].join("\n");
-    const file = await ensureFile(this.app, `${this.plugin.getRoot()}/Exports/migration-guide.md`, content);
+    const file = await ensureFile(this.app, `${this.localizedLifeOsPath("Exports")}/migration-guide.md`, content);
     await this.openFile(file);
+  }
+
+  private localizedLifeOsPath(...parts: string[]): string {
+    const language = normalizeDirectoryLanguage(this.plugin.settings.directoryLanguage);
+    return [this.plugin.getRoot(), ...localizeLifeOsPathParts(parts, language)].join("/");
   }
 
   private async openFile(file: TFile): Promise<void> {

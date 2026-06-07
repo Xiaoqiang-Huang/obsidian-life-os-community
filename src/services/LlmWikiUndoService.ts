@@ -76,12 +76,13 @@ export class LlmWikiUndoService {
   private trashPathFor(path: string): string {
     const cleanPath = normalizePath(path);
     const filename = cleanPath.split("/").pop() ?? "unknown.md";
-    const wikiRoot = this.paths.path("Wiki");
+    const draftsRoot = this.paths.path("Wiki", "Drafts");
+    const batchesRoot = this.paths.path("Wiki", "Batches");
 
-    if (cleanPath.startsWith(`${wikiRoot}/Drafts/`)) {
+    if (cleanPath.startsWith(`${draftsRoot}/`)) {
       return this.paths.path("Trash", "Drafts", filename);
     }
-    if (cleanPath.startsWith(`${wikiRoot}/Batches/`)) {
+    if (cleanPath.startsWith(`${batchesRoot}/`)) {
       return this.paths.path("Trash", "Batches", filename);
     }
     return this.paths.path("Trash", "Raw", filename);

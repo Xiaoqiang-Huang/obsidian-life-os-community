@@ -134,10 +134,10 @@ export class KnowledgeView extends ItemView {
     organizeShortButton.disabled = !this.ensureLlmWikiEnabled(false);
     if (organizeShortButton.disabled) organizeShortButton.title = "LLM Wiki 已在设置中关闭";
     createButton(actions, "打开草稿索引", () => {
-      void this.openFolderIndex(fs, "LLMWiki/Wiki/Drafts", "LLM Wiki Drafts");
+      void this.openFolderIndex(fs, ["LLMWiki", "Wiki", "Drafts"], "LLM Wiki Drafts");
     }, { icon: "file-text" });
     createButton(actions, "打开 Raw Inbox 索引", () => {
-      void this.openFolderIndex(fs, "LLMWiki/Raw/Inbox", "LLM Wiki Raw Inbox");
+      void this.openFolderIndex(fs, ["LLMWiki", "Raw", "Inbox"], "LLM Wiki Raw Inbox");
     }, { icon: "archive" });
 
     this.renderLlmWikiDuplicateReviewCard(reviewColumn);
@@ -535,8 +535,8 @@ export class KnowledgeView extends ItemView {
 
     const actions = card.createDiv({ cls: "lifeos-llmwiki-actions" });
     createButton(actions, "新增资料", () => void this.openNewKnowledgeSourceModal(fs), { primary: true, icon: "file-plus-2" });
-    createButton(actions, "打开 Raw Inbox", () => void this.openFolderIndex(fs, "LLMWiki/Raw/Inbox", "LLM Wiki Raw Inbox"), { icon: "archive" });
-    createButton(actions, "打开正式 Wiki", () => void this.openFolderIndex(fs, "LLMWiki/Wiki", "LLM Wiki Wiki", {
+    createButton(actions, "打开 Raw Inbox", () => void this.openFolderIndex(fs, ["LLMWiki", "Raw", "Inbox"], "LLM Wiki Raw Inbox"), { icon: "archive" });
+    createButton(actions, "打开正式 Wiki", () => void this.openFolderIndex(fs, ["LLMWiki", "Wiki"], "LLM Wiki Wiki", {
       excludeFolders: ["Drafts", "Batches", "Raw", "Trash"]
     }), { icon: "library" });
   }
@@ -613,14 +613,27 @@ export class KnowledgeView extends ItemView {
     subtitle: string
   ): Promise<KnowledgeLibraryItem[]> {
     const prefix = `${fs.path(...parts).replace(/\\/g, "/").replace(/\/+$/g, "")}/`;
+    const formalSeedFiles = new Set([
+      this.normalizeLlmWikiPath(fs.path("Knowledge", "LLMWiki", "Wiki", "hot.md")),
+      this.normalizeLlmWikiPath(fs.path("Knowledge", "LLMWiki", "Wiki", "log.md"))
+    ]);
+    const formalExcludedPrefixes = this.normalizedPathPrefixes([
+      fs.path("Knowledge", "LLMWiki", "Wiki", "Drafts"),
+      fs.path("Knowledge", "LLMWiki", "Wiki", "Batches"),
+      fs.path("Knowledge", "LLMWiki", "Raw"),
+      fs.path("Knowledge", "LLMWiki", "Trash")
+    ]);
+    const manualExcludedPrefixes = this.normalizedPathPrefixes([
+      fs.path("Knowledge", "LLMWiki")
+    ]);
     const files = this.app.vault.getMarkdownFiles()
       .filter((file) => {
         const path = file.path.replace(/\\/g, "/");
         if (!path.startsWith(prefix) || !path.endsWith(".md") || file.basename === "index") return false;
-        if (kind === "formal" && /\/LLMWiki\/Wiki\/(?:hot|log)\.md$/iu.test(path)) return false;
-        if (kind === "formal" && /\/(?:Drafts|Batches|Raw|Trash)\//u.test(path)) return false;
-        if (kind === "manual" && /\/LLMWiki\//u.test(path)) return false;
-        if (kind === "manual" && /\/(?:Exports|Reports|Schema|Trash)\//u.test(path)) return false;
+        const normalizedPath = this.normalizeLlmWikiPath(path);
+        if (kind === "formal" && formalSeedFiles.has(normalizedPath)) return false;
+        if (kind === "formal" && this.isUnderAnyNormalizedPrefix(normalizedPath, formalExcludedPrefixes)) return false;
+        if (kind === "manual" && this.isUnderAnyNormalizedPrefix(normalizedPath, manualExcludedPrefixes)) return false;
         return true;
       })
       .sort((a, b) => b.stat.mtime - a.stat.mtime)
@@ -645,22 +658,47 @@ export class KnowledgeView extends ItemView {
 
   private countVisibleKnowledgeFiles(fs: FileSystemService): number {
     const prefix = `${fs.path("Knowledge").replace(/\\/g, "/").replace(/\/+$/g, "")}/`;
+    const excludedPrefixes = this.normalizedPathPrefixes([
+      fs.path("Knowledge", "LLMWiki", "Wiki", "Batches"),
+      fs.path("Knowledge", "LLMWiki", "Trash"),
+      fs.path("Knowledge", "LLMWiki", "Reports"),
+      fs.path("Knowledge", "LLMWiki", "Schema")
+    ]);
     return this.app.vault.getMarkdownFiles()
       .filter((file) => {
         const path = file.path.replace(/\\/g, "/");
-        return path.startsWith(prefix) && path.endsWith(".md") && file.basename !== "index" && !/\/(?:Batches|Trash|Exports|Reports|Schema)\//u.test(path);
+        return path.startsWith(prefix)
+          && path.endsWith(".md")
+          && file.basename !== "index"
+          && !this.isUnderAnyNormalizedPrefix(this.normalizeLlmWikiPath(path), excludedPrefixes);
       })
       .length;
   }
 
   private countFormalWikiFiles(fs: FileSystemService): number {
     const prefix = `${fs.path("Knowledge", "LLMWiki", "Wiki").replace(/\\/g, "/").replace(/\/+$/g, "")}/`;
+    const excludedPrefixes = this.normalizedPathPrefixes([
+      fs.path("Knowledge", "LLMWiki", "Wiki", "Drafts"),
+      fs.path("Knowledge", "LLMWiki", "Wiki", "Batches"),
+      fs.path("Knowledge", "LLMWiki", "Trash")
+    ]);
     return this.app.vault.getMarkdownFiles()
       .filter((file) => {
         const path = file.path.replace(/\\/g, "/");
-        return path.startsWith(prefix) && path.endsWith(".md") && file.basename !== "index" && !/\/(?:Drafts|Batches|Trash)\//u.test(path);
+        return path.startsWith(prefix)
+          && path.endsWith(".md")
+          && file.basename !== "index"
+          && !this.isUnderAnyNormalizedPrefix(this.normalizeLlmWikiPath(path), excludedPrefixes);
       })
       .length;
+  }
+
+  private normalizedPathPrefixes(paths: string[]): string[] {
+    return paths.map((path) => this.normalizeLlmWikiPath(path).replace(/\/+$/g, ""));
+  }
+
+  private isUnderAnyNormalizedPrefix(path: string, prefixes: string[]): boolean {
+    return prefixes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
   }
 
   private entryCard(parent: HTMLElement, title: string, description: string, icon: string, onClick: () => void): void {
@@ -841,21 +879,36 @@ export class KnowledgeView extends ItemView {
     await this.app.workspace.getLeaf(false).openFile(file);
   }
 
-  private async openFolderIndex(fs: FileSystemService, folder: string, title: string, options: DirectoryIndexOptions = {}): Promise<void> {
-    const file = await this.refreshDirectoryIndex(fs, ["Knowledge", ...folder.split("/").filter(Boolean)], `${title} 目录`, options);
+  private async openFolderIndex(fs: FileSystemService, folder: string | string[], title: string, options: DirectoryIndexOptions = {}): Promise<void> {
+    const folderParts = Array.isArray(folder) ? folder : folder.split("/").filter(Boolean);
+    const file = await this.refreshDirectoryIndex(fs, ["Knowledge", ...folderParts], `${title} 目录`, options);
     if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
   }
 
   private async refreshDirectoryIndex(fs: FileSystemService, parts: string[], title: string, options: DirectoryIndexOptions = {}): Promise<TFile> {
     const directoryPath = fs.path(...parts);
     const indexPath = `${directoryPath}/index.md`;
-    const nextBlock = this.buildDirectoryIndexBlock(directoryPath, indexPath, options);
+    const indexOptions = this.localizeDirectoryIndexOptions(fs, parts, options);
+    const nextBlock = this.buildDirectoryIndexBlock(directoryPath, indexPath, indexOptions);
     const initialContent = `# ${title}\n\n${nextBlock}\n`;
     const file = await ensureFile(this.app, indexPath, initialContent);
     const current = await this.app.vault.read(file);
     const next = this.mergeDirectoryIndexBlock(current, title, nextBlock);
     if (next !== current) await this.app.vault.modify(file, next);
     return file;
+  }
+
+  private localizeDirectoryIndexOptions(fs: FileSystemService, parts: string[], options: DirectoryIndexOptions): DirectoryIndexOptions {
+    const excludeFolders = new Set<string>();
+    for (const folder of options.excludeFolders ?? []) {
+      const normalizedFolder = folder.replace(/^\/+|\/+$/g, "");
+      if (!normalizedFolder) continue;
+      excludeFolders.add(normalizedFolder);
+      const localizedFolderPath = fs.path(...parts, ...normalizedFolder.split("/").filter(Boolean));
+      const localizedName = localizedFolderPath.replace(/\\/g, "/").split("/").pop();
+      if (localizedName) excludeFolders.add(localizedName);
+    }
+    return { ...options, excludeFolders: Array.from(excludeFolders) };
   }
 
   private mergeDirectoryIndexBlock(current: string, title: string, block: string): string {
