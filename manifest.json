@@ -1,7 +1,7 @@
 {
   "id": "personal-life-system",
   "name": "Life OS Assistant",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "minAppVersion": "1.5.0",
   "description": "Organize diary entries, tasks, knowledge, memory, and AI-assisted reviews inside your vault.",
   "author": "Xiaoqiang Huang",
