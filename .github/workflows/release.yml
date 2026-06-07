@@ -47,6 +47,6 @@ jobs:
             gh release upload "$tag" main.js manifest.json styles.css --clobber
           else
             gh release create "$tag" main.js manifest.json styles.css \
-              --title "Life OS $tag" \
-              --notes "Community review build for Life OS $tag."
+              --title "Life OS Assistant $tag" \
+              --notes "Community review build for Life OS Assistant $tag."
           fi

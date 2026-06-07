@@ -1,6 +1,6 @@
-# Life OS
+# Life OS Assistant
 
-Life OS organizes diary entries, tasks, knowledge, memory, and AI-assisted reviews inside your Obsidian vault.
+Life OS Assistant organizes diary entries, tasks, knowledge, memory, and AI-assisted reviews inside your Obsidian vault.
 
 It is designed as a local-first personal operating system: you keep the markdown files, you choose the AI provider, and the plugin helps connect daily records, unfinished tasks, project progress, knowledge notes, and long-term memory.
 
@@ -62,8 +62,8 @@ Plugin settings, model configuration, and license state are stored in Obsidian p
 ## Installation for community review
 
 1. Install the plugin from Obsidian Community Plugins after it is accepted.
-2. Enable "Life OS" in Obsidian settings.
-3. Open the Life OS view from the ribbon or command palette.
+2. Enable "Life OS Assistant" in Obsidian settings.
+3. Open the Life OS Assistant view from the ribbon or command palette.
 4. Configure your AI provider if you want to use AI workflows.
 5. Activate Pro only if you need Pro-only workflows.
 
