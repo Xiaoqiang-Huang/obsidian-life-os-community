@@ -2331,7 +2331,7 @@ class KnowledgeImportHubModal extends Modal {
         accept: CHAT_IMPORT_ACCEPT
       }
     });
-    input.style.display = "none";
+    input.addClass("lifeos-hidden-file-input");
     input.addEventListener("change", () => {
       this.addFiles(input.files);
       input.value = "";

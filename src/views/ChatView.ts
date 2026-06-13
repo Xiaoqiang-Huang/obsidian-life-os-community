@@ -1301,9 +1301,7 @@ export class LifeOSChatView extends ItemView {
   private copyMessageWithFallback(content: string): boolean {
     const textarea = document.createElement("textarea");
     textarea.value = content;
-    textarea.style.position = "fixed";
-    textarea.style.left = "-9999px";
-    textarea.style.top = "0";
+    textarea.addClass("lifeos-clipboard-fallback-input");
     textarea.setAttribute("readonly", "true");
     document.body.appendChild(textarea);
     textarea.select();

@@ -40987,3 +40987,13 @@ body.lifeos-theme-anime-moonlit .lifeos-root :is(.lifeos-hero, .lifeos-page-head
     justify-content: flex-start !important;
   }
 }
+
+.lifeos-clipboard-fallback-input {
+  position: fixed;
+  left: -9999px;
+  top: 0;
+}
+
+.lifeos-hidden-file-input {
+  display: none;
+}
