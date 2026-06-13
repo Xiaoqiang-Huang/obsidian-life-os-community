@@ -70,7 +70,7 @@ export class LlmWikiIntakeService {
     const batchId = this.buildBatchId(capturedAt, input.title);
     const decision = classifyLlmWikiIntake(input.content, input.instruction);
     const privacyLevel = input.privacyOverride || decision.privacyLevel;
-    const aiProcessingAllowed = privacyLevel !== "sensitive";
+    const aiProcessingAllowed = true;
     const requiresPersonalConfirmation = decision.requiresConfirmation;
 
     if (requiresPersonalConfirmation && !input.personalConfirmed) {

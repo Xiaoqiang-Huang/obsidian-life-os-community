@@ -38,6 +38,7 @@ export interface BuildChatContextOptions {
   fetchUrl?: (url: string) => Promise<string>;
   searchWeb?: (query: string) => Promise<string>;
   contextMode?: ChatContextMode;
+  projectScopeId?: string;
 }
 
 type FileLike = {
@@ -65,6 +66,7 @@ export class ChatContextService {
         chatMode: options.contextMode,
         date,
         maxChars: Math.max(options.maxChars ?? DEFAULT_CONTEXT_CHARS, MIN_CONTEXT_ENGINE_BUILD_CHARS),
+        projectScopeId: options.projectScopeId,
         fetchUrl: options.fetchUrl,
         searchWeb: options.searchWeb
       });
@@ -80,6 +82,7 @@ export class ChatContextService {
         `ContextMode:${contextModeLabel(options.contextMode ?? "smart")}`,
         `ContextEngine:${result.modeUsed}`,
         `ContextEngineRequested:${requestedMode}`,
+        options.projectScopeId ? `ProjectScope:${options.projectScopeId}` : "",
         ...sections.map((section) => section.title),
         ...result.sources.map((source) => source.path),
         ...result.warnings

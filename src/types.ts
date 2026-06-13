@@ -35,6 +35,18 @@ export interface LifeOSProject {
   goal?: string;
 }
 
+export type LifeOSProjectDocumentKind = "note" | "meeting" | "requirement" | "reference" | "review";
+
+export interface LifeOSProjectDocument {
+  projectId: string;
+  projectName?: string;
+  title: string;
+  path: string;
+  kind: LifeOSProjectDocumentKind;
+  mtime: number;
+  excerpt?: string;
+}
+
 export interface LifeOSProjectSummary {
   project: LifeOSProject | null;
   projectId?: string;

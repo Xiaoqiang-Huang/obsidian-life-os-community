@@ -73,6 +73,7 @@ export type AssistantVerbosity = "brief" | "normal" | "detailed";
 export type ChatMode = "chat" | "diary" | "review" | "exam";
 export type ChatContextMode = "smart" | "semantic" | "global";
 export type ChatSendBehavior = "enterToSend" | "modEnterToSend";
+export type AiReasoningEffort = "default" | "low" | "medium" | "high" | "max";
 export type ThemePreset = "cool" | "dark-tech" | "wabi" | "pastel";
 export const THEME_STYLES = [
   "minimal-warm",
@@ -80,10 +81,12 @@ export const THEME_STYLES = [
   "obsidian",
   "compact",
   "liquid-glass",
+  "refractive-glass",
   "mesh-sunset",
   "mesh-aurora",
   "mesh-mint",
   "mesh-deep-blue",
+  "blue-white-gradient",
   "mesh-dreamy",
   "mesh-sea-mist",
   "focus-ink",
@@ -114,10 +117,12 @@ export const THEME_STYLES = [
 export type ThemeStyle = typeof THEME_STYLES[number];
 const LIQUID_GLASS_DERIVED_THEME_STYLES = new Set<ThemeStyle>([
   "liquid-glass",
+  "refractive-glass",
   "mesh-sunset",
   "mesh-aurora",
   "mesh-mint",
   "mesh-deep-blue",
+  "blue-white-gradient",
   "mesh-dreamy",
   "mesh-sea-mist",
   "focus-ink",
@@ -179,6 +184,17 @@ export type LlmWikiLongMaterialMode = "ask" | "quick" | "deep" | "save-only";
 export type LlmWikiSensitiveDefault = "local-only" | "ask" | "allow";
 export type DirectoryLanguage = "zh" | "en";
 export type ExamProfileType = "civil-service" | "postgraduate" | "law" | "teacher" | "custom";
+
+export interface TaskFormDraft {
+  title: string;
+  category: string;
+  projectId: string;
+  dueDate: string;
+  priority: string;
+  source: string;
+  note: string;
+  savedAt: string;
+}
 
 export interface ExamMetricProfile {
   field: "xingce_questions" | "interview_practice";
@@ -336,6 +352,34 @@ export function normalizeExamProfileType(value: string | undefined | null): Exam
   return EXAM_PROFILE_OPTIONS.some(([type]) => type === value) ? (value as ExamProfileType) : "civil-service";
 }
 
+function normalizeTaskDraftField(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+export function normalizeTaskFormDraft(value: unknown): TaskFormDraft | null {
+  if (!value || typeof value !== "object") return null;
+  const input = value as Record<string, unknown>;
+  const title = normalizeTaskDraftField(input.title);
+  const category = normalizeTaskDraftField(input.category);
+  const projectId = normalizeTaskDraftField(input.projectId);
+  const dueDate = normalizeTaskDraftField(input.dueDate);
+  const priority = normalizeTaskDraftField(input.priority);
+  const source = normalizeTaskDraftField(input.source);
+  const note = normalizeTaskDraftField(input.note);
+  const savedAt = normalizeTaskDraftField(input.savedAt);
+  if (![title, category, projectId, dueDate, priority, source, note].some((field) => field.trim())) return null;
+  return {
+    title,
+    category,
+    projectId,
+    dueDate,
+    priority,
+    source,
+    note,
+    savedAt
+  };
+}
+
 export function getExamProfilePreset(
   settings: Partial<Pick<PersonalLifeSystemSettings, "examProfileType" | "customExamProfileName">> = {}
 ): ExamProfilePreset {
@@ -400,6 +444,7 @@ export interface PersonalLifeSystemSettings {
   aiAuthPrefix: string;
   aiExtraHeadersJson: string;
   aiApiVersion: string;
+  aiReasoningEffort: AiReasoningEffort;
   enableVisionFileAnalysis: boolean;
   visionAiModel: string;
   maxChatAttachmentBytes: number;
@@ -437,6 +482,7 @@ export interface PersonalLifeSystemSettings {
   importedAiSkills: ImportedAiSkillRecord[];
   /** @deprecated use defaultAiSkillIds */
   defaultAiSkillId: string;
+  lastTaskDraft: TaskFormDraft | null;
   chatSendBehavior: ChatSendBehavior;
   chatDefaultAiReply: boolean;
   autoApplyChatToDaily: boolean;
@@ -880,6 +926,7 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   aiAuthPrefix: "",
   aiExtraHeadersJson: "",
   aiApiVersion: "",
+  aiReasoningEffort: "default",
   enableVisionFileAnalysis: false,
   visionAiModel: "",
   maxChatAttachmentBytes: 6 * 1024 * 1024,
@@ -919,6 +966,7 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   defaultAiSkillIds: ["lifeos-general"],
   importedAiSkills: [],
   defaultAiSkillId: "lifeos-general",
+  lastTaskDraft: null,
   chatSendBehavior: "enterToSend",
   chatDefaultAiReply: true,
   autoApplyChatToDaily: false,

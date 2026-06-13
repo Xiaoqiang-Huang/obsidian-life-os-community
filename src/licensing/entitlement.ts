@@ -1,6 +1,6 @@
 import { Modal } from "obsidian";
 import type { IPlugin } from "../plugin-api";
-import type { LicenseStateSnapshot, LicenseStatusLabel } from "./license-types";
+import { isLifeOsMonthlyProSku, type LicenseStateSnapshot, type LicenseStatusLabel } from "./license-types";
 import { getVerifiedEntitlementPayload } from "./entitlement-token";
 export { __seedVerifiedEntitlementPayloadForTests } from "./entitlement-token";
 
@@ -13,7 +13,17 @@ export type ProFeatureId =
   | "aiEmotionTrend"
   | "aiDiarySmartSearch"
   | "aiWriteback"
-  | "aiExamCoach";
+  | "aiExamCoach"
+  | "aiContextEngine"
+  | "aiDocumentEdit"
+  | "aiReasoningEffort"
+  | "aiSkillImport"
+  | "knowledgeImport"
+  | "knowledgeManagement"
+  | "projectManagement"
+  | "projectDocuments"
+  | "taskAutoCarryover"
+  | "webClipper";
 
 const FEATURE_LABELS: Record<ProFeatureId, string> = {
   aiChat: "AI Chat",
@@ -24,7 +34,17 @@ const FEATURE_LABELS: Record<ProFeatureId, string> = {
   aiEmotionTrend: "情绪 / 趋势统计",
   aiDiarySmartSearch: "AI 智能日记问答",
   aiWriteback: "AI 写回",
-  aiExamCoach: "AI 学习 / 备考辅导"
+  aiExamCoach: "AI 学习 / 备考辅导",
+  aiContextEngine: "AI Context Engine",
+  aiDocumentEdit: "AI Document Editing",
+  aiReasoningEffort: "AI Reasoning Effort",
+  aiSkillImport: "GitHub Skill Import",
+  knowledgeImport: "Knowledge Import",
+  knowledgeManagement: "Knowledge Management",
+  projectManagement: "Project Management",
+  projectDocuments: "Project Documents",
+  taskAutoCarryover: "任务自动延续",
+  webClipper: "Web Clipper"
 };
 
 type EntitlementPlugin = Pick<IPlugin, "app" | "settings" | "activateProCompare" | "activateProLicense">;
@@ -52,7 +72,7 @@ export function resolveLicenseStatus(snapshot: LicenseStateSnapshot | null, now 
   if (!snapshotMatchesVerifiedToken(snapshot, entitlementToken)) return "free";
   if (license.expiresAt && Date.parse(license.expiresAt) <= now.getTime()) return "free";
   if (license.tier === "trial") return "trial";
-  if (license.sku === "pro_monthly_990") return "monthly-pro";
+  if (isLifeOsMonthlyProSku(license.sku)) return "monthly-pro";
   return "lifetime-pro";
 }
 

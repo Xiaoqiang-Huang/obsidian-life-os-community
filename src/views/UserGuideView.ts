@@ -172,7 +172,7 @@ export class UserGuideView extends ItemView {
 
     const pro = createCard(grid, "lifeos-guide-action-card");
     this.cardTitle(pro, "免费版 / 完整体验 Pro / 短期 Pro 使用 / 长期 Pro 使用", "columns-3");
-    pro.createEl("p", { text: "免费版免费使用，定位为基础手动使用，支持 1 台本地使用；30 天试用免费一次，定位为完整体验 Pro，功能与 Pro 一致，设备数最多 3 台，适合先跑通核心记录闭环；月付 Pro 定位为短期 Pro 使用，价格 9.9 元 / 30 天，设备数最多 3 台，适合阶段性高频和临时多设备授权；买断 Pro 定位为长期 Pro 使用，价格 49 元一次买断，设备数最多 5 台，适合长期用户的主力 Vault。" });
+    pro.createEl("p", { text: "免费版免费使用，定位为基础手动使用，支持 1 台本地使用；30 天试用免费一次，定位为完整体验 Pro，功能与 Pro 一致，设备数最多 3 台，适合先跑通核心记录闭环；月付 Pro 价格 19.9 元 / 30 天，设备数最多 3 台，适合阶段性高频和临时多设备授权；买断 Pro 价格 299 元一次买断，设备数最多 5 台，适合长期用户的主力 Vault。已购买月付或买断 Pro 的老用户继续保留原有权益。" });
     const proActions = pro.createDiv({ cls: "lifeos-guide-card-actions" });
     createButton(proActions, "查看版本对比", () => void this.plugin.activateProCompare(), { primary: true, icon: "arrow-right" });
     createButton(proActions, "授权中心", () => void this.plugin.activateProLicense(), { ghost: true, icon: "badge-check" });

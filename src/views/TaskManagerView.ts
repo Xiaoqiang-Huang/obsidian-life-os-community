@@ -3,12 +3,16 @@ import { TASKS_VIEW_TYPE } from "../constants";
 import type PersonalLifeSystemPlugin from "../main";
 import { createButton } from "../components/Button";
 import { createLifeOSShell } from "../components/LifeOSComponent";
+import { ImportProjectDocumentsModal } from "../modals/ImportProjectDocumentsModal";
+import { NewProjectDocumentModal } from "../modals/NewProjectDocumentModal";
 import { NewProjectModal } from "../modals/NewProjectModal";
 import { NewTaskModal } from "../modals/NewTaskModal";
+import { requireProFeature } from "../licensing/entitlement";
 import { FileSystemService } from "../services/FileSystemService";
+import { ProjectDocumentService } from "../services/ProjectDocumentService";
 import { ProjectService, type LifeOSProjectOverview } from "../services/ProjectService";
 import { TaskService } from "../services/TaskService";
-import type { LifeOSProjectSummary, LifeOSTask } from "../types";
+import type { LifeOSProject, LifeOSProjectDocument, LifeOSProjectSummary, LifeOSTask } from "../types";
 import { formatDate, today } from "../utils/dates";
 import { renderMarkdownDisplay } from "../utils/markdown-render";
 
@@ -44,6 +48,7 @@ export class TaskManagerView extends ItemView {
     const fs = new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage);
     const service = new TaskService(this.app, fs);
     const projectService = new ProjectService(this.app, fs);
+    const projectDocumentService = new ProjectDocumentService(this.app, fs);
     const all = await service.loadAllTasks();
     const open = all.filter((task) => task.source === "open" && !task.isDone);
     const done = all.filter((task) => task.source === "done" || task.isDone);
@@ -68,6 +73,7 @@ export class TaskManagerView extends ItemView {
     const detail = layout.createDiv({ cls: "lifeos-project-task-detail" });
     this.renderSummary(detail, todayTasks, visibleOpen, visibleDone);
     this.renderProjectTaskGroups(detail, overview, service);
+    await this.renderProjectDocuments(detail, overview, projects, projectDocumentService);
 
     const board = detail.createDiv({ cls: visibleOpen.length === 0 && visibleDone.length === 0 ? "lifeos-board is-empty-board" : "lifeos-board" });
     this.renderColumn(board, "今日任务", "先处理重要的一件事", todayTasks.length ? todayTasks : visibleOpen.slice(0, 4), service, "calendar-check");
@@ -94,7 +100,10 @@ export class TaskManagerView extends ItemView {
     copy.createEl("p", { text: "把今天要推进的事放在这里。完成后归档，未完成会延续，不会丢失。" });
     const toolbar = header.createDiv({ cls: "lifeos-toolbar" });
     createButton(toolbar, "新建任务", () => new NewTaskModal(this.app, this.plugin, () => this.render(), defaultProjectId).open(), { primary: true, icon: "plus" });
-    createButton(toolbar, "新增项目", () => new NewProjectModal(this.app, this.plugin, () => this.render()).open(), { primary: true, icon: "folder-plus" });
+    createButton(toolbar, "新增项目", () => {
+      if (!requireProFeature(this.plugin, "projectManagement")) return;
+      new NewProjectModal(this.app, this.plugin, () => this.render()).open();
+    }, { primary: true, icon: "folder-plus" });
     createButton(toolbar, "从今日日记提取", () => void this.extractTasksFromToday(), { ghost: true, icon: "wand-2" });
   }
 
@@ -159,7 +168,10 @@ export class TaskManagerView extends ItemView {
         void this.render();
       }
     );
-    createButton(panel, "新增项目", () => new NewProjectModal(this.app, this.plugin, () => this.render()).open(), {
+    createButton(panel, "新增项目", () => {
+      if (!requireProFeature(this.plugin, "projectManagement")) return;
+      new NewProjectModal(this.app, this.plugin, () => this.render()).open();
+    }, {
       ghost: true,
       icon: "folder-plus"
     });
@@ -231,6 +243,147 @@ export class TaskManagerView extends ItemView {
         this.renderBoardCard(section, task, service, false);
       }
     }
+  }
+
+  private async renderProjectDocuments(
+    parent: HTMLElement,
+    overview: LifeOSProjectOverview,
+    projects: LifeOSProject[],
+    service: ProjectDocumentService
+  ): Promise<void> {
+    const panel = parent.createDiv({ cls: "lifeos-project-doc-panel" });
+    const head = panel.createDiv({ cls: "lifeos-project-doc-head" });
+    const copy = head.createDiv({ cls: "lifeos-project-doc-head-copy" });
+    copy.createEl("h2", { text: "项目文档" });
+    copy.createEl("p", {
+      text: this.selectedProjectId && this.selectedProjectId !== "unassigned"
+        ? "管理当前项目的专属资料，AI 助手选择该项目后会优先读取这里。"
+        : "未选择项目时，这里展示所有项目已有文档；选择某个项目后可以新增和管理。"
+    });
+
+    const selectedProject = this.selectedProjectId && this.selectedProjectId !== "unassigned"
+      ? projects.find((project) => project.id === this.selectedProjectId) ?? null
+      : null;
+
+    if (selectedProject) {
+      const actions = head.createDiv({ cls: "lifeos-project-doc-head-actions" });
+      createButton(actions, "新增文档", () => void this.createProjectDocument(selectedProject, service), {
+        primary: true,
+        icon: "file-plus"
+      });
+      createButton(actions, "导入文档", () => void this.importProjectDocuments(selectedProject, service), {
+        primary: true,
+        icon: "upload"
+      });
+      createButton(actions, "打开项目目录", () => void this.openProjectIndex(selectedProject, service), {
+        ghost: true,
+        icon: "folder-open"
+      });
+      const docs = await service.listDocuments(selectedProject);
+      this.renderProjectDocumentList(panel, selectedProject, docs, service, true);
+      return;
+    }
+
+    if (overview.projects.length === 0) {
+      panel.createDiv({ cls: "lifeos-project-doc-empty", text: "还没有项目。先新增项目，再为项目沉淀专属文档。" });
+      return;
+    }
+
+    let rendered = 0;
+    for (const project of projects) {
+      const docs = await service.listDocuments(project);
+      if (docs.length === 0) continue;
+      this.renderProjectDocumentList(panel, project, docs.slice(0, 4), service, false);
+      rendered += 1;
+    }
+
+    if (rendered === 0) {
+      panel.createDiv({ cls: "lifeos-project-doc-empty", text: "当前还没有项目文档。选择左侧项目后可以新增文档。" });
+    }
+  }
+
+  private renderProjectDocumentList(
+    parent: HTMLElement,
+    project: LifeOSProject,
+    docs: LifeOSProjectDocument[],
+    service: ProjectDocumentService,
+    editable: boolean
+  ): void {
+    const group = parent.createDiv({ cls: "lifeos-project-doc-group" });
+    const title = group.createDiv({ cls: "lifeos-project-doc-group-title" });
+    title.createEl("strong", { text: project.name });
+    title.createSpan({ text: `${docs.length} 篇文档` });
+
+    if (docs.length === 0) {
+      group.createDiv({ cls: "lifeos-project-doc-empty", text: "这个项目还没有专属文档。" });
+      return;
+    }
+
+    for (const doc of docs) {
+      const item = group.createDiv({ cls: "lifeos-project-doc-item" });
+      const body = item.createDiv({ cls: "lifeos-project-doc-body" });
+      body.createEl("strong", { text: doc.title });
+      body.createSpan({ text: doc.path });
+      if (doc.excerpt) body.createDiv({ cls: "lifeos-project-doc-excerpt", text: doc.excerpt });
+      const actions = item.createDiv({ cls: "lifeos-project-doc-actions" });
+      createButton(actions, "打开", () => void this.openProjectDocument(doc.path), { ghost: true, icon: "file-text" });
+      if (!editable) continue;
+      createButton(actions, "重命名", () => void this.renameProjectDocument(project, doc, service), { ghost: true, icon: "pencil" });
+      createButton(actions, "删除", () => void this.deleteProjectDocument(project, doc, service), {
+        ghost: true,
+        icon: "trash-2",
+        className: "lifeos-button-danger"
+      });
+    }
+  }
+
+  private async createProjectDocument(project: LifeOSProject, service: ProjectDocumentService): Promise<void> {
+    if (!requireProFeature(this.plugin, "projectDocuments")) return;
+    new NewProjectDocumentModal(this.app, project, service, async (doc) => {
+      await this.openProjectDocument(doc.path);
+      await this.render();
+    }).open();
+  }
+
+  private async importProjectDocuments(project: LifeOSProject, service: ProjectDocumentService): Promise<void> {
+    if (!requireProFeature(this.plugin, "projectDocuments")) return;
+    new ImportProjectDocumentsModal(this.app, project, service, async (documents) => {
+      const first = documents[0]?.document;
+      if (first) await this.openProjectDocument(first.path);
+      await this.render();
+    }).open();
+  }
+
+  private async renameProjectDocument(project: LifeOSProject, doc: LifeOSProjectDocument, service: ProjectDocumentService): Promise<void> {
+    if (!requireProFeature(this.plugin, "projectDocuments")) return;
+    const title = window.prompt("新的文档标题", doc.title);
+    if (!title?.trim() || title.trim() === doc.title) return;
+    await service.renameDocument(project, doc, title);
+    new Notice("项目文档已重命名。");
+    await this.render();
+  }
+
+  private async deleteProjectDocument(project: LifeOSProject, doc: LifeOSProjectDocument, service: ProjectDocumentService): Promise<void> {
+    if (!requireProFeature(this.plugin, "projectDocuments")) return;
+    if (!window.confirm(`确认把「${doc.title}」移动到项目 Trash 吗？`)) return;
+    await service.deleteDocument(project, doc);
+    new Notice("项目文档已移动到 Trash。");
+    await this.render();
+  }
+
+  private async openProjectIndex(project: LifeOSProject, service: ProjectDocumentService): Promise<void> {
+    if (!requireProFeature(this.plugin, "projectDocuments")) return;
+    await service.ensureProjectSpace(project);
+    await this.openProjectDocument(`${service.projectRootPath(project)}/index.md`);
+  }
+
+  private async openProjectDocument(path: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) {
+      new Notice("文档不存在或已被移动。");
+      return;
+    }
+    await this.app.workspace.getLeaf(false).openFile(file);
   }
 
   private renderColumn(
@@ -308,6 +461,7 @@ export class TaskManagerView extends ItemView {
   }
 
   private async extractTasksFromToday(): Promise<void> {
+    if (!requireProFeature(this.plugin, "aiTaskExtract")) return;
     const file = this.app.vault.getAbstractFileByPath(this.plugin.getTodayNotePath(today()));
     if (!(file instanceof TFile)) {
       new Notice("还没有今日日记，先创建一篇再提取待办。");
@@ -318,6 +472,7 @@ export class TaskManagerView extends ItemView {
   }
 
   private async carryover(service: TaskService): Promise<void> {
+    if (!requireProFeature(this.plugin, "taskAutoCarryover")) return;
     const now = new Date();
     const tomorrow = new Date(now);
     tomorrow.setDate(now.getDate() + 1);

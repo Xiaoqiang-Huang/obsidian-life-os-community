@@ -1,9 +1,9 @@
 ﻿import { App, Notice, PluginSettingTab, setIcon } from "obsidian";
 import PersonalLifeSystemPlugin from "./main";
 import { Setting } from "obsidian";
-import type { AiProviderType, AssistantStyle, AssistantVerbosity, ChatContextMode, ChatMode, ChatSendBehavior, DirectoryLanguage, DisplayLanguage, ExamProfileType, HeatmapRange, LlmWikiCompileDepth, LlmWikiLongMaterialMode, LlmWikiSensitiveDefault, ThemeStyle } from "./settings";
+import type { AiProviderType, AiReasoningEffort, AssistantStyle, AssistantVerbosity, ChatContextMode, ChatMode, ChatSendBehavior, DirectoryLanguage, DisplayLanguage, ExamProfileType, HeatmapRange, LlmWikiCompileDepth, LlmWikiLongMaterialMode, LlmWikiSensitiveDefault, ThemeStyle } from "./settings";
 import { analyzeAiConnectionTestModels, DEFAULT_SETTINGS, EXAM_PROFILE_OPTIONS, getAiProviderPreset, getExamChatModeLabel, getExamProfileLabel, getStoredAiApiKey, getStoredAiProviderConfig, getThemeStyleClasses, normalizeAiApiKeyInput, normalizeThemeStyle, setStoredAiApiKey, setStoredAiProviderConfig, THEME_STYLES, validateAiProviderConfig } from "./settings";
-import { resolveLicenseStatus } from "./licensing/entitlement";
+import { requireProFeature, resolveLicenseStatus } from "./licensing/entitlement";
 import { AI_SKILL_CATEGORIES, createImportedAiSkills, getAiSkills, getAiSkillsByCategory, normalizeAiSkillIds } from "./services/AiSkillService";
 import { getUiThemeFamilies, getUiThemeMeta, getUiThemesByFamily } from "./ui/theme";
 import type { UiThemeDensity, UiThemeFamily, UiThemeMaterial, UiThemeMeta } from "./ui/types";
@@ -34,6 +34,7 @@ interface SettingsDraft {
   aiEndpointPath: string;
   aiAuthHeader: string;
   aiAuthPrefix: string;
+  aiReasoningEffort: AiReasoningEffort;
 }
 
 export class PersonalLifeSystemSettingTab extends PluginSettingTab {
@@ -66,6 +67,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     this.button(actions, "恢复默认", () => void this.restoreDefaults(), false, "lifeos-button-danger");
 
     const grid = containerEl.createDiv({ cls: "lifeos-settings-grid" });
+    this.renderThemePreferences(grid);
     this.renderBasics(grid);
     this.renderAi(grid);
     this.renderChatAi(grid);
@@ -74,6 +76,29 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     this.renderLlmWiki(grid);
     this.renderExperience(grid);
     this.renderHeatmap(grid);
+  }
+
+  private renderThemePreferences(parent: HTMLElement): void {
+    const card = this.section(parent, "主题风格", "优先放在设置顶部，方便随时切换 Life OS 的颜色、材质和密度。", "palette");
+    card.addClass("lifeos-settings-theme-card");
+    const themeDescription = (value: ThemeStyle) => `当前：${this.themeStyleLabel(value)}。切换后立即生效。`;
+    this.select<ThemeStyle>(
+      card,
+      "主题风格",
+      themeDescription(this.plugin.settings.themeStyle ?? "minimal-warm"),
+      this.plugin.settings.themeStyle ?? "minimal-warm",
+      THEME_STYLES.map((value): [ThemeStyle, string] => [value, this.themeStyleLabel(value)]),
+      async (value) => {
+        const scrollSnapshot = this.captureScrollPositions();
+        this.plugin.settings.themeStyle = value;
+        await this.saveImmediate(this.themeStyleNotice(value));
+        this.refreshThemeSelectionControls(value);
+        this.restoreScrollPositions(scrollSnapshot);
+        this.keepElementVisible(this.containerEl.querySelector<HTMLElement>(".lifeos-theme-style-row") ?? card);
+      },
+      "lifeos-theme-style-select"
+    );
+    this.renderThemeGallery(card);
   }
 
   private renderBasics(parent: HTMLElement): void {
@@ -124,6 +149,21 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     this.text(advanced, "Endpoint Path", "接口路径，通常保持供应商预设即可。", this.draft.aiEndpointPath, (value) => this.setDraft("aiEndpointPath", value));
     this.text(advanced, "Auth Header", "鉴权请求头名称，常见值为 Authorization。", this.draft.aiAuthHeader, (value) => this.setDraft("aiAuthHeader", value));
     this.text(advanced, "Auth Prefix", "鉴权前缀，常见值为 Bearer，Ollama 可留空。", this.draft.aiAuthPrefix, (value) => this.setDraft("aiAuthPrefix", value));
+    this.select<AiReasoningEffort>(
+      advanced,
+      "Reasoning Effort",
+      "用于支持 reasoning/effort 的模型。默认不发送该参数；不支持时会自动回退。",
+      this.draft.aiReasoningEffort ?? "default",
+      [["default", "默认"], ["low", "low"], ["medium", "medium"], ["high", "high"], ["max", "max"]],
+      async (value) => {
+        if (value !== "default" && !requireProFeature(this.plugin, "aiReasoningEffort")) {
+          this.draft.aiReasoningEffort = "default";
+          this.display();
+          return;
+        }
+        this.setDraft("aiReasoningEffort", value);
+      }
+    );
   }
 
   private renderChatAi(parent: HTMLElement): void {
@@ -312,24 +352,6 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       };
     }
     this.info(card, "当前备考语境", `${getExamChatModeLabel(this.plugin.settings)}会用于 AI 助手，底层文件仍保存在稳定的 Exam / 备考目录下。`);
-    const themeDescription = (value: ThemeStyle) => `当前：${this.themeStyleLabel(value)}。切换后立即生效。`;
-    this.select<ThemeStyle>(
-      card,
-      "主题风格",
-      themeDescription(this.plugin.settings.themeStyle ?? "minimal-warm"),
-      this.plugin.settings.themeStyle ?? "minimal-warm",
-      THEME_STYLES.map((value): [ThemeStyle, string] => [value, this.themeStyleLabel(value)]),
-      async (value) => {
-        const scrollSnapshot = this.captureScrollPositions();
-        this.plugin.settings.themeStyle = value;
-        await this.saveImmediate(this.themeStyleNotice(value));
-        this.refreshThemeSelectionControls(value);
-        this.restoreScrollPositions(scrollSnapshot);
-        this.keepElementVisible(this.containerEl.querySelector<HTMLElement>(".lifeos-theme-style-row") ?? card);
-      },
-      "lifeos-theme-style-select"
-    );
-    this.renderThemeGallery(card);
   }
 
   private renderThemeGallery(parent: HTMLElement): void {
@@ -588,7 +610,14 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     if (aiApiKey !== this.draft.aiApiKey) {
       this.draft.aiApiKey = aiApiKey;
     }
-    return { ...this.draft, aiApiKey };
+    const aiReasoningEffort =
+      this.draft.aiReasoningEffort === "default" || requireProFeature(this.plugin, "aiReasoningEffort")
+        ? this.draft.aiReasoningEffort
+        : "default";
+    if (aiReasoningEffort !== this.draft.aiReasoningEffort) {
+      this.draft.aiReasoningEffort = aiReasoningEffort;
+    }
+    return { ...this.draft, aiApiKey, aiReasoningEffort };
   }
 
   private async testConnection(): Promise<void> {
@@ -606,6 +635,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       aiEndpointPath: this.plugin.settings.aiEndpointPath,
       aiAuthHeader: this.plugin.settings.aiAuthHeader,
       aiAuthPrefix: this.plugin.settings.aiAuthPrefix,
+      aiReasoningEffort: this.plugin.settings.aiReasoningEffort,
       aiApiKeys: { ...(this.plugin.settings.aiApiKeys ?? {}) }
     };
 
@@ -659,6 +689,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       this.plugin.settings.aiEndpointPath = snapshot.aiEndpointPath;
       this.plugin.settings.aiAuthHeader = snapshot.aiAuthHeader;
       this.plugin.settings.aiAuthPrefix = snapshot.aiAuthPrefix;
+      this.plugin.settings.aiReasoningEffort = snapshot.aiReasoningEffort;
       this.plugin.settings.aiApiKeys = snapshot.aiApiKeys;
     }
   }
@@ -722,7 +753,8 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       visionAiModel: this.plugin.settings.visionAiModel ?? "",
       aiEndpointPath: this.plugin.settings.aiEndpointPath,
       aiAuthHeader: this.plugin.settings.aiAuthHeader,
-      aiAuthPrefix: this.plugin.settings.aiAuthPrefix
+      aiAuthPrefix: this.plugin.settings.aiAuthPrefix,
+      aiReasoningEffort: this.plugin.settings.aiReasoningEffort ?? "default"
     };
     this.dirty = false;
   }
@@ -871,10 +903,12 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     if (value === "obsidian") return "融入原生";
     if (value === "compact") return "高密浏览";
     if (value === "liquid-glass") return "通透现代";
+    if (value === "refractive-glass") return "折射高光";
     if (value === "mesh-sunset") return "橙粉日落";
     if (value === "mesh-aurora") return "蓝紫极光";
     if (value === "mesh-mint") return "青绿透亮";
     if (value === "mesh-deep-blue") return "蓝白清冷";
+    if (value === "blue-white-gradient") return "白底蓝调";
     if (value === "mesh-dreamy") return "粉紫柔光";
     if (value === "mesh-sea-mist") return "海盐雾感";
     if (value === "focus-ink") return "写作深读";
@@ -933,10 +967,12 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     if (value === "compact") return "紧凑模式";
     if (value === "obsidian") return "Obsidian 原生";
     if (value === "liquid-glass") return "液态玻璃 / Liquid Glass";
+    if (value === "refractive-glass") return "折射玻璃 / Refractive Glass";
     if (value === "mesh-sunset") return "暖日霞 / Mesh Sunset";
     if (value === "mesh-aurora") return "极光紫 / Mesh Aurora";
     if (value === "mesh-mint") return "薄荷光 / Mesh Mint";
     if (value === "mesh-deep-blue") return "深空蓝 / Mesh Deep Blue";
+    if (value === "blue-white-gradient") return "蓝白渐变 / Blue White Gradient";
     if (value === "mesh-dreamy") return "梦境粉紫 / Mesh Dreamy";
     if (value === "mesh-sea-mist") return "海雾青 / Mesh Sea Mist";
     if (value === "focus-ink") return "专注墨色 / Focus Ink";

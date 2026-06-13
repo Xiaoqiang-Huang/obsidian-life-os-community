@@ -50,13 +50,21 @@ const THEME_META: Partial<Record<ThemeStyle, ThemeMetaSeed>> = {
     recommended: false,
     tokens: palette("#0f766e", "#5fc3bb", "#eef9f8", "#f9fffd", "#ebfaf7", "#b8e4de", "#12231f", "#536561", "0 10px 20px rgba(15, 118, 110, 0.08)", 14, "dense")
   }),
-  "liquid-glass": theme("Liquid Glass", "Bright translucent glass baseline.", {
+  "liquid-glass": theme("LiquidGlass", "Shader-inspired liquid refraction, chromatic edge light, and layered glass depth.", {
     group: "glass",
     family: "glass",
     material: "glass",
     density: "airy",
     recommended: true,
-    tokens: palette("#60a5fa", "#8b5cf6", "#eef6ff", "rgba(255,255,255,0.62)", "rgba(255,255,255,0.82)", "rgba(255,255,255,0.44)", "#152238", "#516176", "0 18px 48px rgba(96, 165, 250, 0.18)", 22, "glass")
+    tokens: palette("#16a3ff", "#78f0ff", "#eef9ff", "rgba(255,255,255,0.54)", "rgba(255,255,255,0.78)", "rgba(255,255,255,0.5)", "#10233d", "#54708c", "0 24px 68px rgba(22, 163, 255, 0.22)", 28, "liquidglass")
+  }),
+  "refractive-glass": theme("Refractive Glass", "Sharper liquid refraction with bright edge highlights.", {
+    group: "glass",
+    family: "glass",
+    material: "glass",
+    density: "airy",
+    recommended: true,
+    tokens: palette("#2f7cff", "#18c8ff", "#f7fcff", "rgba(255,255,255,0.58)", "rgba(255,255,255,0.86)", "rgba(128,190,255,0.34)", "#0d2440", "#55708d", "0 24px 64px rgba(47, 124, 255, 0.16)", 26, "refraction")
   }),
   "mesh-sunset": theme("Sunset Mesh", "Warm sunset gradients with soft lift.", {
     group: "glass",
@@ -89,6 +97,14 @@ const THEME_META: Partial<Record<ThemeStyle, ThemeMetaSeed>> = {
     density: "normal",
     recommended: false,
     tokens: palette("#2563eb", "#93c5fd", "#eef5ff", "rgba(255,255,255,0.74)", "rgba(252,254,255,0.9)", "rgba(96,165,250,0.26)", "#10213f", "#586b88", "0 18px 42px rgba(37, 99, 235, 0.16)", 20, "deep")
+  }),
+  "blue-white-gradient": theme("Blue White Gradient", "White canvas with calm blue gradient depth.", {
+    group: "glass",
+    family: "glass",
+    material: "mesh",
+    density: "airy",
+    recommended: true,
+    tokens: palette("#2563eb", "#38bdf8", "#f8fbff", "rgba(255,255,255,0.82)", "rgba(255,255,255,0.94)", "rgba(147,197,253,0.32)", "#10213f", "#5d708c", "0 18px 44px rgba(37, 99, 235, 0.12)", 22, "blue-white")
   }),
   "mesh-dreamy": theme("Dreamy Mesh", "Dreamy mesh glow with floating atmosphere.", {
     group: "glass",

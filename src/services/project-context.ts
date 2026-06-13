@@ -3,6 +3,7 @@ import type { LifeOSProject, LifeOSProjectStatus, LifeOSProjectSummary, LifeOSPr
 export interface ProjectOverviewForAiOptions {
   maxOpenTasksPerProject?: number;
   maxDoneTasksPerProject?: number;
+  projectScopeId?: string;
 }
 
 export interface LifeOSProjectOverview {
@@ -61,9 +62,9 @@ export function buildProjectOverview(
   const unassignedDone = doneTasks.filter((task) => !task.projectId || !projectIds.has(task.projectId));
 
   return {
-    all: makeSummary(null, "All project tasks", openTasks, doneTasks),
+    all: makeSummary(null, "全部项目任务", openTasks, doneTasks),
     projects: summaries,
-    unassigned: makeSummary(null, "Unassigned tasks", unassignedOpen, unassignedDone)
+    unassigned: makeSummary(null, "未归属任务", unassignedOpen, unassignedDone)
   };
 }
 
@@ -73,18 +74,29 @@ export function formatProjectOverviewForAi(
 ): string {
   const maxOpen = Math.max(1, options.maxOpenTasksPerProject ?? 12);
   const maxDone = Math.max(0, options.maxDoneTasksPerProject ?? 5);
+  const scoped = options.projectScopeId
+    ? overview.projects.filter((summary) => summary.projectId === options.projectScopeId)
+    : overview.projects;
+  const scopeLine = options.projectScopeId
+    ? `当前只分析项目：${scoped[0]?.label ?? options.projectScopeId}。`
+    : "当前覆盖全部项目；如果用户未选择项目，需要展示所有项目的未完成任务。";
   const sections = [
     "# 项目任务概览",
-    "回答单独项目进度、各项目未完成任务和任务分析时优先引用本段；再结合日记、知识库、记忆和复盘内容分析原因与下一步。",
+    "回答单独项目进度、各项目未完成任务和任务分析时优先引用本段；再结合日记、知识库、记忆和复盘内容分析原因与下一步；没有证据就说明资料不足。",
+    scopeLine,
     "",
     `总览：未完成任务 ${overview.all.openCount}，已完成任务 ${overview.all.doneCount}，总进度 ${overview.all.progress}%。`
   ];
 
-  for (const summary of overview.projects) {
+  if (scoped.length === 0 && options.projectScopeId) {
+    sections.push("", `未找到项目 ${options.projectScopeId} 的任务记录。`);
+  }
+
+  for (const summary of scoped) {
     sections.push("", formatProjectSummaryForAi(summary, maxOpen, maxDone));
   }
 
-  if (overview.unassigned.openCount > 0 || overview.unassigned.doneCount > 0) {
+  if (!options.projectScopeId && (overview.unassigned.openCount > 0 || overview.unassigned.doneCount > 0)) {
     sections.push("", formatProjectSummaryForAi(overview.unassigned, maxOpen, maxDone, "未归属任务"));
   }
 

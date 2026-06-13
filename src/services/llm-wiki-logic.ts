@@ -1,5 +1,7 @@
+import { buildKeywordLinkedMarkdown } from "./KeywordLinkService";
+
 export type LlmWikiMaterialLength = "short" | "long" | "very-long";
-export type LlmWikiSourceKind = "pasted_text" | "url" | "current_note" | "local_file" | "manual_markdown";
+export type LlmWikiSourceKind = "pasted_text" | "url" | "web_clipper" | "current_note" | "local_file" | "manual_markdown";
 export type LlmWikiPrivacyLevel = "normal" | "private" | "sensitive";
 export type LlmWikiCompileDepth = "light" | "standard" | "deep";
 export type LlmWikiConfidence = "low" | "medium" | "high";
@@ -72,9 +74,23 @@ export function normalizedLlmWikiSimilarity(left: string, right: string): number
 
 export function detectLlmWikiPrivacyLevel(content: string): LlmWikiPrivacyLevel {
   const text = String(content || "").toLowerCase();
-  if (/api[_ -]?key|private[_ -]?key|secret|password|身份证|银行卡|病历|诊断|token|私钥|密钥/.test(text)) return "sensitive";
+  if (hasPersonalSensitiveSignal(text) || hasCredentialSecretSignal(text)) return "sensitive";
+  if (/api[_ -]?key|private[_ -]?key|secret|password|token|私钥|密钥/.test(text)) return "private";
   if (/内部|未公开|未发布|私人|聊天记录|关系|财务|健康|同事|公司|客户|报价|合同|商业|路线图|家庭|家人|住址|手机号|电话|邮箱/.test(text)) return "private";
   return "normal";
+}
+
+function hasPersonalSensitiveSignal(text: string): boolean {
+  return /身份证|银行卡|病历|诊断/.test(text);
+}
+
+function hasCredentialSecretSignal(text: string): boolean {
+  const credentialName = String.raw`(?:api[_ -]?key|private[_ -]?key|secret|password|token|私钥|密钥)`;
+  const assignedCredential = new RegExp(String.raw`${credentialName}\s*(?:[:=：]|是|为)\s*["']?([a-z0-9][a-z0-9_\-./+=]{3,})`, "i");
+  if (assignedCredential.test(text)) return true;
+  if (/\b(?:sk|cr|pk|rk|ghp|github_pat|xoxb|eyj)[-_a-z0-9]{12,}\b/i.test(text)) return true;
+  if (/\bakia[0-9a-z]{12,}\b/i.test(text)) return true;
+  return new RegExp(String.raw`${credentialName}[\s\S]{0,80}(?:should stay out|stay out of formal|do not write|do not publish|不要|不得|不应|不允许)`, "i").test(text);
 }
 
 export interface LlmWikiSourceMarkdownInput {
@@ -169,7 +185,9 @@ export function buildLlmWikiSourceMarkdown(input: LlmWikiSourceMarkdownInput): s
     "---"
   ].join("\n");
 
-  return `${frontmatter}\n\n${input.content}`;
+  return buildKeywordLinkedMarkdown(`${frontmatter}\n\n${input.content}`, {
+    title: input.title
+  });
 }
 
 export function buildLlmWikiDraftMarkdown(input: LlmWikiDraftMarkdownInput): string {
@@ -195,7 +213,9 @@ export function buildLlmWikiDraftMarkdown(input: LlmWikiDraftMarkdownInput): str
     "---"
   ].join("\n");
 
-  return `${frontmatter}\n\n# ${input.title}\n\n${input.body}`;
+  return buildKeywordLinkedMarkdown(`${frontmatter}\n\n# ${input.title}\n\n${input.body}`, {
+    title: input.title
+  });
 }
 
 export function buildLlmWikiBatchMarkdown(input: LlmWikiBatchMarkdownInput): string {
@@ -293,7 +313,7 @@ export function classifyLlmWikiIntake(content: string, userInstruction = ""): Ll
     secondaryTypes: primaryType === "mixed" ? secondaryTypes : secondaryTypes.filter((type) => type !== primaryType),
     confidence: primaryType === "mixed" ? 0.82 : 0.72,
     privacyLevel,
-    aiProcessingAllowed: privacyLevel !== "sensitive",
+    aiProcessingAllowed: true,
     requiresConfirmation: primaryType !== "knowledge_source" || privacyLevel !== "normal",
     reason: privacyLevel === "sensitive"
       ? "内容包含敏感信号，默认不保存、不编译、不进入未来上下文。"

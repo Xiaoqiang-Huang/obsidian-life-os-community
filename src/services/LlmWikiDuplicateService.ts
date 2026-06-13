@@ -5,6 +5,7 @@ import {
   normalizedLlmWikiSimilarity,
   simpleLlmWikiHash
 } from "./llm-wiki-logic";
+import { stripKeywordLinksSection } from "./KeywordLinkService";
 
 export interface LlmWikiDuplicateResult {
   kind: "none" | "exact" | "similar" | "same-topic";
@@ -125,7 +126,7 @@ export class LlmWikiDuplicateService {
   }
 
   private normalizedBody(content: string): string {
-    return String(content || "").replace(/\r\n/g, "\n").trim();
+    return stripKeywordLinksSection(String(content || "").replace(/\r\n/g, "\n")).trim();
   }
 
   private resultForSimilarity(existingPath: string, similarity: number): LlmWikiDuplicateResult {

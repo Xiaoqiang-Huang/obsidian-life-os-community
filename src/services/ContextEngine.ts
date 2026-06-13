@@ -1,4 +1,4 @@
-import type { App } from "obsidian";
+﻿import type { App } from "obsidian";
 import type { PersonalLifeSystemSettings } from "../settings";
 import type { LifeOSTask } from "../types";
 import { parseTaskLine } from "../utils/markdown";
@@ -35,6 +35,9 @@ const KNOWLEDGE_SCAN_LIMIT = 240;
 const KNOWLEDGE_RELEVANT_EXCERPT_LIMIT = 10;
 const KNOWLEDGE_BROAD_EXCERPT_LIMIT = 24;
 const KNOWLEDGE_EXCERPT_CHARS = 900;
+const PROJECT_DOCUMENT_SCAN_LIMIT = 80;
+const PROJECT_DOCUMENT_SECTION_LIMIT = 12;
+const PROJECT_DOCUMENT_EXCERPT_CHARS = 1600;
 
 export class ContextEngine {
   private readonly app: App;
@@ -76,18 +79,21 @@ export class ContextEngine {
         }),
         this.metadata.getInventory()
       ]);
+      const scopedInventory = this.scopeInventoryForProject(inventory, input.projectScopeId);
       if (!vector.available) {
         return this.buildLocal(input, vector.warnings, "local", maxChars);
       }
-      const projectSections = await this.projectTaskSections(inventory);
-      const knowledgeSections = await this.knowledgeCoverageSections(inventory, input.userMessage);
-      const candidateSections = await this.candidates.buildSections({ userMessage: input.userMessage, inventory, limit: 6 });
+      const projectSections = await this.projectTaskSections(inventory, input.projectScopeId);
+      const projectDocumentSections = await this.projectDocumentSections(inventory, input.projectScopeId, input.userMessage);
+      const knowledgeSections = await this.knowledgeCoverageSections(scopedInventory, input.userMessage);
+      const candidateSections = await this.candidates.buildSections({ userMessage: input.userMessage, inventory: scopedInventory, limit: 6 });
       return this.composer.compose({
         userMessage: input.userMessage,
         modeUsed: "vector",
         maxChars,
         sections: [
           ...projectSections,
+          ...projectDocumentSections,
           ...knowledgeSections,
           ...candidateSections,
           ...this.evidenceSections(vector.evidence, 58, "向量检索证据")
@@ -110,22 +116,24 @@ export class ContextEngine {
     maxChars: number
   ): Promise<ContextEngineResult> {
     const inventory = await this.metadata.getInventory();
+    const scopedInventory = this.scopeInventoryForProject(inventory, input.projectScopeId);
     const plan = await this.planner.plan({
       userMessage: input.userMessage,
       mode: "local",
-      inventory
+      inventory: scopedInventory
     });
-    const [summarySections, evidence, candidateSections, llmWikiSections, currentNoteSections, urlSections, webSearchSections, projectSections, knowledgeSections, coreSections] = await Promise.all([
-      this.summaries.getSections({ mode: "local", date: input.date, inventory }),
-      this.localRetrieval.search(plan, inventory),
-      this.candidates.buildSections({ userMessage: input.userMessage, inventory }),
+    const [summarySections, evidence, candidateSections, llmWikiSections, currentNoteSections, urlSections, webSearchSections, projectSections, projectDocumentSections, knowledgeSections, coreSections] = await Promise.all([
+      this.summaries.getSections({ mode: "local", date: input.date, inventory: scopedInventory }),
+      this.localRetrieval.search(plan, scopedInventory),
+      this.candidates.buildSections({ userMessage: input.userMessage, inventory: scopedInventory }),
       this.llmWikiSections(),
-      this.currentNoteSections(inventory),
+      this.currentNoteSections(scopedInventory),
       this.urlSections(input.userMessage, input.fetchUrl),
       this.webSearchSections(input.userMessage, input.searchWeb),
-      this.projectTaskSections(inventory),
-      this.knowledgeCoverageSections(inventory, input.userMessage),
-      this.coreContextSections(inventory, input.date)
+      this.projectTaskSections(inventory, input.projectScopeId),
+      this.projectDocumentSections(inventory, input.projectScopeId, input.userMessage),
+      this.knowledgeCoverageSections(scopedInventory, input.userMessage),
+      this.coreContextSections(scopedInventory, input.date)
     ]);
 
     return this.composer.compose({
@@ -137,6 +145,7 @@ export class ContextEngine {
         ...urlSections,
         ...webSearchSections,
         ...projectSections,
+        ...projectDocumentSections,
         ...knowledgeSections,
         ...candidateSections,
         ...coreSections,
@@ -150,18 +159,20 @@ export class ContextEngine {
 
   private async buildGraph(input: ContextEngineBuildInput, maxChars: number): Promise<ContextEngineResult> {
     const inventory = await this.metadata.getInventory();
+    const scopedInventory = this.scopeInventoryForProject(inventory, input.projectScopeId);
     const plan = await this.planner.plan({
       userMessage: input.userMessage,
       mode: "graph",
-      inventory
+      inventory: scopedInventory
     });
-    const [projectSections, knowledgeSections, graphSections, candidateSections, summarySections, evidence] = await Promise.all([
-      this.projectTaskSections(inventory),
-      this.knowledgeCoverageSections(inventory, input.userMessage),
-      this.graphContext.build({ userMessage: input.userMessage, date: input.date, inventory }),
-      this.candidates.buildSections({ userMessage: input.userMessage, inventory, limit: 8 }),
-      this.summaries.getSections({ mode: "graph", date: input.date, inventory }),
-      this.localRetrieval.search(plan, inventory)
+    const [projectSections, projectDocumentSections, knowledgeSections, graphSections, candidateSections, summarySections, evidence] = await Promise.all([
+      this.projectTaskSections(inventory, input.projectScopeId),
+      this.projectDocumentSections(inventory, input.projectScopeId, input.userMessage),
+      this.knowledgeCoverageSections(scopedInventory, input.userMessage),
+      this.graphContext.build({ userMessage: input.userMessage, date: input.date, inventory: scopedInventory }),
+      this.candidates.buildSections({ userMessage: input.userMessage, inventory: scopedInventory, limit: 8 }),
+      this.summaries.getSections({ mode: "graph", date: input.date, inventory: scopedInventory }),
+      this.localRetrieval.search(plan, scopedInventory)
     ]);
 
     return this.composer.compose({
@@ -170,6 +181,7 @@ export class ContextEngine {
       maxChars,
       sections: [
         ...projectSections,
+        ...projectDocumentSections,
         ...knowledgeSections,
         ...graphSections,
         ...candidateSections,
@@ -180,11 +192,35 @@ export class ContextEngine {
     });
   }
 
+  private scopeInventoryForProject(
+    inventory: ContextInventoryItem[],
+    projectScopeId?: string
+  ): ContextInventoryItem[] {
+    if (!projectScopeId) return inventory;
+    const projectsRoot = this.normalizePath(`${this.rootFolder}/Projects/`);
+    const selectedProjectRoot = this.normalizePath(`${this.rootFolder}/Projects/${projectScopeId}/`);
+    const projectsIndex = this.normalizePath(`${this.rootFolder}/Projects/index.md`);
+    const openTasks = this.normalizePath(`${this.rootFolder}/Tasks/open.md`);
+    const doneTasks = this.normalizePath(`${this.rootFolder}/Tasks/done.md`);
+
+    return inventory.filter((item) => {
+      const path = this.normalizePath(item.path);
+      if (path === openTasks || path === doneTasks) return false;
+      if (path === projectsIndex) return true;
+      if (path.startsWith(projectsRoot)) return path.startsWith(selectedProjectRoot);
+      return true;
+    });
+  }
+
+  private normalizePath(path: string): string {
+    return path.replace(/\\/g, "/");
+  }
+
   private async llmWikiSections(): Promise<ContextSection[]> {
     return new LlmWikiContextService(this.app, this.settings).buildContextEngineSections();
   }
 
-  private async projectTaskSections(inventory: ContextInventoryItem[]): Promise<ContextSection[]> {
+  private async projectTaskSections(inventory: ContextInventoryItem[], projectScopeId?: string): Promise<ContextSection[]> {
     const projectsItem = inventory.find((item) => item.path === `${this.rootFolder}/Projects/index.md`);
     const openItem = inventory.find((item) => item.path === `${this.rootFolder}/Tasks/open.md`);
     const doneItem = inventory.find((item) => item.path === `${this.rootFolder}/Tasks/done.md`);
@@ -201,7 +237,7 @@ export class ContextEngine {
     if (projects.length === 0 && openTasks.length === 0 && doneTasks.length === 0) return [];
 
     const overview = buildProjectOverview(projects, openTasks, doneTasks);
-    const content = formatProjectOverviewForAi(overview);
+    const content = formatProjectOverviewForAi(overview, { projectScopeId });
     const sourcePath = projectsItem?.path ?? openItem?.path ?? doneItem?.path ?? `${this.rootFolder}/Projects/index.md`;
 
     return [{
@@ -212,10 +248,57 @@ export class ContextEngine {
       sourceInfo: {
         path: sourcePath,
         title: "项目任务概览",
-        type: "task",
+        type: "project",
         excerpt: content.slice(0, 240)
       }
     }];
+  }
+
+  private async projectDocumentSections(inventory: ContextInventoryItem[], projectScopeId?: string, userMessage = ""): Promise<ContextSection[]> {
+    if (!projectScopeId) return [];
+    const projectsItem = inventory.find((item) => item.path === `${this.rootFolder}/Projects/index.md`);
+    const projects = parseProjectIndex(await this.readInventoryContent(projectsItem));
+    const projectName = projects.find((project) => project.id === projectScopeId)?.name ?? projectScopeId;
+    const documentsRoot = `${this.rootFolder}/Projects/${projectScopeId}/Documents/`;
+    const keywords = this.knowledgeKeywords(userMessage);
+    const items = inventory
+      .filter((item) => item.path.startsWith(documentsRoot) && item.path.toLowerCase().endsWith(".md"))
+      .sort((a, b) => b.mtime - a.mtime || a.path.localeCompare(b.path))
+      .slice(0, PROJECT_DOCUMENT_SCAN_LIMIT);
+    const ranked: Array<{ item: ContextInventoryItem; content: string; score: number }> = [];
+
+    for (const item of items) {
+      const markdown = await this.readInventoryContent(item);
+      const content = this.cleanProjectDocumentContext(markdown, PROJECT_DOCUMENT_EXCERPT_CHARS, keywords);
+      if (!content) continue;
+      ranked.push({
+        item,
+        content,
+        score: this.projectDocumentScore(item, markdown, keywords)
+      });
+    }
+
+    ranked.sort((a, b) => b.score - a.score || b.item.mtime - a.item.mtime || a.item.path.localeCompare(b.item.path));
+    const sections: ContextSection[] = [];
+
+    for (const { item, content } of ranked.slice(0, PROJECT_DOCUMENT_SECTION_LIMIT)) {
+      const title = `项目文档：${projectName}`;
+      const sectionContent = [`# ${title}`, `项目ID：${projectScopeId}`, `路径：${item.path}`, "", content].join("\n");
+      sections.push({
+        title: `${title} / ${item.title}`,
+        content: sectionContent,
+        priority: 86,
+        source: item.path,
+        sourceInfo: {
+          path: item.path,
+          title: item.title,
+          type: "project",
+          excerpt: content.slice(0, 240)
+        }
+      });
+    }
+
+    return sections;
   }
 
   private async readInventoryContent(item?: ContextInventoryItem): Promise<string> {
@@ -234,6 +317,107 @@ export class ContextEngine {
       .filter((task): task is LifeOSTask => task !== null);
   }
 
+  private cleanProjectDocumentContext(markdown: string, maxChars: number, keywords: string[]): string {
+    return this.relevantMarkdownPassages(markdown, keywords, maxChars);
+  }
+
+  private projectDocumentScore(item: ContextInventoryItem, markdown: string, keywords: string[]): number {
+    if (keywords.length === 0) return 1;
+    const haystack = [
+      item.path,
+      item.title,
+      ...item.tags,
+      ...item.headings,
+      ...item.links,
+      ...item.backlinks
+    ].join(" ").toLowerCase();
+    let score = 0;
+    for (const keyword of keywords) {
+      const normalized = keyword.toLowerCase();
+      if (!normalized) continue;
+      if (haystack.includes(normalized)) score += 8 + normalized.length;
+    }
+    score += this.bestBlockScore(markdown, keywords);
+    return score;
+  }
+
+  private relevantMarkdownPassages(markdown: string, keywords: string[], maxChars: number): string {
+    const clean = markdown
+      .replace(/^---\r?\n[\s\S]*?\r?\n---\s*/m, "")
+      .replace(/\r\n/g, "\n")
+      .trim();
+    if (!clean) return "";
+    const meaningfulKeywords = this.meaningfulExcerptKeywords(keywords);
+    if (meaningfulKeywords.length === 0 || clean.length <= maxChars) return clean.slice(0, maxChars);
+
+    const blocks = clean.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+    const scored = blocks
+      .map((block, index) => ({ block, index, score: this.blockKeywordScore(block, meaningfulKeywords) }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score || a.index - b.index);
+    if (scored.length === 0) return clean.slice(0, maxChars);
+
+    const selected = scored.slice(0, 4).sort((a, b) => a.index - b.index);
+    const parts: string[] = [];
+    let remaining = maxChars;
+    for (const entry of selected) {
+      if (remaining <= 0) break;
+      const excerpt = this.excerptBlockAroundKeywords(entry.block, meaningfulKeywords, Math.min(remaining, 700));
+      if (!excerpt) continue;
+      const addition = parts.length > 0 ? `\n\n---\n\n${excerpt}` : excerpt;
+      if (addition.length > remaining) {
+        parts.push(addition.slice(0, remaining).trim());
+        break;
+      }
+      parts.push(addition);
+      remaining -= addition.length;
+    }
+    return parts.join("").trim();
+  }
+
+  private bestBlockScore(markdown: string, keywords: string[]): number {
+    const meaningfulKeywords = this.meaningfulExcerptKeywords(keywords);
+    if (meaningfulKeywords.length === 0) return 0;
+    const clean = markdown.replace(/^---\r?\n[\s\S]*?\r?\n---\s*/m, "").replace(/\r\n/g, "\n").trim();
+    return clean
+      .split(/\n{2,}/)
+      .map((block) => this.blockKeywordScore(block, meaningfulKeywords))
+      .reduce((max, score) => Math.max(max, score), 0);
+  }
+
+  private blockKeywordScore(block: string, keywords: string[]): number {
+    const lower = block.toLowerCase();
+    let score = 0;
+    for (const keyword of keywords) {
+      const normalized = keyword.toLowerCase();
+      if (!normalized) continue;
+      if (lower.includes(normalized)) score += 12 + Math.min(normalized.length, 16);
+    }
+    return score;
+  }
+
+  private excerptBlockAroundKeywords(block: string, keywords: string[], maxChars: number): string {
+    if (block.length <= maxChars) return block;
+    const lower = block.toLowerCase();
+    const matchIndex = keywords
+      .map((keyword) => lower.indexOf(keyword.toLowerCase()))
+      .filter((index) => index >= 0)
+      .sort((a, b) => a - b)[0] ?? 0;
+    const start = Math.max(0, matchIndex - 220);
+    const excerpt = block.slice(start, start + maxChars).trim();
+    return start > 0 ? `...${excerpt}` : excerpt;
+  }
+
+  private meaningfulExcerptKeywords(keywords: string[]): string[] {
+    const generic = new Set(["life", "os", "project", "projects", "文档", "项目", "分析", "回答", "根据"]);
+    return Array.from(new Set(
+      keywords
+        .map((keyword) => keyword.trim())
+        .filter((keyword) => keyword.length >= 2)
+        .filter((keyword) => !generic.has(keyword.toLowerCase()))
+    )).slice(0, 16);
+  }
+
   private async knowledgeCoverageSections(inventory: ContextInventoryItem[], userMessage: string): Promise<ContextSection[]> {
     if (!this.hasKnowledgeIntent(userMessage)) return [];
     const items = inventory
@@ -249,7 +433,7 @@ export class ContextEngine {
         item.tags.length > 0 ? `tags=${item.tags.slice(0, 4).join(",")}` : "",
         item.headings.length > 0 ? `headings=${item.headings.slice(0, 3).join(" / ")}` : ""
       ].filter(Boolean).join("；");
-      return `- ${item.title}｜${item.path}${meta ? `｜${meta}` : ""}`;
+      return `- ${item.title} -> ${item.path}${meta ? ` -> ${meta}` : ""}`;
     });
     if (items.length > KNOWLEDGE_CATALOG_LIMIT) {
       catalogLines.push(`- 还有 ${items.length - KNOWLEDGE_CATALOG_LIMIT} 条知识文件未列入索引。`);
@@ -332,24 +516,23 @@ export class ContextEngine {
   }
 
   private hasKnowledgeIntent(message: string): boolean {
-    return /知识库|資料|资料|笔记|筆記|LLM\s*Wiki|wiki|全部信息|全部内容|全量|所有知识|所有资料/i.test(message);
+    return /知识库|资料|笔记|长文档|LLM\s*Wiki|wiki|全部信息|全部内容|全量|所有知识|所有资料/i.test(message);
   }
 
   private hasBroadKnowledgeIntent(message: string): boolean {
-    return /(知识库|資料|资料|笔记|筆記|wiki|LLM\s*Wiki).{0,12}(全部|所有|全量|完整|整体|总览|盘点)|(?:全部|所有|全量|完整|整体|总览|盘点).{0,12}(知识库|資料|资料|笔记|筆記|wiki|LLM\s*Wiki)/i.test(message);
+    return /(知识库|资料|笔记|长文档|wiki|LLM\s*Wiki).{0,12}(全部|所有|全量|完整|整体|总览|盘点)|(?:全部|所有|全量|完整|整体|总览|盘点).{0,12}(知识库|资料|笔记|长文档|wiki|LLM\s*Wiki)/i.test(message);
   }
 
   private knowledgeKeywords(message: string): string[] {
     const generic = new Set([
       "请", "根据", "回答", "什么", "是什么", "知识库", "全部", "所有", "全量", "完整", "整体", "信息", "内容",
-      "资料", "資料", "笔记", "筆記", "wiki", "llm", "the", "and", "with", "from"
+      "资料", "笔记", "长文档", "wiki", "llm", "the", "and", "with", "from"
     ]);
     const tokens = Array.from(message.matchAll(/[\p{L}\p{N}_-]+/gu), (match) => match[0].trim())
       .filter((token) => token.length >= 2)
       .filter((token) => !generic.has(token.toLowerCase()));
     return Array.from(new Set(tokens)).slice(0, 16);
   }
-
   private knowledgeItemScore(item: ContextInventoryItem, markdown: string, keywords: string[], broad: boolean): number {
     const haystack = [
       item.path,

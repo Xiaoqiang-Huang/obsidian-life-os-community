@@ -12840,6 +12840,14 @@ body.lifeos-theme-minimal-warm .lifeos-setting-row > * {
   margin: 0;
 }
 
+.lifeos-settings-theme-card {
+  grid-column: 1 / -1;
+}
+
+.lifeos-settings-theme-card .lifeos-theme-swatch-details {
+  margin-top: 12px;
+}
+
 .lifeos-setting-row {
   grid-template-columns: minmax(190px, 260px) minmax(0, 1fr);
   align-items: start;
@@ -13945,6 +13953,11 @@ body.lifeos-theme-minimal-warm .lifeos-stat-value {
   color: var(--lifeos-text);
   font-size: 22px;
   font-weight: 680;
+}
+
+.lifeos-theme-minimal-warm .lifeos-dashboard-center .lifeos-stat-card .lifeos-stat-value,
+body.lifeos-theme-minimal-warm .lifeos-dashboard-center .lifeos-stat-card .lifeos-stat-value {
+  font-size: 20px;
 }
 
 .lifeos-theme-minimal-warm .lifeos-stat-label,
@@ -15094,7 +15107,7 @@ body.lifeos-theme-minimal-warm .lifeos-main {
 
 .lifeos-knowledge-row {
   display: grid;
-  grid-template-columns: minmax(180px, 0.35fr) minmax(0, 0.65fr);
+  grid-template-columns: minmax(180px, 0.35fr) minmax(160px, 0.3fr) minmax(0, 0.6fr) auto;
   gap: 12px;
   align-items: center;
   width: 100%;
@@ -15113,6 +15126,20 @@ body.lifeos-theme-minimal-warm .lifeos-main {
 
 .lifeos-knowledge-row .lifeos-knowledge-snippet {
   overflow: hidden;
+}
+
+.lifeos-knowledge-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.lifeos-knowledge-row-actions .lifeos-button {
+  min-height: 34px;
+  padding: 7px 10px;
+  white-space: nowrap;
 }
 
 .lifeos-knowledge-main {
@@ -16006,6 +16033,149 @@ select.lifeos-input {
   max-width: 100%;
   margin-inline: 0 !important;
   justify-content: space-between !important;
+}
+
+.lifeos-project-import-input {
+  display: none;
+}
+
+.lifeos-project-import-drop {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 104px;
+  padding: 16px;
+  border: 1px dashed color-mix(in srgb, var(--lifeos-primary, #5b7cff) 34%, var(--lifeos-border, rgba(148, 163, 184, 0.35)));
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(241, 248, 255, 0.64)),
+    color-mix(in srgb, var(--lifeos-primary, #5b7cff) 5%, transparent);
+  color: var(--lifeos-text, var(--text-normal));
+}
+
+.lifeos-project-import-drop.is-dragging {
+  border-style: solid;
+  border-color: var(--lifeos-primary, #5b7cff);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lifeos-primary, #5b7cff) 16%, transparent);
+}
+
+.lifeos-project-import-drop-icon {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--lifeos-primary, #5b7cff) 13%, white);
+  color: var(--lifeos-primary, #5b7cff);
+}
+
+.lifeos-project-import-drop-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.lifeos-project-import-drop-copy strong {
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.lifeos-project-import-drop-copy span {
+  color: var(--lifeos-muted, var(--text-muted));
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-project-import-list {
+  display: grid;
+  gap: 8px;
+  max-height: 240px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.lifeos-project-import-list.is-empty {
+  max-height: none;
+  overflow: visible;
+}
+
+.lifeos-project-import-empty {
+  padding: 12px 14px;
+  border: 1px solid var(--lifeos-border-soft, rgba(148, 163, 184, 0.18));
+  border-radius: 12px;
+  color: var(--lifeos-muted, var(--text-muted));
+  background: var(--lifeos-surface-soft, rgba(255, 255, 255, 0.56));
+}
+
+.lifeos-project-import-item {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--lifeos-border-soft, rgba(148, 163, 184, 0.18));
+  border-radius: 12px;
+  background: var(--lifeos-surface, rgba(255, 255, 255, 0.74));
+}
+
+.lifeos-project-import-item-icon {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--lifeos-accent, #14b8a6) 14%, white);
+  color: var(--lifeos-accent, #0f9f92);
+}
+
+.lifeos-project-import-item-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lifeos-project-import-item-copy strong,
+.lifeos-project-import-item-copy span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-project-import-item-copy strong {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.lifeos-project-import-item-copy span {
+  color: var(--lifeos-muted, var(--text-muted));
+  font-size: 12px;
+}
+
+.theme-dark .lifeos-project-import-drop,
+body.theme-dark .lifeos-project-import-drop {
+  background:
+    linear-gradient(135deg, rgba(21, 31, 47, 0.92), rgba(18, 35, 52, 0.82)),
+    color-mix(in srgb, var(--lifeos-primary, #7c8cff) 8%, transparent);
+}
+
+.theme-dark .lifeos-project-import-drop-icon,
+body.theme-dark .lifeos-project-import-drop-icon,
+.theme-dark .lifeos-project-import-item-icon,
+body.theme-dark .lifeos-project-import-item-icon {
+  background: rgba(124, 140, 255, 0.16);
+}
+
+.theme-dark .lifeos-project-import-item,
+body.theme-dark .lifeos-project-import-item,
+.theme-dark .lifeos-project-import-empty,
+body.theme-dark .lifeos-project-import-empty {
+  background: rgba(15, 23, 42, 0.7);
 }
 
 .lifeos-daily-quick-row {
@@ -17071,7 +17241,7 @@ body.lifeos-theme-minimal-warm .lifeos-chat-shell.lifeos-chat-shell-focused,
 
 .lifeos-knowledge-row {
   display: grid !important;
-  grid-template-columns: minmax(160px, 0.45fr) minmax(220px, 1fr) auto !important;
+  grid-template-columns: minmax(160px, 0.42fr) minmax(180px, 0.44fr) minmax(0, 1fr) auto !important;
   gap: 10px !important;
   align-items: center !important;
 }
@@ -21028,6 +21198,86 @@ body.lifeos-theme-academic-paper .lifeos-settings {
   grid-row: 1;
   justify-self: end;
   align-self: start;
+}
+
+.lifeos-chat-view-host .lifeos-chat-context-mode-control {
+  align-items: center;
+}
+
+.lifeos-chat-view-host .lifeos-chat-context-mode-control .lifeos-chip-label {
+  color: color-mix(in srgb, var(--lifeos-primary, #2563eb) 62%, var(--lifeos-muted));
+  font-weight: 820;
+}
+
+.lifeos-chat-view-host .lifeos-chat-context-mode-control .lifeos-chips {
+  gap: 5px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--lifeos-primary, #2563eb) 18%, var(--lifeos-border));
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.74), rgba(235, 246, 255, 0.62)),
+    color-mix(in srgb, var(--lifeos-primary, #2563eb) 5%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.lifeos-chat-view-host .lifeos-chat-context-mode-control .lifeos-chip {
+  min-height: 26px;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  color: color-mix(in srgb, var(--lifeos-text, #1e293b) 78%, var(--lifeos-primary, #2563eb));
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.lifeos-chat-view-host .lifeos-chat-context-mode-control .lifeos-chip:hover {
+  border-color: color-mix(in srgb, var(--lifeos-primary, #2563eb) 28%, transparent);
+  background: color-mix(in srgb, var(--lifeos-primary, #2563eb) 8%, white);
+  color: var(--lifeos-primary, #2563eb);
+}
+
+.lifeos-chat-view-host .lifeos-chat-context-mode-control .lifeos-chip.is-active {
+  border-color: color-mix(in srgb, var(--lifeos-primary, #2563eb) 72%, #38bdf8);
+  color: #ffffff;
+  background:
+    linear-gradient(135deg, #2563eb 0%, #1f7aff 56%, #38bdf8 100%);
+  box-shadow:
+    0 8px 18px rgba(37, 99, 235, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
+.lifeos-chat-view-host .lifeos-chat-reasoning-effort-control {
+  align-items: center;
+}
+
+.lifeos-chat-view-host .lifeos-chat-reasoning-effort-control .lifeos-chip-label {
+  color: color-mix(in srgb, var(--lifeos-primary, #2563eb) 68%, var(--lifeos-muted));
+  font-weight: 820;
+}
+
+.lifeos-chat-view-host .lifeos-chat-reasoning-effort-control .lifeos-chips {
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--lifeos-primary, #2563eb) 20%, var(--lifeos-border));
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(231, 244, 255, 0.66)),
+    color-mix(in srgb, var(--lifeos-primary, #2563eb) 6%, transparent);
+}
+
+.lifeos-chat-view-host .lifeos-chat-reasoning-effort-control .lifeos-chip {
+  min-height: 26px;
+  padding: 5px 9px;
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+.lifeos-chat-view-host .lifeos-chat-reasoning-effort-control .lifeos-chip.is-active {
+  color: #ffffff;
+  background: linear-gradient(135deg, #2563eb 0%, #1f7aff 58%, #38bdf8 100%);
+  box-shadow: 0 8px 16px rgba(37, 99, 235, 0.2);
 }
 
 .lifeos-chat-view-host .lifeos-chat-provider-switch {
@@ -25279,6 +25529,80 @@ body.lifeos-theme-liquid-glass .lifeos-chat-view-host .lifeos-main.lifeos-chat-m
   height: 15px;
 }
 
+.lifeos-knowledge-pipeline-flow {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.lifeos-knowledge-pipeline-section {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.lifeos-knowledge-pipeline-section.is-pipeline-review {
+  grid-column: 1 / -1;
+  padding-top: 4px;
+  border-top: 1px dashed var(--lifeos-border);
+}
+
+.lifeos-knowledge-pipeline-section-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.lifeos-knowledge-pipeline-section-head .lifeos-card-title {
+  min-width: 0;
+}
+
+.lifeos-knowledge-pipeline-description {
+  margin: 0;
+  color: var(--lifeos-muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.lifeos-knowledge-pipeline-items {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.lifeos-knowledge-pipeline-item {
+  min-height: 0;
+  cursor: default;
+}
+
+.lifeos-knowledge-pipeline-item.needs-review {
+  border-color: color-mix(in srgb, var(--lifeos-danger, #ef4444) 36%, var(--lifeos-border));
+  background:
+    radial-gradient(circle at 12% 10%, color-mix(in srgb, var(--lifeos-danger, #ef4444) 12%, transparent), transparent 36%),
+    linear-gradient(145deg, var(--lifeos-surface), var(--lifeos-surface-soft));
+}
+
+.lifeos-knowledge-review-reason {
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--lifeos-danger, #ef4444) 24%, var(--lifeos-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--lifeos-danger, #ef4444) 7%, transparent);
+  color: var(--lifeos-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.lifeos-knowledge-pipeline-item.is-lifeos-knowledge-focus {
+  border-color: var(--lifeos-primary);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--lifeos-border) 88%, transparent),
+    0 0 0 3px var(--lifeos-primary-soft, rgba(31, 122, 255, 0.14)),
+    0 18px 34px color-mix(in srgb, var(--lifeos-primary) 18%, transparent);
+}
+
 .lifeos-knowledge-library-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -25433,6 +25757,9 @@ body.is-mobile :is(.lifeos-knowledge-library-actions, .lifeos-knowledge-section-
 }
 
 body.is-mobile .lifeos-knowledge-library-grid,
+.lifeos-root.lifeos-is-mobile-runtime .lifeos-knowledge-pipeline-flow,
+.lifeos-root.lifeos-is-narrow-pane .lifeos-knowledge-pipeline-flow,
+body.is-mobile .lifeos-knowledge-pipeline-flow,
 .lifeos-root.lifeos-is-mobile-runtime .lifeos-knowledge-library-grid,
 .lifeos-root.lifeos-is-narrow-pane .lifeos-knowledge-library-grid,
 body.is-mobile .lifeos-knowledge-capture-form,
@@ -25453,6 +25780,32 @@ body.is-mobile .lifeos-knowledge-capture-form,
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
+}
+
+.lifeos-pro-policy-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-color: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--interactive-accent) 7%, var(--background-primary));
+}
+
+.lifeos-pro-policy-note-icon {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  color: var(--interactive-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+}
+
+.lifeos-pro-policy-note-text {
+  color: var(--text-muted);
+  line-height: 1.65;
 }
 
 .lifeos-plan-card {
@@ -35125,11 +35478,77 @@ body.lifeos-theme-academic-ink .lifeos-root {
   --lifeos-knowledge-section-gap: 14px;
 }
 
+.lifeos-knowledge-main .lifeos-hero {
+  width: 100% !important;
+  max-width: none !important;
+  justify-self: stretch !important;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px) !important;
+  gap: 24px;
+  align-items: center;
+}
+
+.lifeos-knowledge-main .lifeos-hero-copy {
+  min-width: 0;
+}
+
+.lifeos-knowledge-main .lifeos-hero-side {
+  width: 100%;
+  min-width: 0;
+  justify-self: end;
+  align-items: stretch;
+}
+
+.lifeos-knowledge-main .lifeos-hero-actions {
+  width: 100%;
+  justify-content: flex-end;
+}
+
+@media (max-width: 1100px) {
+  .lifeos-knowledge-main .lifeos-hero {
+    grid-template-columns: 1fr !important;
+  }
+
+  .lifeos-knowledge-main .lifeos-hero-side,
+  .lifeos-knowledge-main .lifeos-hero-actions {
+    justify-content: flex-start;
+    align-items: flex-start;
+  }
+}
+
 .lifeos-knowledge-main .lifeos-knowledge-workspace {
   display: grid;
-  grid-template-columns: minmax(260px, 0.72fr) minmax(0, 1.28fr);
+  grid-template-columns: minmax(260px, 0.74fr) minmax(500px, 1.48fr) minmax(270px, 0.78fr);
   gap: 14px;
   align-items: start;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-overview {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-category-grid {
+  grid-column: 1;
+  grid-row: 2;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  align-content: start;
+  min-width: 0;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-library {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-side-stack {
+  grid-column: 3;
+  grid-row: 1 / span 3;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-recent-full {
+  grid-column: 1;
+  grid-row: 3;
 }
 
 .lifeos-knowledge-main :is(.lifeos-panel, .lifeos-feature-card) {
@@ -35141,9 +35560,56 @@ body.lifeos-theme-academic-ink .lifeos-root {
   margin-bottom: 0;
 }
 
+.lifeos-knowledge-main .lifeos-knowledge-category-grid .lifeos-knowledge-entry {
+  min-height: 0;
+}
+
 .lifeos-knowledge-main .lifeos-knowledge-entry {
   min-height: 122px;
   gap: 8px;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-category-meta {
+  display: grid;
+  grid-template-columns: minmax(88px, auto) minmax(0, 1fr);
+  gap: 8px;
+  align-items: stretch;
+  margin-top: 2px;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-category-stat,
+.lifeos-knowledge-main .lifeos-knowledge-category-recent {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--lifeos-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--lifeos-surface) 74%, transparent);
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-category-value {
+  color: var(--lifeos-text);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-category-recent span:last-child {
+  overflow: hidden;
+  color: var(--lifeos-text);
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-category-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 2px;
 }
 
 .lifeos-knowledge-main :is(.lifeos-knowledge-entry, .lifeos-knowledge-recent-full) > p {
@@ -35152,21 +35618,193 @@ body.lifeos-theme-academic-ink .lifeos-root {
 }
 
 .lifeos-knowledge-main .lifeos-knowledge-row {
-  grid-template-columns: minmax(160px, 0.72fr) minmax(180px, 0.72fr) minmax(0, 1.36fr);
+  grid-template-columns: minmax(160px, 0.68fr) minmax(180px, 0.62fr) minmax(0, 1.2fr) minmax(220px, auto);
   gap: 10px;
   padding: 11px 12px;
   border: 1px solid var(--lifeos-border);
   border-radius: 14px;
   background: var(--lifeos-surface-soft);
+  cursor: pointer;
 }
 
 .lifeos-knowledge-main .lifeos-knowledge-row .lifeos-knowledge-snippet {
   max-height: 3.2em;
 }
 
+.lifeos-knowledge-main .lifeos-knowledge-row-actions {
+  justify-self: end;
+}
+
 .lifeos-knowledge-main .lifeos-knowledge-recent-full {
-  max-height: min(52vh, 540px);
+  max-height: none;
   overflow: auto;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-workspace > .lifeos-knowledge-recent-full .lifeos-knowledge-row {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-workspace > .lifeos-knowledge-recent-full .lifeos-knowledge-row-actions {
+  justify-self: stretch;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-workspace > .lifeos-knowledge-recent-full .lifeos-knowledge-row-actions .lifeos-button {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-knowledge-main .lifeos-knowledge-workspace,
+.lifeos-root.lifeos-is-mobile-runtime .lifeos-knowledge-main .lifeos-knowledge-workspace {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-knowledge-main .lifeos-knowledge-workspace > *,
+.lifeos-root.lifeos-is-mobile-runtime .lifeos-knowledge-main .lifeos-knowledge-workspace > * {
+  grid-column: 1 !important;
+  grid-row: auto !important;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-side-stack {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-library-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 2px;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-import-panel > p {
+  margin: 8px 0 12px;
+  color: var(--lifeos-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-import-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-import-tile {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 70px;
+  padding: 10px;
+  border: 1px solid var(--lifeos-border);
+  border-radius: 14px;
+  color: var(--lifeos-text);
+  text-align: left;
+  background: color-mix(in srgb, var(--lifeos-surface) 78%, transparent);
+  cursor: pointer;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-import-tile strong {
+  display: block;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-import-tile span:not(.lifeos-status-icon) {
+  display: block;
+  margin-top: 3px;
+  color: var(--lifeos-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-map-list,
+.lifeos-knowledge-main .lifeos-knowledge-reuse-grid {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-map-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--lifeos-border);
+  border-radius: 13px;
+  color: var(--lifeos-text);
+  background: color-mix(in srgb, var(--lifeos-surface) 78%, transparent);
+  font-weight: 700;
+  text-align: left;
+}
+
+.lifeos-knowledge-import-modal .lifeos-knowledge-import-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.lifeos-knowledge-import-modal .lifeos-knowledge-import-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--lifeos-border);
+  border-radius: 16px;
+  background: var(--lifeos-surface-soft);
+}
+
+.lifeos-knowledge-import-modal .lifeos-knowledge-import-card.is-wide,
+.lifeos-knowledge-import-modal .lifeos-knowledge-capture-field.is-wide {
+  grid-column: 1 / -1;
+}
+
+.lifeos-knowledge-import-modal .lifeos-knowledge-import-card > p {
+  margin: 0;
+  color: var(--lifeos-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.lifeos-knowledge-import-modal .lifeos-knowledge-import-file-list {
+  display: grid;
+  gap: 8px;
+}
+
+.lifeos-knowledge-import-modal .lifeos-knowledge-import-file-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid var(--lifeos-border);
+  border-radius: 12px;
+  background: var(--lifeos-surface);
+}
+
+.lifeos-knowledge-import-modal .lifeos-knowledge-import-file-row > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-knowledge-capture-field.is-hidden {
+  display: none !important;
+}
+
+:is(.lifeos-theme-night-owl, .lifeos-theme-anime-moonlit, .lifeos-theme-midnight-terminal, .lifeos-theme-academic-ink).lifeos-root .lifeos-knowledge-main :is(.lifeos-knowledge-import-panel, .lifeos-knowledge-map-panel, .lifeos-knowledge-reuse-panel, .lifeos-knowledge-import-tile, .lifeos-knowledge-map-row),
+body:is(.lifeos-theme-night-owl, .lifeos-theme-anime-moonlit, .lifeos-theme-midnight-terminal, .lifeos-theme-academic-ink) .lifeos-root .lifeos-knowledge-main :is(.lifeos-knowledge-import-panel, .lifeos-knowledge-map-panel, .lifeos-knowledge-reuse-panel, .lifeos-knowledge-import-tile, .lifeos-knowledge-map-row) {
+  border-color: var(--lifeos-dark-workspace-border) !important;
+  color: var(--lifeos-dark-workspace-text) !important;
+  background: var(--lifeos-dark-workspace-panel) !important;
 }
 
 :is(.lifeos-theme-night-owl, .lifeos-theme-anime-moonlit, .lifeos-theme-midnight-terminal, .lifeos-theme-academic-ink).lifeos-root :is(
@@ -35433,6 +36071,11 @@ body:is(.lifeos-theme-night-owl, .lifeos-theme-anime-moonlit, .lifeos-theme-midn
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .lifeos-knowledge-main .lifeos-knowledge-workspace > * {
+    grid-column: 1 !important;
+    grid-row: auto !important;
+  }
+
   .lifeos-llmwiki-layout .lifeos-llmwiki-drafts,
   .lifeos-llmwiki-layout .lifeos-llmwiki-long-sources,
   .lifeos-knowledge-main .lifeos-knowledge-recent-full {
@@ -35442,7 +36085,9 @@ body:is(.lifeos-theme-night-owl, .lifeos-theme-anime-moonlit, .lifeos-theme-midn
 
 @media (max-width: 760px) {
   .lifeos-llmwiki-layout .lifeos-llmwiki-stats,
-  .lifeos-knowledge-main .lifeos-knowledge-entry-grid {
+  .lifeos-knowledge-main .lifeos-knowledge-entry-grid,
+  .lifeos-knowledge-main .lifeos-knowledge-import-grid,
+  .lifeos-knowledge-import-modal .lifeos-knowledge-import-form {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -36611,11 +37256,137 @@ body.lifeos-theme-anime-moonlit .lifeos-settings {
   background: color-mix(in srgb, var(--background-secondary) 72%, transparent 28%);
 }
 
+.lifeos-project-doc-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(100, 116, 139, 0.18);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--background-primary) 88%, #f3fbf9 12%);
+  color: var(--text-normal);
+  box-shadow: 0 16px 38px rgba(45, 58, 94, 0.08);
+}
+
+.lifeos-project-doc-head,
+.lifeos-project-doc-item,
+.lifeos-project-doc-group-title {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.lifeos-project-doc-head {
+  align-items: flex-start;
+}
+
+.lifeos-project-doc-head-copy {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 4px;
+  min-width: 0;
+}
+
+.lifeos-project-doc-head-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-left: auto;
+  min-width: max-content;
+}
+
+.lifeos-project-doc-head-actions .lifeos-button {
+  flex: 0 0 auto;
+}
+
+.lifeos-project-doc-head h2 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.lifeos-project-doc-head p,
+.lifeos-project-doc-group-title span,
+.lifeos-project-doc-body span,
+.lifeos-project-doc-excerpt {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.lifeos-project-doc-head p {
+  margin: 4px 0 0;
+}
+
+.lifeos-project-doc-group {
+  display: grid;
+  gap: 8px;
+}
+
+.lifeos-project-doc-item {
+  align-items: stretch;
+  padding: 10px;
+  border: 1px solid rgba(100, 116, 139, 0.16);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--background-secondary) 86%, transparent 14%);
+}
+
+.lifeos-project-doc-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.lifeos-project-doc-body strong,
+.lifeos-project-doc-body span,
+.lifeos-project-doc-excerpt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-project-doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.lifeos-project-doc-empty {
+  padding: 12px;
+  border: 1px dashed rgba(100, 116, 139, 0.22);
+  border-radius: 12px;
+  color: var(--text-muted);
+}
+
+.lifeos-chat-project-scope {
+  display: grid;
+  gap: 6px;
+  min-width: min(220px, 100%);
+}
+
+.lifeos-project-scope-select {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid rgba(100, 116, 139, 0.24);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--background-primary) 90%, transparent 10%);
+  color: var(--text-normal);
+}
+
 .theme-dark .lifeos-root :is(
   .lifeos-project-panel,
   .lifeos-project-task-panel,
   .lifeos-project-task-group,
-  .lifeos-project-task-empty
+  .lifeos-project-task-empty,
+  .lifeos-project-doc-panel,
+  .lifeos-project-doc-item,
+  .lifeos-project-doc-empty,
+  .lifeos-project-scope-select
 ) {
   border-color: var(--lifeos-dark-border) !important;
   background:
@@ -36680,4 +37451,3539 @@ body.is-mobile .lifeos-project-task-group-head {
 body.is-mobile .lifeos-project-task-group-head .lifeos-button {
   grid-column: 1 / -1;
   width: 100%;
+}
+
+.lifeos-root.lifeos-is-mobile-runtime .lifeos-project-doc-head,
+.lifeos-root.lifeos-is-narrow-pane .lifeos-project-doc-head,
+body.is-mobile .lifeos-project-doc-head,
+.lifeos-root.lifeos-is-mobile-runtime .lifeos-project-doc-item,
+.lifeos-root.lifeos-is-narrow-pane .lifeos-project-doc-item,
+body.is-mobile .lifeos-project-doc-item {
+  display: grid;
+}
+
+.lifeos-root.lifeos-is-mobile-runtime .lifeos-project-doc-actions,
+.lifeos-root.lifeos-is-narrow-pane .lifeos-project-doc-actions,
+body.is-mobile .lifeos-project-doc-actions {
+  justify-content: stretch;
+}
+
+.lifeos-root.lifeos-is-mobile-runtime .lifeos-project-doc-head-actions,
+.lifeos-root.lifeos-is-narrow-pane .lifeos-project-doc-head-actions,
+body.is-mobile .lifeos-project-doc-head-actions {
+  justify-content: stretch;
+  margin-left: 0;
+  min-width: 0;
+}
+
+.lifeos-root.lifeos-is-mobile-runtime .lifeos-project-doc-actions .lifeos-button,
+.lifeos-root.lifeos-is-narrow-pane .lifeos-project-doc-actions .lifeos-button,
+body.is-mobile .lifeos-project-doc-actions .lifeos-button {
+  width: 100%;
+}
+
+.lifeos-root.lifeos-is-mobile-runtime .lifeos-project-doc-head-actions .lifeos-button,
+.lifeos-root.lifeos-is-narrow-pane .lifeos-project-doc-head-actions .lifeos-button,
+body.is-mobile .lifeos-project-doc-head-actions .lifeos-button {
+  width: 100%;
+}
+
+.lifeos-knowledge-main .lifeos-hero-side,
+.lifeos-knowledge-main .lifeos-hero-actions,
+.lifeos-knowledge-main .lifeos-llmwiki-actions,
+.lifeos-knowledge-main .lifeos-knowledge-library-actions {
+  align-items: center;
+}
+
+.lifeos-knowledge-main .lifeos-hero-side {
+  justify-content: center;
+}
+
+.lifeos-knowledge-main .lifeos-hero-actions,
+.lifeos-knowledge-main .lifeos-llmwiki-actions,
+.lifeos-knowledge-main .lifeos-knowledge-library-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.lifeos-knowledge-main :is(.lifeos-hero-actions, .lifeos-llmwiki-actions, .lifeos-knowledge-library-actions) .lifeos-button {
+  min-height: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+/* Life OS blue white gradient theme start */
+.lifeos-theme-blue-white-gradient,
+.lifeos-theme-blue-white-gradient.lifeos-root,
+.lifeos-theme-blue-white-gradient.lifeos-settings,
+body.lifeos-theme-blue-white-gradient .lifeos-root,
+body.lifeos-theme-blue-white-gradient .lifeos-settings {
+  --lifeos-bg: #f8fbff;
+  --lifeos-bg-2: #eef6ff;
+  --lifeos-bg-3: #ffffff;
+  --lifeos-primary: #2563eb;
+  --lifeos-primary-hover: #1d4ed8;
+  --lifeos-primary-soft: rgba(37, 99, 235, 0.12);
+  --lifeos-primary-glow: rgba(37, 99, 235, 0.18);
+  --lifeos-accent: #38bdf8;
+  --lifeos-accent-soft: rgba(56, 189, 248, 0.14);
+  --lifeos-brand: #2563eb;
+  --lifeos-brand-soft: rgba(37, 99, 235, 0.12);
+  --lifeos-theme-canvas-1: #ffffff;
+  --lifeos-theme-canvas-2: #f4f9ff;
+  --lifeos-theme-canvas-3: #eaf3ff;
+  --lifeos-theme-orb-a: rgba(37, 99, 235, 0.18);
+  --lifeos-theme-orb-b: rgba(56, 189, 248, 0.16);
+  --lifeos-theme-orb-c: rgba(147, 197, 253, 0.24);
+  --lifeos-theme-orb-d: rgba(219, 234, 254, 0.32);
+  --lifeos-theme-surface: rgba(255, 255, 255, 0.88);
+  --lifeos-theme-surface-strong: rgba(255, 255, 255, 0.97);
+  --lifeos-theme-surface-soft: rgba(241, 248, 255, 0.82);
+  --lifeos-theme-hero-a: rgba(255, 255, 255, 0.94);
+  --lifeos-theme-hero-b: rgba(219, 234, 254, 0.76);
+  --lifeos-theme-border: rgba(96, 165, 250, 0.24);
+  --lifeos-theme-border-strong: rgba(37, 99, 235, 0.36);
+  --lifeos-theme-shadow: rgba(37, 99, 235, 0.12);
+  --lifeos-theme-active: rgba(219, 234, 254, 0.74);
+  --lifeos-theme-button: rgba(248, 251, 255, 0.96);
+  --lifeos-theme-input: rgba(255, 255, 255, 0.98);
+  --lifeos-text: #10213f;
+  --lifeos-muted: #5d708c;
+  --lifeos-muted-2: #8092ad;
+  --lifeos-glass-bg: rgba(255, 255, 255, 0.74);
+  --lifeos-glass-bg-strong: rgba(255, 255, 255, 0.92);
+  --lifeos-glass-bg-soft: rgba(240, 247, 255, 0.66);
+  --lifeos-glass-border: rgba(147, 197, 253, 0.28);
+  --lifeos-glass-border-strong: rgba(37, 99, 235, 0.32);
+  --lifeos-mesh-base-start: #ffffff;
+  --lifeos-mesh-base-mid: #f5faff;
+  --lifeos-mesh-base-end: #eaf4ff;
+  --lifeos-mesh-peach: rgba(255, 255, 255, 0.42);
+  --lifeos-mesh-gold: rgba(191, 219, 254, 0.2);
+  --lifeos-mesh-lilac: rgba(147, 197, 253, 0.2);
+  --lifeos-mesh-sky: rgba(56, 189, 248, 0.24);
+  --lifeos-mesh-mint: rgba(125, 211, 252, 0.16);
+  --lifeos-mesh-rose: rgba(219, 234, 254, 0.2);
+  --lifeos-settings-shell-bg: linear-gradient(180deg, #ffffff, #eef6ff);
+  --lifeos-settings-gallery-bg: #eaf4ff;
+  --lifeos-settings-row-bg: rgba(255, 255, 255, 0.82);
+  --lifeos-settings-card-bg: rgba(255, 255, 255, 0.88);
+  --lifeos-settings-tab-active: linear-gradient(135deg, #2563eb, #38bdf8);
+}
+
+.lifeos-theme-blue-white-gradient.lifeos-root,
+.lifeos-theme-blue-white-gradient .lifeos-root,
+body.lifeos-theme-blue-white-gradient .lifeos-root {
+  background:
+    linear-gradient(115deg, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.78) 28%, rgba(255, 255, 255, 0) 54%),
+    linear-gradient(155deg, rgba(219, 234, 254, 0) 0%, rgba(219, 234, 254, 0.5) 46%, rgba(186, 230, 253, 0.32) 100%),
+    linear-gradient(135deg, #ffffff 0%, #f7fbff 44%, #eaf4ff 100%) !important;
+  color: #10213f !important;
+}
+
+.lifeos-theme-blue-white-gradient .lifeos-shell,
+.lifeos-theme-blue-white-gradient .lifeos-main,
+.lifeos-theme-blue-white-gradient.lifeos-settings,
+body.lifeos-theme-blue-white-gradient .lifeos-shell,
+body.lifeos-theme-blue-white-gradient .lifeos-main,
+body.lifeos-theme-blue-white-gradient .lifeos-settings {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(240, 247, 255, 0.76)),
+    linear-gradient(180deg, #ffffff, #edf6ff) !important;
+  color: #10213f !important;
+}
+
+.lifeos-theme-blue-white-gradient :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero, .lifeos-card, .lifeos-panel, .lifeos-stat-card, .lifeos-contrib-card, .lifeos-chat-main, .lifeos-chat-log, .lifeos-chat-composer, .lifeos-memory-workspace-card, .lifeos-memory-side, .lifeos-empty-state),
+body.lifeos-theme-blue-white-gradient .lifeos-root :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero, .lifeos-card, .lifeos-panel, .lifeos-stat-card, .lifeos-contrib-card, .lifeos-chat-main, .lifeos-chat-log, .lifeos-chat-composer, .lifeos-memory-workspace-card, .lifeos-memory-side, .lifeos-empty-state),
+body.lifeos-theme-blue-white-gradient .lifeos-settings :is(.lifeos-settings-hero, .lifeos-settings-card, .lifeos-theme-gallery-panel, .lifeos-theme-preview-card) {
+  border-color: rgba(147, 197, 253, 0.28) !important;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(242, 248, 255, 0.76)) !important;
+  color: #10213f !important;
+  box-shadow: 0 18px 44px rgba(37, 99, 235, 0.1) !important;
+}
+
+.lifeos-theme-blue-white-gradient .lifeos-sidebar,
+.lifeos-theme-blue-white-gradient .lifeos-glass-sidebar,
+body.lifeos-theme-blue-white-gradient .lifeos-sidebar,
+body.lifeos-theme-blue-white-gradient .lifeos-glass-sidebar {
+  border-right-color: rgba(147, 197, 253, 0.28) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(239, 247, 255, 0.82)) !important;
+  box-shadow: 10px 0 34px rgba(37, 99, 235, 0.08) !important;
+}
+
+.lifeos-theme-blue-white-gradient :is(.lifeos-card-title, .lifeos-panel h2, .lifeos-page-header h1, .lifeos-hero h1, .lifeos-settings-hero h1, .lifeos-stat-value),
+body.lifeos-theme-blue-white-gradient .lifeos-root :is(.lifeos-card-title, .lifeos-panel h2, .lifeos-page-header h1, .lifeos-hero h1, .lifeos-settings-hero h1, .lifeos-stat-value) {
+  color: #10213f !important;
+}
+
+.lifeos-theme-blue-white-gradient :is(.lifeos-card p, .lifeos-panel p, .lifeos-page-header p, .lifeos-hero p, .lifeos-settings-hero p, .lifeos-muted, .lifeos-stat-label),
+body.lifeos-theme-blue-white-gradient .lifeos-root :is(.lifeos-card p, .lifeos-panel p, .lifeos-page-header p, .lifeos-hero p, .lifeos-settings-hero p, .lifeos-muted, .lifeos-stat-label) {
+  color: #5d708c !important;
+}
+
+.lifeos-theme-blue-white-gradient .lifeos-nav-item,
+body.lifeos-theme-blue-white-gradient .lifeos-nav-item {
+  color: #4f6382 !important;
+}
+
+.lifeos-theme-blue-white-gradient .lifeos-nav-item.is-active,
+body.lifeos-theme-blue-white-gradient .lifeos-nav-item.is-active {
+  border-color: rgba(96, 165, 250, 0.3) !important;
+  background: linear-gradient(135deg, rgba(219, 234, 254, 0.86), rgba(255, 255, 255, 0.82)) !important;
+  color: #0f3f8c !important;
+}
+
+.lifeos-theme-blue-white-gradient :is(.lifeos-button-primary, .lifeos-button.is-primary, .lifeos-btn-primary, .lifeos-chat-send),
+body.lifeos-theme-blue-white-gradient .lifeos-root :is(.lifeos-button-primary, .lifeos-button.is-primary, .lifeos-btn-primary, .lifeos-chat-send) {
+  border-color: rgba(37, 99, 235, 0.36) !important;
+  background: linear-gradient(135deg, #2563eb, #38bdf8) !important;
+  color: #ffffff !important;
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.2) !important;
+}
+
+.lifeos-theme-blue-white-gradient :is(.lifeos-button, .lifeos-btn, .lifeos-chip, .lifeos-provider-grid button, .lifeos-contrib-settings, .lifeos-input, .lifeos-select, .lifeos-glass-input, input[type="text"], input[type="password"], input[type="number"], textarea, select),
+body.lifeos-theme-blue-white-gradient .lifeos-root :is(.lifeos-button, .lifeos-btn, .lifeos-chip, .lifeos-provider-grid button, .lifeos-contrib-settings, .lifeos-input, .lifeos-select, .lifeos-glass-input, input[type="text"], input[type="password"], input[type="number"], textarea, select) {
+  border-color: rgba(147, 197, 253, 0.28) !important;
+  background: rgba(255, 255, 255, 0.88) !important;
+  color: #10213f !important;
+}
+
+.lifeos-theme-blue-white-gradient :is(.lifeos-button:hover, .lifeos-btn:hover, .lifeos-chip:hover, .lifeos-provider-grid button:hover, .lifeos-contrib-settings:hover),
+body.lifeos-theme-blue-white-gradient .lifeos-root :is(.lifeos-button:hover, .lifeos-btn:hover, .lifeos-chip:hover, .lifeos-provider-grid button:hover, .lifeos-contrib-settings:hover) {
+  border-color: rgba(37, 99, 235, 0.36) !important;
+  background: rgba(239, 247, 255, 0.96) !important;
+  color: #0f3f8c !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-context-mode-control .lifeos-chip.is-active,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-context-mode-control .lifeos-chip.is-active,
+body .lifeos-root.lifeos-chat-root .lifeos-chat-context-mode-control .lifeos-chip.is-active {
+  border-color: rgba(37, 99, 235, 0.72) !important;
+  background: linear-gradient(135deg, #2563eb 0%, #1f7aff 56%, #38bdf8 100%) !important;
+  color: #ffffff !important;
+  box-shadow:
+    0 8px 18px rgba(37, 99, 235, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+}
+
+.lifeos-theme-swatch.is-blue-white-gradient .lifeos-theme-swatch-preview,
+.lifeos-theme-preview-card.is-blue-white-gradient .lifeos-theme-preview-scene {
+  background:
+    linear-gradient(120deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.72) 34%, rgba(255, 255, 255, 0) 58%),
+    linear-gradient(155deg, rgba(219, 234, 254, 0) 0%, rgba(219, 234, 254, 0.68) 52%, rgba(125, 211, 252, 0.36) 100%),
+    linear-gradient(135deg, #ffffff 0%, #f7fbff 44%, #eaf4ff 100%) !important;
+}
+/* Life OS blue white gradient theme end */
+
+/* Life OS refractive glass theme start */
+.lifeos-theme-refractive-glass,
+.lifeos-theme-refractive-glass.lifeos-root,
+.lifeos-theme-refractive-glass.lifeos-settings,
+body.lifeos-theme-refractive-glass .lifeos-root,
+body.lifeos-theme-refractive-glass .lifeos-settings {
+  --lifeos-bg: #f7fcff;
+  --lifeos-bg-2: #eaf7ff;
+  --lifeos-bg-3: #ffffff;
+  --lifeos-primary: #2f7cff;
+  --lifeos-primary-hover: #1b63d9;
+  --lifeos-primary-soft: rgba(47, 124, 255, 0.14);
+  --lifeos-primary-glow: rgba(47, 124, 255, 0.22);
+  --lifeos-accent: #18c8ff;
+  --lifeos-accent-soft: rgba(24, 200, 255, 0.16);
+  --lifeos-accent-glow: rgba(24, 200, 255, 0.24);
+  --lifeos-brand: #2f7cff;
+  --lifeos-brand-soft: rgba(47, 124, 255, 0.12);
+  --lifeos-theme-canvas-1: #ffffff;
+  --lifeos-theme-canvas-2: #f1f9ff;
+  --lifeos-theme-canvas-3: #e4f3ff;
+  --lifeos-theme-orb-a: rgba(47, 124, 255, 0.2);
+  --lifeos-theme-orb-b: rgba(24, 200, 255, 0.18);
+  --lifeos-theme-orb-c: rgba(161, 118, 255, 0.12);
+  --lifeos-theme-orb-d: rgba(219, 251, 255, 0.42);
+  --lifeos-theme-surface: rgba(255, 255, 255, 0.66);
+  --lifeos-theme-surface-strong: rgba(255, 255, 255, 0.9);
+  --lifeos-theme-surface-soft: rgba(237, 248, 255, 0.68);
+  --lifeos-theme-hero-a: rgba(255, 255, 255, 0.88);
+  --lifeos-theme-hero-b: rgba(218, 242, 255, 0.62);
+  --lifeos-theme-border: rgba(128, 190, 255, 0.34);
+  --lifeos-theme-border-strong: rgba(47, 124, 255, 0.4);
+  --lifeos-theme-shadow: rgba(47, 124, 255, 0.14);
+  --lifeos-theme-active: rgba(232, 248, 255, 0.8);
+  --lifeos-theme-button: rgba(255, 255, 255, 0.82);
+  --lifeos-theme-input: rgba(255, 255, 255, 0.92);
+  --lifeos-text: #0d2440;
+  --lifeos-muted: #55708d;
+  --lifeos-muted-2: #7890aa;
+  --lifeos-glass-bg: rgba(255, 255, 255, 0.52);
+  --lifeos-glass-bg-strong: rgba(255, 255, 255, 0.78);
+  --lifeos-glass-bg-soft: rgba(232, 247, 255, 0.54);
+  --lifeos-glass-border: rgba(255, 255, 255, 0.72);
+  --lifeos-glass-border-strong: rgba(47, 124, 255, 0.36);
+  --lifeos-mesh-base-start: #ffffff;
+  --lifeos-mesh-base-mid: #f1faff;
+  --lifeos-mesh-base-end: #dff2ff;
+  --lifeos-mesh-peach: rgba(255, 255, 255, 0.4);
+  --lifeos-mesh-gold: rgba(229, 248, 255, 0.34);
+  --lifeos-mesh-lilac: rgba(170, 146, 255, 0.16);
+  --lifeos-mesh-sky: rgba(47, 124, 255, 0.28);
+  --lifeos-mesh-mint: rgba(24, 200, 255, 0.22);
+  --lifeos-mesh-rose: rgba(252, 231, 255, 0.2);
+  --lifeos-settings-shell-bg:
+    radial-gradient(circle at 18% 12%, rgba(24, 200, 255, 0.2), transparent 32%),
+    radial-gradient(circle at 86% 0%, rgba(47, 124, 255, 0.14), transparent 30%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(230, 246, 255, 0.7));
+  --lifeos-settings-shell-border: rgba(255, 255, 255, 0.7);
+  --lifeos-settings-shell-shadow:
+    0 28px 72px rgba(47, 124, 255, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.96);
+  --lifeos-settings-row-bg: linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(223, 246, 255, 0.42));
+  --lifeos-settings-row-border: rgba(139, 198, 255, 0.24);
+  --lifeos-settings-input-bg: rgba(255, 255, 255, 0.8);
+  --lifeos-settings-input-border: rgba(128, 190, 255, 0.32);
+  --lifeos-settings-tab-bg: rgba(255, 255, 255, 0.5);
+  --lifeos-settings-tab-active: linear-gradient(135deg, rgba(47, 124, 255, 0.96), rgba(24, 200, 255, 0.88));
+  --lifeos-settings-tab-active-border: rgba(255, 255, 255, 0.74);
+  --lifeos-settings-tab-active-shadow:
+    0 14px 32px rgba(47, 124, 255, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.68);
+  --lifeos-settings-chip-bg: rgba(255, 255, 255, 0.56);
+  --lifeos-settings-gallery-bg: linear-gradient(180deg, rgba(236, 249, 255, 0.66), rgba(214, 239, 255, 0.54));
+  --lifeos-settings-summary-bg: linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(229, 248, 255, 0.46));
+  --lifeos-settings-preview-card-bg: linear-gradient(145deg, rgba(255, 255, 255, 0.68), rgba(224, 246, 255, 0.44));
+  --lifeos-settings-preview-card-border: rgba(255, 255, 255, 0.7);
+  --lifeos-settings-preview-card-shadow:
+    0 16px 38px rgba(47, 124, 255, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  --lifeos-settings-preview-text: #0d2440;
+  --lifeos-settings-preview-muted: #55708d;
+  --lifeos-settings-preview-token-label: rgba(13, 36, 64, 0.68);
+}
+
+.lifeos-theme-refractive-glass.lifeos-root,
+.lifeos-theme-refractive-glass .lifeos-root,
+.lifeos-chat-view-host .lifeos-root.lifeos-theme-refractive-glass,
+.workspace-leaf-content .lifeos-root.lifeos-theme-refractive-glass,
+body.lifeos-theme-refractive-glass .lifeos-root {
+  position: relative;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 14% 14%, rgba(24, 200, 255, 0.22), transparent 24%),
+    radial-gradient(circle at 84% 8%, rgba(47, 124, 255, 0.18), transparent 28%),
+    radial-gradient(circle at 72% 86%, rgba(88, 230, 215, 0.16), transparent 28%),
+    linear-gradient(135deg, #ffffff 0%, #f7fcff 38%, #e5f5ff 100%) !important;
+  color: #0d2440 !important;
+}
+
+.lifeos-theme-refractive-glass .lifeos-main,
+.lifeos-theme-refractive-glass .lifeos-shell,
+.lifeos-theme-refractive-glass.lifeos-settings,
+body.lifeos-theme-refractive-glass .lifeos-main,
+body.lifeos-theme-refractive-glass .lifeos-shell,
+body.lifeos-theme-refractive-glass .lifeos-settings {
+  background:
+    linear-gradient(120deg, rgba(255, 255, 255, 0.84) 0%, rgba(255, 255, 255, 0.48) 36%, rgba(255, 255, 255, 0) 62%),
+    linear-gradient(180deg, rgba(248, 253, 255, 0.92), rgba(229, 246, 255, 0.74)) !important;
+  color: #0d2440 !important;
+}
+
+.lifeos-theme-refractive-glass :is(
+  .lifeos-hero,
+  .lifeos-page-header,
+  .lifeos-settings-hero,
+  .lifeos-card,
+  .lifeos-panel,
+  .lifeos-stat-card,
+  .lifeos-contrib-card,
+  .lifeos-chat-main,
+  .lifeos-chat-log,
+  .lifeos-chat-composer,
+  .lifeos-chat-welcome,
+  .lifeos-memory-workspace-card,
+  .lifeos-memory-side,
+  .lifeos-empty-state,
+  .lifeos-knowledge-entry,
+  .lifeos-knowledge-import-panel
+),
+body.lifeos-theme-refractive-glass .lifeos-root :is(
+  .lifeos-hero,
+  .lifeos-page-header,
+  .lifeos-settings-hero,
+  .lifeos-card,
+  .lifeos-panel,
+  .lifeos-stat-card,
+  .lifeos-contrib-card,
+  .lifeos-chat-main,
+  .lifeos-chat-log,
+  .lifeos-chat-composer,
+  .lifeos-chat-welcome,
+  .lifeos-memory-workspace-card,
+  .lifeos-memory-side,
+  .lifeos-empty-state,
+  .lifeos-knowledge-entry,
+  .lifeos-knowledge-import-panel
+),
+body.lifeos-theme-refractive-glass .lifeos-settings :is(.lifeos-settings-card, .lifeos-theme-gallery-panel, .lifeos-theme-preview-card) {
+  border-color: rgba(255, 255, 255, 0.72) !important;
+  background:
+    linear-gradient(148deg, rgba(255, 255, 255, 0.74), rgba(219, 244, 255, 0.38) 56%, rgba(255, 255, 255, 0.58)) !important;
+  box-shadow:
+    0 22px 54px rgba(47, 124, 255, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.94),
+    inset 0 -1px 0 rgba(24, 200, 255, 0.14),
+    inset 1px 0 0 rgba(255, 255, 255, 0.52) !important;
+  backdrop-filter: blur(26px) saturate(1.35) contrast(1.04) !important;
+  -webkit-backdrop-filter: blur(26px) saturate(1.35) contrast(1.04) !important;
+}
+
+.lifeos-theme-refractive-glass :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero),
+body.lifeos-theme-refractive-glass .lifeos-root :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero) {
+  overflow: hidden;
+  border-color: rgba(255, 255, 255, 0.78) !important;
+  background:
+    linear-gradient(112deg, rgba(255, 255, 255, 0.86) 0%, rgba(236, 250, 255, 0.48) 44%, rgba(191, 231, 255, 0.38) 100%) !important;
+}
+
+.lifeos-theme-refractive-glass :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero)::before,
+body.lifeos-theme-refractive-glass .lifeos-root :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(105deg, transparent 0 18%, rgba(255, 255, 255, 0.72) 24%, transparent 32%),
+    linear-gradient(290deg, transparent 0 62%, rgba(24, 200, 255, 0.18) 70%, transparent 82%);
+  opacity: 0.78;
+}
+
+.lifeos-theme-refractive-glass .lifeos-sidebar,
+.lifeos-theme-refractive-glass .lifeos-glass-sidebar,
+body.lifeos-theme-refractive-glass .lifeos-sidebar,
+body.lifeos-theme-refractive-glass .lifeos-glass-sidebar {
+  border-right-color: rgba(128, 190, 255, 0.24) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(235, 249, 255, 0.66)) !important;
+  box-shadow:
+    12px 0 40px rgba(47, 124, 255, 0.08),
+    inset -1px 0 0 rgba(255, 255, 255, 0.78) !important;
+  backdrop-filter: blur(24px) saturate(1.24) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(1.24) !important;
+}
+
+.lifeos-theme-refractive-glass :is(.lifeos-card-title, .lifeos-panel h2, .lifeos-page-header h1, .lifeos-hero h1, .lifeos-settings-hero h1, .lifeos-stat-value, .lifeos-empty-title),
+body.lifeos-theme-refractive-glass .lifeos-root :is(.lifeos-card-title, .lifeos-panel h2, .lifeos-page-header h1, .lifeos-hero h1, .lifeos-settings-hero h1, .lifeos-stat-value, .lifeos-empty-title) {
+  color: #0d2440 !important;
+}
+
+.lifeos-theme-refractive-glass :is(.lifeos-card p, .lifeos-panel p, .lifeos-page-header p, .lifeos-hero p, .lifeos-settings-hero p, .lifeos-muted, .lifeos-stat-label, .lifeos-empty-desc),
+body.lifeos-theme-refractive-glass .lifeos-root :is(.lifeos-card p, .lifeos-panel p, .lifeos-page-header p, .lifeos-hero p, .lifeos-settings-hero p, .lifeos-muted, .lifeos-stat-label, .lifeos-empty-desc) {
+  color: #55708d !important;
+}
+
+.lifeos-theme-refractive-glass .lifeos-nav-item,
+body.lifeos-theme-refractive-glass .lifeos-nav-item {
+  border-color: rgba(128, 190, 255, 0.12) !important;
+  color: #456583 !important;
+}
+
+.lifeos-theme-refractive-glass .lifeos-nav-item:hover,
+body.lifeos-theme-refractive-glass .lifeos-nav-item:hover,
+.lifeos-theme-refractive-glass .lifeos-nav-item.is-active,
+body.lifeos-theme-refractive-glass .lifeos-nav-item.is-active {
+  border-color: rgba(255, 255, 255, 0.78) !important;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(211, 241, 255, 0.56)) !important;
+  color: #0a4aa3 !important;
+  box-shadow:
+    0 14px 28px rgba(47, 124, 255, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92) !important;
+}
+
+.lifeos-theme-refractive-glass :is(.lifeos-button-primary, .lifeos-button.is-primary, .lifeos-btn-primary, .lifeos-chat-send),
+body.lifeos-theme-refractive-glass .lifeos-root :is(.lifeos-button-primary, .lifeos-button.is-primary, .lifeos-btn-primary, .lifeos-chat-send) {
+  border-color: rgba(255, 255, 255, 0.7) !important;
+  background:
+    linear-gradient(135deg, #2f7cff 0%, #1c9dff 52%, #18c8ff 100%) !important;
+  color: #ffffff !important;
+  box-shadow:
+    0 16px 34px rgba(47, 124, 255, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.42) !important;
+}
+
+.lifeos-theme-refractive-glass :is(.lifeos-button, .lifeos-btn, .lifeos-chip, .lifeos-provider-grid button, .lifeos-contrib-settings, .lifeos-input, .lifeos-select, .lifeos-glass-input, input[type="text"], input[type="password"], input[type="number"], textarea, select),
+body.lifeos-theme-refractive-glass .lifeos-root :is(.lifeos-button, .lifeos-btn, .lifeos-chip, .lifeos-provider-grid button, .lifeos-contrib-settings, .lifeos-input, .lifeos-select, .lifeos-glass-input, input[type="text"], input[type="password"], input[type="number"], textarea, select) {
+  border-color: rgba(128, 190, 255, 0.28) !important;
+  background: rgba(255, 255, 255, 0.76) !important;
+  color: #0d2440 !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82) !important;
+  backdrop-filter: blur(18px) saturate(1.18) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(1.18) !important;
+}
+
+.lifeos-theme-refractive-glass :is(.lifeos-button:hover, .lifeos-btn:hover, .lifeos-chip:hover, .lifeos-provider-grid button:hover, .lifeos-contrib-settings:hover),
+body.lifeos-theme-refractive-glass .lifeos-root :is(.lifeos-button:hover, .lifeos-btn:hover, .lifeos-chip:hover, .lifeos-provider-grid button:hover, .lifeos-contrib-settings:hover) {
+  border-color: rgba(47, 124, 255, 0.38) !important;
+  background: rgba(241, 250, 255, 0.9) !important;
+  color: #0a4aa3 !important;
+  box-shadow:
+    0 10px 22px rgba(47, 124, 255, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+}
+
+.lifeos-theme-refractive-glass :is(.lifeos-stat-icon, .lifeos-status-icon, .lifeos-brand-icon, .lifeos-hero-icon, .lifeos-modal-icon),
+body.lifeos-theme-refractive-glass .lifeos-root :is(.lifeos-stat-icon, .lifeos-status-icon, .lifeos-brand-icon, .lifeos-hero-icon, .lifeos-modal-icon) {
+  border-color: rgba(255, 255, 255, 0.72) !important;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(213, 244, 255, 0.56)) !important;
+  color: #1c78ff !important;
+  box-shadow:
+    0 12px 28px rgba(47, 124, 255, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92) !important;
+}
+
+.lifeos-theme-refractive-glass .lifeos-chat-bubble-user,
+body.lifeos-theme-refractive-glass .lifeos-root .lifeos-chat-bubble-user {
+  background:
+    linear-gradient(135deg, #2f7cff, #18c8ff) !important;
+  color: #ffffff !important;
+  box-shadow:
+    0 16px 34px rgba(47, 124, 255, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.36) !important;
+}
+
+.lifeos-theme-refractive-glass .lifeos-chat-bubble-ai,
+body.lifeos-theme-refractive-glass .lifeos-root .lifeos-chat-bubble-ai {
+  border-color: rgba(255, 255, 255, 0.72) !important;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.8), rgba(229, 247, 255, 0.52)) !important;
+  color: #0d2440 !important;
+}
+
+.modal.mod-settings:has(.lifeos-settings.lifeos-theme-refractive-glass) .vertical-tab-header,
+body.lifeos-theme-refractive-glass .modal.mod-settings:has(.lifeos-settings) .vertical-tab-header {
+  background:
+    radial-gradient(circle at 18% 10%, rgba(24, 200, 255, 0.2), transparent 30%),
+    linear-gradient(180deg, rgba(246, 253, 255, 0.82), rgba(220, 240, 255, 0.68)) !important;
+  border-right-color: rgba(128, 190, 255, 0.24) !important;
+  backdrop-filter: blur(26px) saturate(1.3) !important;
+  -webkit-backdrop-filter: blur(26px) saturate(1.3) !important;
+}
+
+.modal.mod-settings:has(.lifeos-settings.lifeos-theme-refractive-glass) .vertical-tab-nav-item:hover,
+.modal.mod-settings:has(.lifeos-settings.lifeos-theme-refractive-glass) .vertical-tab-nav-item.is-active,
+body.lifeos-theme-refractive-glass .modal.mod-settings:has(.lifeos-settings) .vertical-tab-nav-item:hover,
+body.lifeos-theme-refractive-glass .modal.mod-settings:has(.lifeos-settings) .vertical-tab-nav-item.is-active {
+  background: rgba(255, 255, 255, 0.74) !important;
+  color: #0a4aa3 !important;
+  box-shadow:
+    0 12px 26px rgba(47, 124, 255, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+}
+
+.lifeos-theme-swatch.is-refractive-glass .lifeos-theme-swatch-preview,
+.lifeos-theme-preview-card.is-refractive-glass .lifeos-theme-preview-scene {
+  background:
+    linear-gradient(116deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.64) 28%, rgba(255, 255, 255, 0) 48%),
+    radial-gradient(circle at 18% 18%, rgba(24, 200, 255, 0.5), transparent 30%),
+    radial-gradient(circle at 86% 18%, rgba(47, 124, 255, 0.44), transparent 34%),
+    radial-gradient(circle at 74% 82%, rgba(170, 146, 255, 0.26), transparent 32%),
+    linear-gradient(135deg, #ffffff 0%, #f3fbff 46%, #dff2ff 100%) !important;
+}
+
+.lifeos-theme-swatch.is-refractive-glass .lifeos-theme-swatch-preview::after,
+.lifeos-theme-preview-card.is-refractive-glass .lifeos-theme-preview-scene::after {
+  background:
+    linear-gradient(102deg, transparent 0 24%, rgba(255, 255, 255, 0.76) 31%, transparent 42%),
+    linear-gradient(282deg, transparent 0 58%, rgba(24, 200, 255, 0.22) 70%, transparent 82%) !important;
+}
+/* Life OS refractive glass theme end */
+
+/* Life OS review stat grid alignment final guard start */
+.lifeos-review-stat-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 18px !important;
+  width: 100% !important;
+  align-items: stretch !important;
+  justify-items: stretch !important;
+}
+
+.lifeos-review-stat-grid .lifeos-stat-card {
+  width: 100% !important;
+  min-width: 0 !important;
+  justify-self: stretch !important;
+}
+
+@media (max-width: 1100px) {
+  .lifeos-review-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 680px) {
+  .lifeos-review-stat-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+body.is-mobile .lifeos-review-stat-grid,
+.lifeos-root.lifeos-is-mobile-runtime .lifeos-review-stat-grid,
+.lifeos-root.lifeos-is-narrow-pane .lifeos-review-stat-grid {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+/* Life OS review stat grid alignment final guard end */
+
+/* Life OS mobile completion layer start */
+body.is-mobile .lifeos-root,
+.lifeos-root.lifeos-is-mobile-runtime,
+.lifeos-root.lifeos-is-phone-runtime,
+.lifeos-root.lifeos-is-narrow-pane {
+  --lifeos-mobile-page-padding: clamp(10px, 3.2vw, 14px);
+  --lifeos-mobile-safe-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+  scrollbar-gutter: stable;
+}
+
+@media (max-width: 680px), (pointer: coarse) and (max-width: 860px) {
+  body.is-mobile .lifeos-root,
+  .lifeos-root.lifeos-is-mobile-runtime,
+  .lifeos-root.lifeos-is-phone-runtime,
+  .lifeos-root.lifeos-is-narrow-pane {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+  }
+
+  body.is-mobile .lifeos-root .lifeos-main,
+  .lifeos-root.lifeos-is-mobile-runtime .lifeos-main,
+  .lifeos-root.lifeos-is-phone-runtime .lifeos-main,
+  .lifeos-root.lifeos-is-narrow-pane .lifeos-main {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    padding-inline: var(--lifeos-mobile-page-padding) !important;
+    padding-bottom: var(--lifeos-mobile-safe-bottom) !important;
+    overflow-x: hidden !important;
+  }
+
+  :is(
+    body.is-mobile .lifeos-root,
+    .lifeos-root.lifeos-is-mobile-runtime,
+    .lifeos-root.lifeos-is-phone-runtime,
+    .lifeos-root.lifeos-is-narrow-pane
+  ) :is(
+    .lifeos-hero,
+    .lifeos-page-header,
+    .lifeos-settings-hero,
+    .lifeos-chat-top,
+    .lifeos-chat-main,
+    .lifeos-chat-log,
+    .lifeos-chat-composer,
+    .lifeos-card,
+    .lifeos-panel,
+    .lifeos-stat-card,
+    .lifeos-knowledge-overview,
+    .lifeos-knowledge-library,
+    .lifeos-knowledge-import-panel,
+    .lifeos-knowledge-map-panel,
+    .lifeos-knowledge-reuse-panel,
+    .lifeos-project-doc-panel,
+    .lifeos-project-task-panel,
+    .lifeos-review-focus-grid,
+    .lifeos-memory-workspace-card,
+    .lifeos-memory-side
+  ) {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .lifeos-knowledge-main .lifeos-knowledge-workspace,
+  .lifeos-knowledge-main .lifeos-knowledge-pipeline-flow,
+  .lifeos-knowledge-main .lifeos-knowledge-entry-grid,
+  .lifeos-knowledge-main .lifeos-knowledge-category-grid,
+  .lifeos-knowledge-main .lifeos-knowledge-import-grid,
+  .lifeos-knowledge-main .lifeos-knowledge-reuse-grid,
+  .lifeos-knowledge-main .lifeos-knowledge-library-grid,
+  :is(
+    body.is-mobile .lifeos-root,
+    .lifeos-root.lifeos-is-mobile-runtime,
+    .lifeos-root.lifeos-is-phone-runtime,
+    .lifeos-root.lifeos-is-narrow-pane
+  ) :is(
+    .lifeos-dashboard-grid,
+    .lifeos-dashboard-center,
+    .lifeos-dashboard-right,
+    .lifeos-daily-layout,
+    .lifeos-daily-grid,
+    .lifeos-llmwiki-layout,
+    .lifeos-llmwiki-stats,
+    .lifeos-memory-layout,
+    .lifeos-review-grid,
+    .lifeos-checkin-page-grid,
+    .lifeos-task-board,
+    .lifeos-board,
+    .lifeos-project-task-layout
+  ) {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 12px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  :is(
+    body.is-mobile .lifeos-root,
+    .lifeos-root.lifeos-is-mobile-runtime,
+    .lifeos-root.lifeos-is-phone-runtime,
+    .lifeos-root.lifeos-is-narrow-pane
+  ) :is(
+    .lifeos-stat-grid,
+    .lifeos-task-summary-grid,
+    .lifeos-status-grid,
+    .lifeos-knowledge-overview-stats,
+    .lifeos-contrib-stat-grid,
+    .lifeos-review-stat-grid
+  ) {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  :is(
+    body.is-mobile .lifeos-root,
+    .lifeos-root.lifeos-is-mobile-runtime,
+    .lifeos-root.lifeos-is-phone-runtime,
+    .lifeos-root.lifeos-is-narrow-pane
+  ) :is(
+    .lifeos-knowledge-pipeline-section,
+    .lifeos-knowledge-pipeline-items,
+    .lifeos-knowledge-pipeline-item,
+    .lifeos-knowledge-library-item,
+    .lifeos-knowledge-row,
+    .lifeos-llmwiki-review-row,
+    .lifeos-project-doc-item,
+    .lifeos-project-doc-group
+  ) {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 10px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  :is(
+    body.is-mobile .lifeos-root,
+    .lifeos-root.lifeos-is-mobile-runtime,
+    .lifeos-root.lifeos-is-phone-runtime,
+    .lifeos-root.lifeos-is-narrow-pane
+  ) :is(
+    .lifeos-hero-actions,
+    .lifeos-page-actions,
+    .lifeos-card-actions,
+    .lifeos-llmwiki-actions,
+    .lifeos-knowledge-library-actions,
+    .lifeos-knowledge-section-actions,
+    .lifeos-project-doc-head-actions,
+    .lifeos-project-doc-actions,
+    .lifeos-chat-top-actions,
+    .lifeos-chat-primary-controls,
+    .lifeos-chat-toggle-row,
+    .lifeos-chat-advanced-controls,
+    .lifeos-settings-actions
+  ) {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    justify-content: stretch !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  :is(
+    body.is-mobile .lifeos-root,
+    .lifeos-root.lifeos-is-mobile-runtime,
+    .lifeos-root.lifeos-is-phone-runtime,
+    .lifeos-root.lifeos-is-narrow-pane
+  ) :is(
+    .lifeos-hero-actions,
+    .lifeos-page-actions,
+    .lifeos-card-actions,
+    .lifeos-llmwiki-actions,
+    .lifeos-knowledge-library-actions,
+    .lifeos-knowledge-section-actions,
+    .lifeos-project-doc-head-actions,
+    .lifeos-project-doc-actions,
+    .lifeos-chat-top-actions,
+    .lifeos-chat-primary-controls,
+    .lifeos-chat-toggle-row,
+    .lifeos-chat-advanced-controls,
+    .lifeos-settings-actions
+  ) > :is(button, .lifeos-button, .lifeos-btn, .lifeos-chip, select, input) {
+    flex: 1 1 min(100%, 148px) !important;
+    min-width: 0 !important;
+    min-height: 44px !important;
+  }
+
+  :is(
+    body.is-mobile .lifeos-root,
+    .lifeos-root.lifeos-is-mobile-runtime,
+    .lifeos-root.lifeos-is-phone-runtime,
+    .lifeos-root.lifeos-is-narrow-pane
+  ) :is(
+    button,
+    .lifeos-button,
+    .lifeos-btn,
+    .lifeos-chip,
+    .lifeos-action-tile,
+    input:not([type="checkbox"]),
+    select,
+    textarea
+  ) {
+    min-height: 44px !important;
+    touch-action: manipulation;
+  }
+
+  :is(
+    body.is-mobile .lifeos-root,
+    .lifeos-root.lifeos-is-mobile-runtime,
+    .lifeos-root.lifeos-is-phone-runtime,
+    .lifeos-root.lifeos-is-narrow-pane
+  ) :is(
+    .lifeos-chat-context-mode-control,
+    .lifeos-chat-reasoning-effort-control,
+    .lifeos-chat-project-scope,
+    .lifeos-chat-provider-switch
+  ) {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    justify-self: stretch !important;
+  }
+
+  :is(
+    body.is-mobile .lifeos-root,
+    .lifeos-root.lifeos-is-mobile-runtime,
+    .lifeos-root.lifeos-is-phone-runtime,
+    .lifeos-root.lifeos-is-narrow-pane
+  ) .lifeos-chat-project-scope {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 6px !important;
+  }
+
+  :is(
+    body.is-mobile .lifeos-root,
+    .lifeos-root.lifeos-is-mobile-runtime,
+    .lifeos-root.lifeos-is-phone-runtime,
+    .lifeos-root.lifeos-is-narrow-pane
+  ) :is(.lifeos-project-scope-select, .lifeos-chat-provider-list, .lifeos-chat-provider-button) {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  :is(
+    body.is-mobile .lifeos-root,
+    .lifeos-root.lifeos-is-mobile-runtime,
+    .lifeos-root.lifeos-is-phone-runtime,
+    .lifeos-root.lifeos-is-narrow-pane
+  ) .lifeos-chat-provider-list {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    justify-content: stretch !important;
+  }
+
+  :is(
+    body.is-mobile .lifeos-root,
+    .lifeos-root.lifeos-is-mobile-runtime,
+    .lifeos-root.lifeos-is-phone-runtime,
+    .lifeos-root.lifeos-is-narrow-pane
+  ) .lifeos-chat-composer {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  :is(
+    body.is-mobile .lifeos-root,
+    .lifeos-root.lifeos-is-mobile-runtime,
+    .lifeos-root.lifeos-is-phone-runtime,
+    .lifeos-root.lifeos-is-narrow-pane
+  ) .lifeos-chat-composer-actions {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+
+  :is(
+    body.is-mobile .lifeos-root,
+    .lifeos-root.lifeos-is-mobile-runtime,
+    .lifeos-root.lifeos-is-phone-runtime,
+    .lifeos-root.lifeos-is-narrow-pane
+  ) :is(.lifeos-chat-composer textarea, .lifeos-chat-composer button) {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  :is(
+    body.is-mobile .lifeos-root,
+    .lifeos-root.lifeos-is-mobile-runtime,
+    .lifeos-root.lifeos-is-phone-runtime,
+    .lifeos-root.lifeos-is-narrow-pane
+  ) :is(
+    .lifeos-chat-log,
+    .lifeos-skill-picker,
+    .lifeos-knowledge-library,
+    .lifeos-knowledge-pipeline-items,
+    .lifeos-llmwiki-drafts,
+    .lifeos-llmwiki-long-sources,
+    .lifeos-board,
+    .lifeos-memory-list
+  ) {
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: stable;
+  }
+
+  :is(
+    body.is-mobile .lifeos-root,
+    .lifeos-root.lifeos-is-mobile-runtime,
+    .lifeos-root.lifeos-is-phone-runtime,
+    .lifeos-root.lifeos-is-narrow-pane
+  ) :is(
+    .lifeos-knowledge-snippet,
+    .lifeos-project-doc-excerpt,
+    .lifeos-project-doc-body strong,
+    .lifeos-project-doc-body span,
+    .lifeos-board-card-title,
+    .lifeos-chat-bubble,
+    .lifeos-chat-bubble-content,
+    .lifeos-llmwiki-reference,
+    .lifeos-history-title,
+    .lifeos-history-subtitle,
+    .lifeos-provider-current
+  ) {
+    max-width: 100% !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-word;
+    white-space: normal !important;
+  }
+
+  :is(
+    body.is-mobile .lifeos-root,
+    .lifeos-root.lifeos-is-mobile-runtime,
+    .lifeos-root.lifeos-is-phone-runtime,
+    .lifeos-root.lifeos-is-narrow-pane
+  ) :is(pre, code, table, .markdown-rendered table) {
+    max-width: 100% !important;
+    overflow-x: auto !important;
+  }
+
+  body.is-mobile .modal.lifeos-modal-host,
+  body.is-mobile .modal.lifeos-knowledge-import-modal-host,
+  body.is-mobile .modal.lifeos-project-document-modal-host {
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px) !important;
+    max-height: calc(100svh - 16px) !important;
+    margin: 8px !important;
+  }
+
+  body.is-mobile .lifeos-knowledge-import-modal .lifeos-knowledge-import-form,
+  body.is-mobile .lifeos-project-document-form,
+  .lifeos-root.lifeos-is-mobile-runtime .lifeos-knowledge-import-modal .lifeos-knowledge-import-form,
+  .lifeos-root.lifeos-is-narrow-pane .lifeos-knowledge-import-modal .lifeos-knowledge-import-form {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  body.is-mobile .lifeos-knowledge-import-modal .lifeos-knowledge-import-card,
+  body.is-mobile .lifeos-knowledge-import-modal .lifeos-knowledge-import-file-row,
+  body.is-mobile .lifeos-project-document-modal,
+  body.is-mobile .lifeos-project-document-form {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  body.is-mobile .lifeos-knowledge-import-modal .lifeos-knowledge-import-file-row {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 6px !important;
+  }
+
+  body.is-mobile .lifeos-settings,
+  .lifeos-settings.lifeos-is-mobile-runtime,
+  .lifeos-settings.lifeos-is-phone-runtime,
+  .lifeos-settings.lifeos-is-narrow-pane,
+  .modal.mod-settings:has(.lifeos-settings) .lifeos-settings {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+  }
+
+  body.is-mobile .lifeos-settings :is(
+    .lifeos-settings-grid,
+    .lifeos-settings-theme-card,
+    .lifeos-settings-skill-details,
+    .lifeos-settings-skill-list,
+    .lifeos-settings-skill-category,
+    .lifeos-theme-preview-grid,
+    .lifeos-theme-gallery-panel
+  ),
+  .lifeos-settings.lifeos-is-mobile-runtime :is(
+    .lifeos-settings-grid,
+    .lifeos-settings-theme-card,
+    .lifeos-settings-skill-details,
+    .lifeos-settings-skill-list,
+    .lifeos-settings-skill-category,
+    .lifeos-theme-preview-grid,
+    .lifeos-theme-gallery-panel
+  ),
+  .lifeos-settings.lifeos-is-narrow-pane :is(
+    .lifeos-settings-grid,
+    .lifeos-settings-theme-card,
+    .lifeos-settings-skill-details,
+    .lifeos-settings-skill-list,
+    .lifeos-settings-skill-category,
+    .lifeos-theme-preview-grid,
+    .lifeos-theme-gallery-panel
+  ) {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+}
+
+@media (max-width: 420px) {
+  :is(
+    body.is-mobile .lifeos-root,
+    .lifeos-root.lifeos-is-mobile-runtime,
+    .lifeos-root.lifeos-is-phone-runtime,
+    .lifeos-root.lifeos-is-narrow-pane
+  ) :is(
+    .lifeos-stat-grid,
+    .lifeos-task-summary-grid,
+    .lifeos-status-grid,
+    .lifeos-knowledge-overview-stats,
+    .lifeos-contrib-stat-grid,
+    .lifeos-review-stat-grid
+  ) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+/* Life OS mobile completion layer end */
+
+/* Life OS chat narrow first-viewport guard start */
+@media (max-width: 760px), (pointer: coarse) and (max-width: 900px) {
+  .lifeos-chat-view-host .lifeos-main.lifeos-chat-main-host,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-main.lifeos-chat-main-host,
+  .lifeos-root.lifeos-chat-root .lifeos-main.lifeos-chat-main-host {
+    padding-block: 8px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-main,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-main,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-main {
+    gap: 8px !important;
+    min-height: 0 !important;
+    padding: 10px !important;
+    overflow: hidden !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-top,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-top,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-top {
+    gap: 6px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-top-copy h1,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-top-copy h1,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-top-copy h1 {
+    margin: 0 0 2px !important;
+    font-size: clamp(20px, 6vw, 28px) !important;
+    line-height: 1.1 !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-top-copy p,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-top-copy p,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-top-copy p {
+    margin: 0 !important;
+    font-size: 12px !important;
+    line-height: 1.35 !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-controls,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-controls,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-controls {
+    gap: 6px !important;
+    max-height: 132px !important;
+    padding: 8px !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-quick,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-quick,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-quick {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    gap: 6px !important;
+    height: 38px !important;
+    min-height: 38px !important;
+    max-height: 38px !important;
+    padding: 0 !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-quick button,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-quick button,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-quick button {
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-height: 36px !important;
+    padding: 6px 10px !important;
+    white-space: nowrap !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) minmax(88px, auto) !important;
+    gap: 6px !important;
+    max-height: 166px !important;
+    padding: 8px !important;
+    overflow: hidden !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-attachment-bar,
+  .lifeos-chat-view-host .lifeos-chat-attachment-list,
+  .lifeos-chat-view-host .lifeos-chat-composer textarea,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-attachment-bar,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-attachment-list,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer textarea,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-attachment-bar,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-attachment-list,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer textarea {
+    grid-column: 1 / -1 !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-attachment-hint,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-attachment-hint,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-attachment-hint {
+    display: none !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer textarea,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer textarea,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer textarea {
+    height: 48px !important;
+    min-height: 48px !important;
+    max-height: 58px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer > button:not(.lifeos-chat-upload-button),
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer > button:not(.lifeos-chat-upload-button),
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer > button:not(.lifeos-chat-upload-button) {
+    width: 100% !important;
+    min-height: 38px !important;
+    padding: 6px 10px !important;
+  }
+}
+
+/* Life OS AI assistant interaction polish start */
+.lifeos-chat-view-host .lifeos-chat-bubble,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-bubble,
+.lifeos-root.lifeos-chat-root .lifeos-chat-bubble {
+  position: relative;
+}
+
+.lifeos-chat-view-host .lifeos-chat-bubble-header,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-bubble-header,
+.lifeos-root.lifeos-chat-root .lifeos-chat-bubble-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  margin-bottom: 4px;
+}
+
+.lifeos-chat-view-host .lifeos-chat-bubble-header .lifeos-chat-bubble-label,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-bubble-header .lifeos-chat-bubble-label,
+.lifeos-root.lifeos-chat-root .lifeos-chat-bubble-header .lifeos-chat-bubble-label {
+  margin-bottom: 0;
+}
+
+.lifeos-chat-view-host .lifeos-chat-copy-button,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-copy-button,
+.lifeos-root.lifeos-chat-root .lifeos-chat-copy-button {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--lifeos-primary, #2563eb) 16%, transparent);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.74);
+  color: color-mix(in srgb, var(--lifeos-text, #10213f) 74%, var(--lifeos-primary, #2563eb));
+  font-size: 11px;
+  line-height: 1.2;
+  opacity: 0;
+  transform: translateY(-1px);
+  transition: opacity 140ms ease, border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.lifeos-chat-view-host .lifeos-chat-bubble:hover .lifeos-chat-copy-button,
+.lifeos-chat-view-host .lifeos-chat-copy-button:focus-visible,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-bubble:hover .lifeos-chat-copy-button,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-copy-button:focus-visible,
+.lifeos-root.lifeos-chat-root .lifeos-chat-bubble:hover .lifeos-chat-copy-button,
+.lifeos-root.lifeos-chat-root .lifeos-chat-copy-button:focus-visible {
+  opacity: 1;
+}
+
+.lifeos-chat-view-host .lifeos-chat-copy-button:hover,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-copy-button:hover,
+.lifeos-root.lifeos-chat-root .lifeos-chat-copy-button:hover {
+  border-color: color-mix(in srgb, var(--lifeos-primary, #2563eb) 34%, transparent);
+  background: color-mix(in srgb, var(--lifeos-primary, #2563eb) 10%, white);
+  color: var(--lifeos-primary, #2563eb);
+}
+
+.lifeos-chat-view-host .lifeos-chat-bubble-user .lifeos-chat-copy-button,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-bubble-user .lifeos-chat-copy-button,
+.lifeos-root.lifeos-chat-root .lifeos-chat-bubble-user .lifeos-chat-copy-button {
+  border-color: rgba(255, 255, 255, 0.34);
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer textarea,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer textarea,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer textarea {
+  resize: vertical !important;
+  max-height: min(42svh, 360px) !important;
+  overflow-y: auto !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-attachment-bar,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-attachment-bar,
+.lifeos-root.lifeos-chat-root .lifeos-chat-attachment-bar {
+  align-items: flex-start !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-attachment-hint,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-attachment-hint,
+.lifeos-root.lifeos-chat-root .lifeos-chat-attachment-hint {
+  flex: 1 1 360px;
+  min-width: min(100%, 240px);
+  white-space: normal;
+}
+
+.lifeos-chat-view-host .lifeos-chat-attachment-list,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-attachment-list,
+.lifeos-root.lifeos-chat-root .lifeos-chat-attachment-list {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  gap: 8px !important;
+  align-items: stretch;
+  margin-top: 0;
+}
+
+.lifeos-chat-view-host .lifeos-chat-attachment-chip,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-attachment-chip,
+.lifeos-root.lifeos-chat-root .lifeos-chat-attachment-chip {
+  width: 100%;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.lifeos-chat-view-host .lifeos-chat-attachment-chip-label,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-attachment-chip-label,
+.lifeos-root.lifeos-chat-root .lifeos-chat-attachment-chip-label {
+  flex: 1 1 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-chat-view-host .lifeos-chat-attachment-warning,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-attachment-warning,
+.lifeos-root.lifeos-chat-root .lifeos-chat-attachment-warning {
+  flex: 1 1 100%;
+}
+
+.lifeos-chat-view-host :is(.lifeos-chip.is-active, .lifeos-skill-chip.is-active, .lifeos-chat-provider-button.is-active),
+.workspace-leaf-content[data-type="personal-life-system-chat"] :is(.lifeos-chip.is-active, .lifeos-skill-chip.is-active, .lifeos-chat-provider-button.is-active),
+.lifeos-root.lifeos-chat-root :is(.lifeos-chip.is-active, .lifeos-skill-chip.is-active, .lifeos-chat-provider-button.is-active) {
+  border-color: rgba(37, 99, 235, 0.72) !important;
+  background: linear-gradient(135deg, #2563eb 0%, #1f7aff 56%, #38bdf8 100%) !important;
+  color: #ffffff !important;
+  box-shadow:
+    0 8px 18px rgba(37, 99, 235, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.32) !important;
+}
+
+.lifeos-chat-view-host :is(.lifeos-chip.is-active, .lifeos-skill-chip.is-active, .lifeos-chat-provider-button.is-active) *,
+.workspace-leaf-content[data-type="personal-life-system-chat"] :is(.lifeos-chip.is-active, .lifeos-skill-chip.is-active, .lifeos-chat-provider-button.is-active) *,
+.lifeos-root.lifeos-chat-root :is(.lifeos-chip.is-active, .lifeos-skill-chip.is-active, .lifeos-chat-provider-button.is-active) * {
+  color: #ffffff !important;
+}
+
+@media (hover: none) {
+  .lifeos-chat-view-host .lifeos-chat-copy-button,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-copy-button,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-copy-button {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .lifeos-chat-view-host .lifeos-chat-composer textarea,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer textarea,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer textarea {
+    max-height: min(30svh, 220px) !important;
+  }
+}
+/* Life OS AI assistant interaction polish end */
+
+@media (max-width: 420px) {
+  .lifeos-chat-view-host .lifeos-chat-controls,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-controls,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-controls {
+    max-height: 126px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-log:has(.lifeos-chat-welcome),
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-log:has(.lifeos-chat-welcome),
+  .lifeos-root.lifeos-chat-root .lifeos-chat-log:has(.lifeos-chat-welcome) {
+    flex-basis: 132px !important;
+    height: 132px !important;
+    min-height: 132px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-welcome,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-welcome,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-welcome {
+    min-height: 120px !important;
+    padding: 9px 10px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-welcome h2,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-welcome h2,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-welcome h2 {
+    margin: 4px 0 !important;
+    font-size: 16px !important;
+    line-height: 1.2 !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-welcome p,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-welcome p,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-welcome p {
+    font-size: 12px !important;
+    line-height: 1.25 !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer {
+    max-height: 158px !important;
+  }
+}
+/* Life OS chat narrow first-viewport guard end */
+
+/* Life OS Codex-like chat runtime controls start */
+.lifeos-chat-view-host .lifeos-chat-runtime-status,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-status,
+.lifeos-root.lifeos-chat-root .lifeos-chat-runtime-status {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid rgba(93, 155, 236, 0.22);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(231, 245, 255, 0.72));
+  box-shadow: 0 12px 34px rgba(86, 142, 210, 0.08);
+  color: var(--lifeos-text, #1f2937);
+}
+
+.lifeos-chat-view-host .lifeos-chat-runtime-metric,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-metric,
+.lifeos-root.lifeos-chat-root .lifeos-chat-runtime-metric {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 2px;
+  min-width: 0;
+}
+
+.lifeos-chat-view-host .lifeos-chat-runtime-label,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-label,
+.lifeos-root.lifeos-chat-root .lifeos-chat-runtime-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--lifeos-muted, #64748b);
+  white-space: nowrap;
+}
+
+.lifeos-chat-view-host .lifeos-chat-runtime-value,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-value,
+.lifeos-root.lifeos-chat-root .lifeos-chat-runtime-value {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--lifeos-text, #1f2937);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-chat-view-host .lifeos-chat-runtime-pill,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-pill,
+.lifeos-root.lifeos-chat-root .lifeos-chat-runtime-pill {
+  grid-column: 1 / -1;
+  justify-self: start;
+  min-width: 42px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(47, 128, 237, 0.12);
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.lifeos-chat-view-host .lifeos-chat-runtime-actions,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-actions,
+.lifeos-root.lifeos-chat-root .lifeos-chat-runtime-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.lifeos-chat-view-host .lifeos-chat-runtime-actions .lifeos-button,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-actions .lifeos-button,
+.lifeos-root.lifeos-chat-root .lifeos-chat-runtime-actions .lifeos-button {
+  min-height: 30px;
+  padding: 5px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.lifeos-theme-obsidian .lifeos-chat-runtime-status,
+body.lifeos-theme-obsidian .lifeos-root .lifeos-chat-runtime-status,
+.lifeos-theme-business-navy .lifeos-chat-runtime-status,
+body.lifeos-theme-business-navy .lifeos-root .lifeos-chat-runtime-status {
+  border-color: rgba(139, 166, 255, 0.25);
+  background: linear-gradient(135deg, rgba(13, 20, 38, 0.9), rgba(20, 38, 68, 0.78));
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.24);
+  color: rgba(239, 246, 255, 0.94);
+}
+
+.lifeos-theme-obsidian .lifeos-chat-runtime-value,
+.lifeos-theme-obsidian .lifeos-chat-runtime-label,
+body.lifeos-theme-obsidian .lifeos-root .lifeos-chat-runtime-value,
+body.lifeos-theme-obsidian .lifeos-root .lifeos-chat-runtime-label,
+.lifeos-theme-business-navy .lifeos-chat-runtime-value,
+.lifeos-theme-business-navy .lifeos-chat-runtime-label,
+body.lifeos-theme-business-navy .lifeos-root .lifeos-chat-runtime-value,
+body.lifeos-theme-business-navy .lifeos-root .lifeos-chat-runtime-label {
+  color: rgba(239, 246, 255, 0.9);
+}
+
+@media (max-width: 980px) {
+  .lifeos-chat-view-host .lifeos-chat-runtime-status,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-status,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-runtime-status {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-runtime-actions,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-actions,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-runtime-actions {
+    justify-content: stretch;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-runtime-actions .lifeos-button,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-actions .lifeos-button,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-runtime-actions .lifeos-button {
+    flex: 1 1 120px;
+    min-width: 0;
+  }
+}
+/* Life OS Codex-like chat runtime controls end */
+
+/* -------------------------------------------------------------------------- */
+/* Knowledge studio layout + LiquidGlass refinement                            */
+/* -------------------------------------------------------------------------- */
+
+.lifeos-knowledge-main .lifeos-hero {
+  grid-template-columns: minmax(0, 1fr) minmax(360px, auto) !important;
+  align-items: center !important;
+  max-width: 1480px;
+  margin-inline: auto;
+}
+
+.lifeos-knowledge-main .lifeos-hero-side {
+  justify-self: end;
+  width: min(100%, 430px);
+}
+
+.lifeos-knowledge-main .lifeos-hero-actions {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(150px, 1fr));
+  gap: 10px;
+  justify-content: stretch !important;
+  align-items: stretch !important;
+}
+
+.lifeos-knowledge-main .lifeos-hero-actions .lifeos-button {
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-workspace {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 390px) !important;
+  gap: 16px !important;
+  align-items: start !important;
+  max-width: 1480px;
+  margin-inline: auto;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-primary {
+  display: grid;
+  grid-column: 1 !important;
+  gap: 16px;
+  min-width: 0;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-workspace > .lifeos-knowledge-side-stack {
+  position: sticky;
+  top: 16px;
+  display: grid;
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  gap: 14px;
+  min-width: 0;
+  align-self: start;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-primary > :is(
+  .lifeos-knowledge-library,
+  .lifeos-knowledge-category-grid,
+  .lifeos-knowledge-recent-full
+) {
+  grid-column: auto !important;
+  grid-row: auto !important;
+  min-width: 0;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-library {
+  gap: 16px;
+  padding: 20px !important;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-library-head {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-library-actions {
+  display: flex !important;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-library-actions .lifeos-button,
+.lifeos-knowledge-main .lifeos-knowledge-section-actions .lifeos-button,
+.lifeos-knowledge-main .lifeos-knowledge-item-actions .lifeos-button,
+.lifeos-knowledge-main .lifeos-knowledge-row-actions .lifeos-button,
+.lifeos-knowledge-main .lifeos-knowledge-category-actions .lifeos-button {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-pipeline-flow {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+  gap: 14px;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-pipeline-section {
+  min-width: 0;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-pipeline-items {
+  gap: 12px;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-pipeline-item {
+  min-height: 168px;
+  align-content: start;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-library-item-top {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-library-kind {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-library-meta {
+  white-space: nowrap;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-item-actions {
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-category-grid {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 14px !important;
+  align-items: stretch;
+  margin: 0 !important;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-category-grid .lifeos-knowledge-entry {
+  display: grid;
+  grid-template-rows: auto auto minmax(76px, 1fr) auto;
+  gap: 10px;
+  min-height: 196px;
+  padding: 18px !important;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-category-grid .lifeos-card-title {
+  min-width: 0;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-category-grid .lifeos-card-title span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-category-grid .lifeos-knowledge-entry > p {
+  margin: 0;
+  min-height: 2.8em;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-category-meta {
+  display: grid !important;
+  grid-template-columns: minmax(82px, 0.42fr) minmax(0, 1fr) !important;
+  gap: 10px;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-category-stat,
+.lifeos-knowledge-main .lifeos-knowledge-category-recent {
+  min-width: 0;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-category-recent span:last-child {
+  max-width: 100%;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-category-actions {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-items: stretch;
+  margin-top: 0;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-category-actions .lifeos-button {
+  justify-content: center;
+  width: 100%;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-recent-full {
+  max-height: none !important;
+  overflow: visible !important;
+  padding: 20px !important;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-primary > .lifeos-knowledge-recent-full .lifeos-knowledge-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(128px, auto) !important;
+  gap: 6px 14px;
+  align-items: start;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-primary > .lifeos-knowledge-recent-full .lifeos-knowledge-row .lifeos-history-title,
+.lifeos-knowledge-main .lifeos-knowledge-primary > .lifeos-knowledge-recent-full .lifeos-knowledge-row .lifeos-history-subtitle,
+.lifeos-knowledge-main .lifeos-knowledge-primary > .lifeos-knowledge-recent-full .lifeos-knowledge-row .lifeos-knowledge-snippet {
+  grid-column: 1;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-primary > .lifeos-knowledge-recent-full .lifeos-knowledge-row-actions {
+  display: flex !important;
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  flex-direction: column;
+  gap: 8px;
+  justify-self: end;
+  width: 128px;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-primary > .lifeos-knowledge-recent-full .lifeos-knowledge-row-actions .lifeos-button {
+  width: 100%;
+  min-height: 34px;
+  justify-content: center;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-side-stack :is(
+  .lifeos-knowledge-overview,
+  .lifeos-knowledge-import-panel,
+  .lifeos-knowledge-map-panel,
+  .lifeos-knowledge-reuse-panel
+) {
+  width: 100%;
+  min-width: 0;
+  padding: 18px !important;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-overview-stats,
+.lifeos-knowledge-main .lifeos-knowledge-reuse-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-import-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 10px;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-import-tile {
+  min-height: 72px;
+  align-items: start;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-import-tile strong,
+.lifeos-knowledge-main .lifeos-knowledge-import-tile span:not(.lifeos-status-icon) {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+@media (max-width: 1280px) {
+  .lifeos-knowledge-main .lifeos-knowledge-workspace {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-knowledge-main .lifeos-knowledge-workspace > .lifeos-knowledge-side-stack {
+    position: static;
+    grid-column: 1 !important;
+    grid-row: auto !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lifeos-knowledge-main .lifeos-knowledge-category-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .lifeos-knowledge-main .lifeos-hero,
+  .lifeos-knowledge-main .lifeos-knowledge-library-head,
+  .lifeos-knowledge-main .lifeos-knowledge-pipeline-flow,
+  .lifeos-knowledge-main .lifeos-knowledge-workspace > .lifeos-knowledge-side-stack,
+  .lifeos-knowledge-main .lifeos-knowledge-category-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-knowledge-main .lifeos-hero-side {
+    justify-self: stretch;
+    width: 100%;
+  }
+
+  .lifeos-knowledge-main .lifeos-hero-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lifeos-knowledge-main .lifeos-knowledge-primary > .lifeos-knowledge-recent-full .lifeos-knowledge-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-knowledge-main .lifeos-knowledge-primary > .lifeos-knowledge-recent-full .lifeos-knowledge-row-actions {
+    grid-column: 1;
+    grid-row: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-self: stretch;
+    width: 100%;
+  }
+
+  .lifeos-knowledge-main .lifeos-knowledge-primary > .lifeos-knowledge-recent-full .lifeos-knowledge-row-actions .lifeos-button {
+    flex: 1 1 112px;
+  }
+}
+
+@media (max-width: 560px) {
+  .lifeos-knowledge-main .lifeos-hero-actions,
+  .lifeos-knowledge-main .lifeos-knowledge-category-actions,
+  .lifeos-knowledge-main .lifeos-knowledge-import-grid,
+  .lifeos-knowledge-main .lifeos-knowledge-overview-stats,
+  .lifeos-knowledge-main .lifeos-knowledge-reuse-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+.lifeos-liquidglass-root {
+  position: relative !important;
+  isolation: isolate;
+  overflow: visible;
+}
+
+.lifeos-liquidglass-root > :not(.lifeos-liquidglass-backdrop) {
+  position: relative;
+  z-index: 1;
+}
+
+.lifeos-liquidglass-backdrop {
+  position: absolute;
+  inset: -7%;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 16% 12%, rgba(255, 255, 255, 0.88), transparent 30%),
+    radial-gradient(circle at 82% 4%, rgba(73, 180, 255, 0.3), transparent 28%),
+    radial-gradient(circle at 74% 86%, rgba(168, 234, 255, 0.42), transparent 34%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.58), rgba(222, 245, 255, 0.28));
+  filter: saturate(1.18) contrast(1.04);
+}
+
+.lifeos-liquidglass-target {
+  position: relative;
+  isolation: isolate;
+  overflow: visible !important;
+  transform: translateZ(0);
+}
+
+.lifeos-liquidglass-target > canvas:first-child {
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.lifeos-liquidglass-runtime-fallback .lifeos-liquidglass-target,
+.lifeos-theme-liquid-glass .lifeos-liquidglass-target {
+  backdrop-filter: blur(30px) saturate(1.32) contrast(1.04);
+  -webkit-backdrop-filter: blur(30px) saturate(1.32) contrast(1.04);
+}
+
+.lifeos-theme-liquid-glass .lifeos-liquidglass-target::before {
+  border-color: rgba(255, 255, 255, 0.82);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 12px 18px 38px rgba(255, 255, 255, 0.18),
+    inset -14px -16px 34px rgba(43, 155, 255, 0.14);
+}
+
+.lifeos-theme-liquid-glass .lifeos-liquidglass-target::after {
+  background:
+    linear-gradient(118deg, rgba(255, 255, 255, 0.66), transparent 26%),
+    radial-gradient(circle at 96% 18%, rgba(54, 190, 255, 0.24), transparent 28%);
+  opacity: 0.78;
+}
+
+.lifeos-theme-liquid-glass.lifeos-root,
+.lifeos-chat-view-host .lifeos-root.lifeos-theme-liquid-glass,
+.workspace-leaf-content .lifeos-root.lifeos-theme-liquid-glass,
+body.lifeos-theme-liquid-glass .lifeos-root {
+  --lifeos-bg: #eef9ff;
+  --lifeos-bg-2: #dff1ff;
+  --lifeos-accent: #16a3ff;
+  --lifeos-primary: #16a3ff;
+  --lifeos-accent-soft: rgba(22, 163, 255, 0.14);
+  --lifeos-accent-glow: rgba(22, 163, 255, 0.28);
+  --lifeos-glass-border: rgba(255, 255, 255, 0.68);
+  --lifeos-glass-highlight: rgba(255, 255, 255, 0.96);
+  --lifeos-glass-hairline: rgba(38, 124, 166, 0.13);
+  --lifeos-surface: rgba(255, 255, 255, 0.62);
+  --lifeos-surface-soft: rgba(238, 249, 255, 0.42);
+  --lifeos-border: rgba(255, 255, 255, 0.7);
+  --lifeos-border-soft: rgba(255, 255, 255, 0.46);
+  --lifeos-shadow-card: 0 24px 68px rgba(22, 92, 130, 0.16);
+  --lifeos-shadow-soft: 0 14px 38px rgba(22, 92, 130, 0.11);
+  --lifeos-radius-md: 18px;
+  --lifeos-radius-lg: 24px;
+  --lifeos-radius-xl: 32px;
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(115deg, #fbfdff 0%, #edf9ff 31%, #f7fcff 58%, #dff2ff 100%) !important;
+}
+
+.lifeos-theme-liquid-glass.lifeos-root::before,
+.lifeos-chat-view-host .lifeos-root.lifeos-theme-liquid-glass::before,
+.workspace-leaf-content .lifeos-root.lifeos-theme-liquid-glass::before,
+body.lifeos-theme-liquid-glass .lifeos-root::before {
+  content: "";
+  position: absolute;
+  inset: -18%;
+  pointer-events: none;
+  background:
+    linear-gradient(112deg, transparent 5%, rgba(255, 255, 255, 0.62) 24%, transparent 42%, rgba(120, 240, 255, 0.18) 62%, transparent 78%),
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0 1px, transparent 1px 18px),
+    conic-gradient(from 230deg at 48% 28%, rgba(255, 255, 255, 0.34), rgba(124, 224, 255, 0.18), transparent 38%, rgba(255, 255, 255, 0.28), transparent 74%, rgba(93, 151, 255, 0.14));
+  filter: blur(14px) saturate(1.24);
+  opacity: 0.82;
+  transform: translate3d(0, 0, 0);
+}
+
+.lifeos-theme-liquid-glass.lifeos-root > *,
+.lifeos-chat-view-host .lifeos-root.lifeos-theme-liquid-glass > *,
+.workspace-leaf-content .lifeos-root.lifeos-theme-liquid-glass > *,
+body.lifeos-theme-liquid-glass .lifeos-root > * {
+  position: relative;
+  z-index: 1;
+}
+
+.lifeos-theme-liquid-glass :is(
+  .lifeos-sidebar,
+  .lifeos-brand,
+  .lifeos-hero,
+  .lifeos-page-header,
+  .lifeos-card,
+  .lifeos-panel,
+  .lifeos-feature-card,
+  .lifeos-stat-card,
+  .lifeos-chat-main,
+  .lifeos-chat-log,
+  .lifeos-chat-composer,
+  .lifeos-chat-welcome,
+  .lifeos-settings-card
+),
+body.lifeos-theme-liquid-glass .lifeos-root :is(
+  .lifeos-sidebar,
+  .lifeos-brand,
+  .lifeos-hero,
+  .lifeos-page-header,
+  .lifeos-card,
+  .lifeos-panel,
+  .lifeos-feature-card,
+  .lifeos-stat-card,
+  .lifeos-chat-main,
+  .lifeos-chat-log,
+  .lifeos-chat-composer,
+  .lifeos-chat-welcome,
+  .lifeos-settings-card
+) {
+  border-color: rgba(255, 255, 255, 0.72) !important;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.64), rgba(218, 244, 255, 0.28) 46%, rgba(255, 255, 255, 0.36)),
+    rgba(255, 255, 255, 0.36) !important;
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.92),
+    inset -1px -1px 0 rgba(90, 199, 255, 0.18),
+    0 0 0 1px rgba(76, 145, 187, 0.08),
+    0 24px 68px rgba(22, 92, 130, 0.14) !important;
+  backdrop-filter: blur(28px) saturate(1.45) contrast(1.04) brightness(1.04) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(1.45) contrast(1.04) brightness(1.04) !important;
+}
+
+.lifeos-theme-liquid-glass :is(
+  .lifeos-card,
+  .lifeos-panel,
+  .lifeos-feature-card,
+  .lifeos-stat-card,
+  .lifeos-hero,
+  .lifeos-page-header,
+  .lifeos-settings-card
+)::after,
+body.lifeos-theme-liquid-glass .lifeos-root :is(
+  .lifeos-card,
+  .lifeos-panel,
+  .lifeos-feature-card,
+  .lifeos-stat-card,
+  .lifeos-hero,
+  .lifeos-page-header,
+  .lifeos-settings-card
+)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(112deg, rgba(255, 255, 255, 0.72), transparent 22% 58%, rgba(64, 216, 255, 0.2) 74%, transparent),
+    linear-gradient(292deg, transparent 0 64%, rgba(22, 163, 255, 0.18) 78%, transparent);
+  mix-blend-mode: screen;
+  opacity: 0.78;
+}
+
+.lifeos-theme-liquid-glass :is(.lifeos-button, .lifeos-chip, .lifeos-skill-chip, .lifeos-theme-swatch, .lifeos-import-chip),
+body.lifeos-theme-liquid-glass .lifeos-root :is(.lifeos-button, .lifeos-chip, .lifeos-skill-chip, .lifeos-theme-swatch, .lifeos-import-chip) {
+  border-color: rgba(255, 255, 255, 0.78) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(221, 246, 255, 0.32)) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    inset 0 -1px 0 rgba(38, 180, 255, 0.16),
+    0 9px 20px rgba(20, 106, 160, 0.08) !important;
+}
+
+.lifeos-theme-liquid-glass :is(
+  .lifeos-button-primary,
+  .lifeos-btn-primary,
+  .lifeos-button.is-primary,
+  .lifeos-chat-send,
+  .lifeos-chip.is-active,
+  .lifeos-skill-chip.is-active
+),
+body.lifeos-theme-liquid-glass .lifeos-root :is(
+  .lifeos-button-primary,
+  .lifeos-btn-primary,
+  .lifeos-button.is-primary,
+  .lifeos-chat-send,
+  .lifeos-chip.is-active,
+  .lifeos-skill-chip.is-active
+) {
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.5) !important;
+  background:
+    linear-gradient(180deg, #47c8ff 0%, #149cff 44%, #0d72ff 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.48),
+    inset 0 -1px 0 rgba(0, 50, 180, 0.28),
+    -1px 0 0 rgba(120, 240, 255, 0.55),
+    1px 0 0 rgba(111, 94, 255, 0.34),
+    0 14px 32px rgba(22, 123, 255, 0.28) !important;
+}
+
+.lifeos-theme-liquid-glass :is(.lifeos-input, .lifeos-select, .lifeos-glass-input, textarea),
+body.lifeos-theme-liquid-glass .lifeos-root :is(.lifeos-input, .lifeos-select, .lifeos-glass-input, textarea) {
+  border-color: rgba(255, 255, 255, 0.74) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(231, 249, 255, 0.5)) !important;
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.92),
+    inset -1px -1px 0 rgba(65, 184, 255, 0.12),
+    0 0 0 1px rgba(67, 128, 170, 0.06) !important;
+}
+
+.lifeos-theme-liquid-glass .lifeos-nav-item.is-active,
+body.lifeos-theme-liquid-glass .lifeos-root .lifeos-nav-item.is-active {
+  color: #0969da !important;
+  border-color: rgba(255, 255, 255, 0.72) !important;
+  background:
+    linear-gradient(112deg, rgba(255, 255, 255, 0.82), rgba(186, 234, 255, 0.38) 54%, rgba(255, 255, 255, 0.44)) !important;
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.9),
+    inset -1px -1px 0 rgba(22, 163, 255, 0.18),
+    0 12px 30px rgba(22, 123, 255, 0.13) !important;
+}
+
+.theme-dark .lifeos-theme-liquid-glass.lifeos-root,
+.theme-dark .lifeos-chat-view-host .lifeos-root.lifeos-theme-liquid-glass,
+.theme-dark .workspace-leaf-content .lifeos-root.lifeos-theme-liquid-glass,
+.theme-dark body.lifeos-theme-liquid-glass .lifeos-root {
+  --lifeos-bg: #071323;
+  --lifeos-bg-2: #0d2135;
+  --lifeos-text: #ecf8ff;
+  --lifeos-muted: rgba(219, 239, 255, 0.78);
+  --lifeos-surface: rgba(14, 31, 49, 0.62);
+  --lifeos-surface-soft: rgba(13, 35, 55, 0.45);
+  --lifeos-border: rgba(185, 230, 255, 0.18);
+  background:
+    linear-gradient(115deg, #071323 0%, #0c2237 42%, #061724 100%) !important;
+}
+
+.theme-dark .lifeos-theme-liquid-glass :is(.lifeos-card, .lifeos-panel, .lifeos-feature-card, .lifeos-stat-card, .lifeos-hero, .lifeos-page-header, .lifeos-sidebar),
+.theme-dark body.lifeos-theme-liquid-glass .lifeos-root :is(.lifeos-card, .lifeos-panel, .lifeos-feature-card, .lifeos-stat-card, .lifeos-hero, .lifeos-page-header, .lifeos-sidebar) {
+  background:
+    linear-gradient(145deg, rgba(31, 57, 82, 0.68), rgba(10, 27, 45, 0.54) 52%, rgba(36, 83, 112, 0.24)),
+    rgba(11, 29, 47, 0.62) !important;
+  border-color: rgba(185, 230, 255, 0.18) !important;
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.14),
+    inset -1px -1px 0 rgba(105, 220, 255, 0.1),
+    0 24px 68px rgba(0, 0, 0, 0.34) !important;
+}
+
+/* Life OS chat composer manual resize final pass start */
+.lifeos-chat-view-host .lifeos-chat-composer,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto auto !important;
+  grid-auto-rows: auto !important;
+  align-items: end !important;
+  gap: 8px !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-attachment-bar,
+.lifeos-chat-view-host .lifeos-chat-attachment-list,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-attachment-bar,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-attachment-list,
+.lifeos-root.lifeos-chat-root .lifeos-chat-attachment-bar,
+.lifeos-root.lifeos-chat-root .lifeos-chat-attachment-list {
+  grid-column: 1 / -1 !important;
+  min-width: 0 !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-resize-handle,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-resize-handle,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-resize-handle {
+  grid-column: 1 / -1 !important;
+  display: grid !important;
+  place-items: center !important;
+  height: 14px !important;
+  min-height: 14px !important;
+  margin: -3px 0 0 !important;
+  cursor: ns-resize !important;
+  touch-action: none !important;
+  user-select: none !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-resize-handle::before,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-resize-handle::before,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-resize-handle::before {
+  content: "";
+  width: min(92px, 28%);
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lifeos-primary, #2563eb) 24%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-resize-handle:hover::before,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-resize-handle:hover::before,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-resize-handle:hover::before,
+body.lifeos-chat-composer-is-resizing .lifeos-chat-composer-resize-handle::before {
+  background: var(--lifeos-primary, #2563eb);
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer textarea,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer textarea,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer textarea {
+  grid-column: 1 / 2 !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-height: 64px !important;
+  height: var(--lifeos-chat-composer-height, 82px) !important;
+  max-height: min(42svh, 420px) !important;
+  resize: none !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer > .lifeos-button,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer > .lifeos-button,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer > .lifeos-button {
+  align-self: end !important;
+  justify-self: end !important;
+  white-space: nowrap !important;
+}
+
+body.lifeos-chat-composer-is-resizing {
+  cursor: ns-resize !important;
+  user-select: none !important;
+}
+
+@media (max-width: 760px) {
+  .lifeos-chat-view-host .lifeos-chat-composer,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer {
+    grid-template-columns: 1fr !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer .lifeos-button,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer .lifeos-button,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer .lifeos-button {
+    width: 100% !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer textarea,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer textarea,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer textarea {
+    grid-column: 1 / -1 !important;
+    max-height: min(34svh, 260px) !important;
+  }
+}
+/* Life OS chat composer manual resize final pass end */
+
+/* Life OS knowledge recent alignment and writeback picker final pass start */
+.lifeos-knowledge-main .lifeos-knowledge-workspace > .lifeos-knowledge-recent-full {
+  grid-column: 1 / -1 !important;
+  grid-row: auto !important;
+  width: 100% !important;
+  max-width: none !important;
+  justify-self: stretch !important;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-workspace > .lifeos-knowledge-recent-full .lifeos-knowledge-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(128px, auto) !important;
+  gap: 6px 14px !important;
+  align-items: start !important;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-workspace > .lifeos-knowledge-recent-full .lifeos-knowledge-row .lifeos-history-title,
+.lifeos-knowledge-main .lifeos-knowledge-workspace > .lifeos-knowledge-recent-full .lifeos-knowledge-row .lifeos-history-subtitle,
+.lifeos-knowledge-main .lifeos-knowledge-workspace > .lifeos-knowledge-recent-full .lifeos-knowledge-row .lifeos-knowledge-snippet {
+  grid-column: 1 !important;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-workspace > .lifeos-knowledge-recent-full .lifeos-knowledge-row-actions {
+  display: flex !important;
+  grid-column: 2 !important;
+  grid-row: 1 / span 3 !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+  justify-self: end !important;
+  width: 128px !important;
+}
+
+.lifeos-knowledge-main .lifeos-knowledge-workspace > .lifeos-knowledge-recent-full .lifeos-knowledge-row-actions .lifeos-button {
+  width: 100% !important;
+  min-height: 34px !important;
+  justify-content: center !important;
+}
+
+.lifeos-writeback-target-modal-host .modal-content,
+.modal.lifeos-writeback-target-modal-host .modal-content {
+  width: min(820px, calc(100vw - 28px)) !important;
+}
+
+.lifeos-writeback-target-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+}
+
+@media (max-width: 760px) {
+  .lifeos-knowledge-main .lifeos-knowledge-workspace > .lifeos-knowledge-recent-full .lifeos-knowledge-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-knowledge-main .lifeos-knowledge-workspace > .lifeos-knowledge-recent-full .lifeos-knowledge-row-actions {
+    grid-column: 1 !important;
+    grid-row: auto !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    justify-self: stretch !important;
+    width: 100% !important;
+  }
+
+  .lifeos-knowledge-main .lifeos-knowledge-workspace > .lifeos-knowledge-recent-full .lifeos-knowledge-row-actions .lifeos-button {
+    flex: 1 1 112px !important;
+  }
+
+  .lifeos-writeback-target-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+/* Life OS knowledge recent alignment and writeback picker final pass end */
+
+/* Life OS knowledge card column alignment final pass start */
+.lifeos-knowledge-main .lifeos-hero,
+.lifeos-knowledge-main .lifeos-knowledge-workspace {
+  width: min(100%, 1480px) !important;
+  max-width: 1480px !important;
+  margin-inline: auto !important;
+  justify-self: center !important;
+  box-sizing: border-box !important;
+}
+
+@media (min-width: 1281px) {
+  .lifeos-knowledge-main .lifeos-knowledge-workspace {
+    grid-template-columns: minmax(0, 3fr) minmax(320px, 390px) !important;
+    gap: 18px !important;
+    align-items: start !important;
+  }
+
+  .lifeos-knowledge-main .lifeos-knowledge-primary {
+    display: grid !important;
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    gap: 16px !important;
+    min-width: 0 !important;
+  }
+
+  .lifeos-knowledge-main .lifeos-knowledge-workspace > .lifeos-knowledge-side-stack {
+    display: grid !important;
+    grid-column: 2 !important;
+    grid-row: 1 / span 2 !important;
+    gap: 14px !important;
+    min-width: 0 !important;
+    align-self: start !important;
+  }
+
+  .lifeos-knowledge-main .lifeos-knowledge-library {
+    grid-column: 1 !important;
+    grid-row: auto !important;
+    width: 100% !important;
+    align-self: stretch !important;
+  }
+
+  .lifeos-knowledge-main .lifeos-knowledge-category-grid {
+    grid-column: 1 !important;
+    grid-row: auto !important;
+    width: 100% !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 16px !important;
+    align-self: stretch !important;
+  }
+
+  .lifeos-knowledge-main .lifeos-knowledge-side-stack :is(
+    .lifeos-knowledge-overview,
+    .lifeos-knowledge-import-panel,
+    .lifeos-knowledge-map-panel,
+    .lifeos-knowledge-reuse-panel
+  ) {
+    grid-column: 1 !important;
+    grid-row: auto !important;
+    width: 100% !important;
+    align-self: stretch !important;
+  }
+
+  .lifeos-knowledge-main .lifeos-knowledge-workspace > .lifeos-knowledge-recent-full {
+    grid-column: 1 / -1 !important;
+    grid-row: auto !important;
+    width: 100% !important;
+    max-width: none !important;
+    justify-self: stretch !important;
+  }
+}
+/* Life OS knowledge card column alignment final pass end */
+
+/* Life OS review grid alignment final pass start */
+.lifeos-root {
+  --lifeos-review-column-gap: 18px;
+}
+
+.lifeos-root .lifeos-review-stat-grid,
+.lifeos-root .lifeos-review-focus-grid,
+.lifeos-root .lifeos-review-grid {
+  display: grid !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: var(--lifeos-review-column-gap, 18px) !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  box-sizing: border-box !important;
+  align-items: stretch !important;
+  justify-items: stretch !important;
+}
+
+.lifeos-root .lifeos-review-stat-grid > *,
+.lifeos-root .lifeos-review-focus-grid > *,
+.lifeos-root .lifeos-review-grid > * {
+  min-width: 0 !important;
+  width: 100% !important;
+  justify-self: stretch !important;
+}
+
+.lifeos-root .lifeos-review-focus-grid > :first-child {
+  grid-column: 1 / span 3 !important;
+}
+
+.lifeos-root .lifeos-review-focus-grid > :last-child {
+  grid-column: 4 / span 1 !important;
+}
+
+@media (max-width: 1100px) {
+  .lifeos-root .lifeos-review-stat-grid,
+  .lifeos-root .lifeos-review-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .lifeos-root .lifeos-review-focus-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-root .lifeos-review-focus-grid > :first-child,
+  .lifeos-root .lifeos-review-focus-grid > :last-child {
+    grid-column: auto !important;
+  }
+}
+
+@media (max-width: 680px) {
+  .lifeos-root .lifeos-review-stat-grid,
+  .lifeos-root .lifeos-review-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+body.is-mobile .lifeos-root .lifeos-review-stat-grid,
+body.is-mobile .lifeos-root .lifeos-review-focus-grid,
+body.is-mobile .lifeos-root .lifeos-review-grid,
+.lifeos-root.lifeos-is-narrow-pane .lifeos-review-stat-grid,
+.lifeos-root.lifeos-is-narrow-pane .lifeos-review-focus-grid,
+.lifeos-root.lifeos-is-narrow-pane .lifeos-review-grid {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+body.is-mobile .lifeos-root .lifeos-review-focus-grid > :first-child,
+body.is-mobile .lifeos-root .lifeos-review-focus-grid > :last-child,
+.lifeos-root.lifeos-is-narrow-pane .lifeos-review-focus-grid > :first-child,
+.lifeos-root.lifeos-is-narrow-pane .lifeos-review-focus-grid > :last-child {
+  grid-column: auto !important;
+}
+/* Life OS review grid alignment final pass end */
+
+/* Life OS knowledge full-width desktop alignment final pass start */
+.lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-hero,
+.lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-workspace,
+.lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-library,
+.workspace-leaf-content .lifeos-main.lifeos-knowledge-main .lifeos-hero,
+.workspace-leaf-content .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-workspace,
+.workspace-leaf-content .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-library {
+  width: 100% !important;
+  max-width: none !important;
+  margin-inline: 0 !important;
+  justify-self: stretch !important;
+  box-sizing: border-box !important;
+}
+
+@media (min-width: 1281px) {
+  .lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-workspace,
+  .workspace-leaf-content .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-workspace {
+    grid-template-columns: minmax(0, 3fr) minmax(320px, 390px) !important;
+  }
+}
+/* Life OS knowledge full-width desktop alignment final pass end */
+
+/* Life OS knowledge simplified workspace final pass start */
+.lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-workspace,
+.workspace-leaf-content .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-workspace {
+  display: grid !important;
+  width: 100% !important;
+  max-width: none !important;
+  margin-inline: 0 !important;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px) !important;
+  gap: 18px !important;
+  align-items: start !important;
+  justify-self: stretch !important;
+  box-sizing: border-box !important;
+}
+
+.lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-primary,
+.workspace-leaf-content .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-primary {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 16px !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  align-content: start !important;
+}
+
+.lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-side-stack,
+.workspace-leaf-content .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-side-stack {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 14px !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  align-content: start !important;
+}
+
+.lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-category-grid,
+.workspace-leaf-content .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-category-grid {
+  display: none !important;
+}
+
+.lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-primary > .lifeos-knowledge-recent-full,
+.workspace-leaf-content .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-primary > .lifeos-knowledge-recent-full {
+  grid-column: 1 !important;
+  width: 100% !important;
+  max-width: none !important;
+  margin-inline: 0 !important;
+  justify-self: stretch !important;
+  box-sizing: border-box !important;
+}
+
+.lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-overview .lifeos-llmwiki-actions,
+.workspace-leaf-content .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-overview .lifeos-llmwiki-actions {
+  display: none !important;
+}
+
+.lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-recent-full .lifeos-knowledge-row,
+.workspace-leaf-content .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-recent-full .lifeos-knowledge-row {
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-recent-full .lifeos-knowledge-row-actions,
+.workspace-leaf-content .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-recent-full .lifeos-knowledge-row-actions {
+  flex: 0 0 112px !important;
+  width: 112px !important;
+}
+
+@media (min-width: 1500px) {
+  .lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-workspace,
+  .workspace-leaf-content .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-workspace {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 390px) !important;
+  }
+}
+
+@media (max-width: 1280px) {
+  .lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-workspace,
+  .workspace-leaf-content .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-workspace {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-side-stack,
+  .workspace-leaf-content .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-side-stack {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 820px) {
+  .lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-side-stack,
+  .workspace-leaf-content .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-side-stack {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-recent-full .lifeos-knowledge-row,
+  .workspace-leaf-content .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-recent-full .lifeos-knowledge-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-recent-full .lifeos-knowledge-row-actions,
+  .workspace-leaf-content .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-recent-full .lifeos-knowledge-row-actions {
+    flex: 1 1 auto !important;
+    width: 100% !important;
+  }
+}
+/* Life OS knowledge simplified workspace final pass end */
+
+/* Life OS chat composer controls relocation final pass start */
+.lifeos-chat-view-host .lifeos-chat-control-summary,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-control-summary,
+.lifeos-root.lifeos-chat-root .lifeos-chat-control-summary {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 7px !important;
+  align-items: center !important;
+  margin: -2px 0 8px !important;
+  padding: 7px 10px !important;
+  border: 1px solid color-mix(in srgb, var(--lifeos-primary, #2563eb) 10%, var(--lifeos-border-soft, var(--lifeos-border))) !important;
+  border-radius: 16px !important;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.62), rgba(240, 249, 255, 0.44)),
+    color-mix(in srgb, var(--lifeos-primary, #2563eb) 3%, transparent) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-control-summary-chip,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-control-summary-chip,
+.lifeos-root.lifeos-chat-root .lifeos-chat-control-summary-chip {
+  display: inline-flex !important;
+  min-width: 0 !important;
+  max-width: min(260px, 100%) !important;
+  min-height: 28px !important;
+  align-items: center !important;
+  gap: 5px !important;
+  padding: 5px 9px !important;
+  border: 1px solid rgba(255, 255, 255, 0.66) !important;
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, 0.54) !important;
+  color: var(--lifeos-muted) !important;
+  font-size: 11px !important;
+  line-height: 1.2 !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-control-summary-chip strong,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-control-summary-chip strong,
+.lifeos-root.lifeos-chat-root .lifeos-chat-control-summary-chip strong {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  color: var(--lifeos-text) !important;
+  font-weight: 760 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls {
+  grid-column: 1 / -1 !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  gap: 8px 12px !important;
+  align-items: start !important;
+  margin: 0 0 4px !important;
+  padding: 8px 10px !important;
+  border-radius: 18px !important;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.5), rgba(239, 249, 255, 0.36)),
+    color-mix(in srgb, var(--lifeos-primary, #2563eb) 2%, transparent) !important;
+  box-sizing: border-box !important;
+  min-width: 0 !important;
+  width: 100% !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-primary-controls {
+  display: grid !important;
+  grid-template-columns: minmax(180px, 0.85fr) minmax(0, 1.65fr) minmax(220px, 0.8fr) !important;
+  gap: 8px 10px !important;
+  align-items: start !important;
+  min-width: 0 !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-skill-control,
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-primary-controls > .lifeos-chat-chip-controls,
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-provider-switch,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-skill-control,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-primary-controls > .lifeos-chat-chip-controls,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-provider-switch,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-skill-control,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-primary-controls > .lifeos-chat-chip-controls,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-provider-switch {
+  grid-column: auto !important;
+  grid-row: auto !important;
+  justify-self: stretch !important;
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-primary-controls > .lifeos-chat-chip-controls,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-primary-controls > .lifeos-chat-chip-controls,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-primary-controls > .lifeos-chat-chip-controls {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 6px !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-provider-head,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-provider-head,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-provider-head {
+  justify-content: flex-start !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-provider-list,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-provider-list,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-provider-list {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)) !important;
+  justify-content: stretch !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-toggles,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-toggles,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-toggles {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  justify-self: end !important;
+  min-width: 220px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-advanced-controls,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-advanced-controls,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-advanced-controls {
+  grid-column: 1 / -1 !important;
+  grid-row: auto !important;
+  width: 100% !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls.has-expanded-skill-picker,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls.has-expanded-skill-picker,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls.has-expanded-skill-picker {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls.has-expanded-skill-picker .lifeos-chat-primary-controls,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls.has-expanded-skill-picker .lifeos-chat-primary-controls,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls.has-expanded-skill-picker .lifeos-chat-primary-controls {
+  grid-column: 1 / -1 !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls.has-expanded-skill-picker .lifeos-chat-toggles,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls.has-expanded-skill-picker .lifeos-chat-toggles,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls.has-expanded-skill-picker .lifeos-chat-toggles {
+  grid-column: 1 / -1 !important;
+  grid-row: auto !important;
+  justify-self: start !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls.has-expanded-skill-picker .lifeos-skill-picker,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls.has-expanded-skill-picker .lifeos-skill-picker,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls.has-expanded-skill-picker .lifeos-skill-picker {
+  max-height: min(38vh, 360px) !important;
+  overflow: auto !important;
+}
+
+@media (max-width: 1100px) {
+  .lifeos-chat-view-host .lifeos-chat-composer-controls,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls,
+  .lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-primary-controls {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-toggles,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-toggles,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-toggles {
+    grid-column: 1 / -1 !important;
+    grid-row: auto !important;
+    justify-content: flex-start !important;
+    justify-self: start !important;
+    min-width: 0 !important;
+  }
+}
+/* Life OS chat composer controls relocation final pass end */
+
+/* Life OS comprehensive test hardening: AI assistant viewport + dark surfaces. */
+.lifeos-theme-night-owl :is(
+  .lifeos-hero,
+  .lifeos-page-header,
+  .lifeos-settings-hero,
+  .lifeos-stat-card,
+  .lifeos-card-subtle,
+  .lifeos-recommendation-card,
+  .lifeos-task-focus-card,
+  .lifeos-ai-card,
+  .lifeos-workflow-card
+),
+body.lifeos-theme-night-owl .lifeos-root :is(
+  .lifeos-hero,
+  .lifeos-page-header,
+  .lifeos-settings-hero,
+  .lifeos-stat-card,
+  .lifeos-card-subtle,
+  .lifeos-recommendation-card,
+  .lifeos-task-focus-card,
+  .lifeos-ai-card,
+  .lifeos-workflow-card
+),
+.lifeos-theme-anime-moonlit :is(
+  .lifeos-hero,
+  .lifeos-page-header,
+  .lifeos-settings-hero,
+  .lifeos-stat-card,
+  .lifeos-card-subtle,
+  .lifeos-recommendation-card,
+  .lifeos-task-focus-card,
+  .lifeos-ai-card,
+  .lifeos-workflow-card
+),
+body.lifeos-theme-anime-moonlit .lifeos-root :is(
+  .lifeos-hero,
+  .lifeos-page-header,
+  .lifeos-settings-hero,
+  .lifeos-stat-card,
+  .lifeos-card-subtle,
+  .lifeos-recommendation-card,
+  .lifeos-task-focus-card,
+  .lifeos-ai-card,
+  .lifeos-workflow-card
+) {
+  color: #f8fbff !important;
+  background:
+    linear-gradient(160deg, rgba(12, 19, 35, 0.94), rgba(18, 27, 46, 0.9)),
+    var(--lifeos-surface, rgba(12, 19, 35, 0.94)) !important;
+  border-color: rgba(160, 181, 226, 0.24) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 18px 52px rgba(0, 0, 0, 0.34) !important;
+}
+
+.lifeos-theme-academic-ink :is(
+  .lifeos-hero,
+  .lifeos-page-header,
+  .lifeos-settings-hero,
+  .lifeos-stat-card,
+  .lifeos-card-subtle,
+  .lifeos-recommendation-card,
+  .lifeos-task-focus-card,
+  .lifeos-ai-card,
+  .lifeos-workflow-card
+),
+body.lifeos-theme-academic-ink .lifeos-root :is(
+  .lifeos-hero,
+  .lifeos-page-header,
+  .lifeos-settings-hero,
+  .lifeos-stat-card,
+  .lifeos-card-subtle,
+  .lifeos-recommendation-card,
+  .lifeos-task-focus-card,
+  .lifeos-ai-card,
+  .lifeos-workflow-card
+) {
+  color: #f7f2e7 !important;
+  background:
+    linear-gradient(160deg, rgba(31, 35, 44, 0.94), rgba(20, 23, 29, 0.9)),
+    rgba(31, 35, 44, 0.94) !important;
+  border-color: rgba(218, 209, 190, 0.24) !important;
+}
+
+.lifeos-theme-night-owl :is(.lifeos-hero *, .lifeos-page-header *, .lifeos-settings-hero *),
+body.lifeos-theme-night-owl .lifeos-root :is(.lifeos-hero *, .lifeos-page-header *, .lifeos-settings-hero *),
+.lifeos-theme-anime-moonlit :is(.lifeos-hero *, .lifeos-page-header *, .lifeos-settings-hero *),
+body.lifeos-theme-anime-moonlit .lifeos-root :is(.lifeos-hero *, .lifeos-page-header *, .lifeos-settings-hero *) {
+  color: #f8fbff !important;
+}
+
+.lifeos-theme-academic-ink :is(.lifeos-hero *, .lifeos-page-header *, .lifeos-settings-hero *),
+body.lifeos-theme-academic-ink .lifeos-root :is(.lifeos-hero *, .lifeos-page-header *, .lifeos-settings-hero *) {
+  color: #f7f2e7 !important;
+}
+
+.lifeos-theme-night-owl :is(.lifeos-stat-card, .lifeos-card-subtle) :is(.lifeos-stat-label, .lifeos-muted, p, span),
+body.lifeos-theme-night-owl .lifeos-root :is(.lifeos-stat-card, .lifeos-card-subtle) :is(.lifeos-stat-label, .lifeos-muted, p, span),
+.lifeos-theme-anime-moonlit :is(.lifeos-stat-card, .lifeos-card-subtle) :is(.lifeos-stat-label, .lifeos-muted, p, span),
+body.lifeos-theme-anime-moonlit .lifeos-root :is(.lifeos-stat-card, .lifeos-card-subtle) :is(.lifeos-stat-label, .lifeos-muted, p, span) {
+  color: #dbe5ff !important;
+}
+
+.lifeos-theme-academic-ink :is(.lifeos-stat-card, .lifeos-card-subtle) :is(.lifeos-stat-label, .lifeos-muted, p, span),
+body.lifeos-theme-academic-ink .lifeos-root :is(.lifeos-stat-card, .lifeos-card-subtle) :is(.lifeos-stat-label, .lifeos-muted, p, span) {
+  color: #e5dccb !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-main,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-main,
+.lifeos-root.lifeos-chat-root .lifeos-chat-main {
+  grid-template-rows: auto auto minmax(0, 1fr) auto !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-log,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-log,
+.lifeos-root.lifeos-chat-root .lifeos-chat-log {
+  min-height: clamp(180px, 31svh, 420px) !important;
+  max-height: min(42svh, 520px) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-control-summary,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-control-summary,
+.lifeos-root.lifeos-chat-root .lifeos-chat-control-summary {
+  margin: 0 0 6px !important;
+  padding: 5px 8px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer {
+  margin-top: 8px !important;
+}
+
+@media (max-height: 860px) {
+  .lifeos-chat-view-host .lifeos-chat-top,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-top,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-top {
+    margin-bottom: 6px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-top-copy p,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-top-copy p,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-top-copy p {
+    display: none !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-runtime-status,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-status,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-runtime-status {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) auto !important;
+    gap: 5px !important;
+    padding: 5px 7px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-runtime-pill,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-pill,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-runtime-pill {
+    grid-column: auto !important;
+    min-width: 0 !important;
+    padding-inline: 6px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-runtime-actions .lifeos-button,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-actions .lifeos-button,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-runtime-actions .lifeos-button {
+    min-height: 28px !important;
+    padding: 4px 8px !important;
+    font-size: 11px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-welcome,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-welcome,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-welcome {
+    padding: 12px 14px !important;
+  }
+}
+
+@media (max-width: 900px), (max-height: 860px) {
+  .lifeos-chat-view-host .lifeos-chat-composer,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer {
+    grid-template-columns: minmax(0, 1fr) minmax(82px, auto) minmax(82px, auto) !important;
+    gap: 6px !important;
+    padding: 7px !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer-controls,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls {
+    max-height: 118px !important;
+    padding: 6px 8px !important;
+    overflow-y: auto !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-attachment-hint,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-attachment-hint,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-attachment-hint {
+    display: none !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer textarea,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer textarea,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer textarea {
+    min-height: 52px !important;
+    max-height: min(24svh, 180px) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .lifeos-chat-view-host .lifeos-chat-log,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-log,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-log {
+    min-height: clamp(132px, 22svh, 220px) !important;
+    max-height: 28svh !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer {
+    grid-template-columns: minmax(0, 1fr) minmax(74px, auto) minmax(74px, auto) !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer > .lifeos-button,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer > .lifeos-button,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer > .lifeos-button {
+    width: auto !important;
+    min-height: 36px !important;
+    padding: 6px 9px !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .lifeos-chat-view-host .lifeos-chat-runtime-status,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-status,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-runtime-status {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-runtime-actions,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-actions,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-runtime-actions {
+    display: none !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-control-summary,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-control-summary,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-control-summary {
+    max-height: 58px !important;
+    overflow-y: auto !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer-controls,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls {
+    max-height: 94px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer textarea,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer textarea,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer textarea {
+    min-height: 44px !important;
+    height: min(var(--lifeos-chat-composer-height, 52px), 88px) !important;
+  }
+}
+
+/* Life OS comprehensive visual regression fixes: composer order, mobile first screen, dark glass readability. */
+.lifeos-chat-view-host .lifeos-chat-main,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-main,
+.lifeos-root.lifeos-chat-root .lifeos-chat-main {
+  display: grid !important;
+  grid-template-rows: auto auto minmax(96px, 1fr) auto auto auto !important;
+  gap: 8px !important;
+  align-content: stretch !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-top,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-top,
+.lifeos-root.lifeos-chat-root .lifeos-chat-top {
+  order: 1 !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-control-summary,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-control-summary,
+.lifeos-root.lifeos-chat-root .lifeos-chat-control-summary {
+  order: 2 !important;
+  max-height: 52px !important;
+  overflow-y: auto !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-log,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-log,
+.lifeos-root.lifeos-chat-root .lifeos-chat-log,
+.lifeos-chat-view-host .lifeos-chat-log:has(.lifeos-chat-welcome),
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-log:has(.lifeos-chat-welcome),
+.lifeos-root.lifeos-chat-root .lifeos-chat-log:has(.lifeos-chat-welcome) {
+  order: 3 !important;
+  flex: initial !important;
+  min-height: clamp(96px, 18svh, 260px) !important;
+  height: auto !important;
+  max-height: min(30svh, 360px) !important;
+  overflow: auto !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-runtime-status,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-status,
+.lifeos-root.lifeos-chat-root .lifeos-chat-runtime-status {
+  order: 4 !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-quick,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-quick,
+.lifeos-root.lifeos-chat-root .lifeos-chat-quick {
+  order: 5 !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer {
+  order: 6 !important;
+  gap: 6px !important;
+  padding: 7px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls {
+  max-height: 112px !important;
+  padding: 6px 8px !important;
+  overflow-y: auto !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer textarea,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer textarea,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer textarea {
+  min-height: 52px !important;
+  max-height: min(24svh, 160px) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-attachment-hint,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-attachment-hint,
+.lifeos-root.lifeos-chat-root .lifeos-chat-attachment-hint {
+  display: none !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-resize-handle,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-resize-handle,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-resize-handle {
+  height: 8px !important;
+  min-height: 8px !important;
+  margin: -2px 0 !important;
+}
+
+@media (max-width: 900px), (max-height: 860px) {
+  .lifeos-chat-view-host .lifeos-chat-main,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-main,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-main {
+    grid-template-rows: auto auto minmax(82px, 0.72fr) auto auto auto !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-top-copy p,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-top-copy p,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-top-copy p {
+    display: none !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-log,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-log,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-log,
+  .lifeos-chat-view-host .lifeos-chat-log:has(.lifeos-chat-welcome),
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-log:has(.lifeos-chat-welcome),
+  .lifeos-root.lifeos-chat-root .lifeos-chat-log:has(.lifeos-chat-welcome) {
+    min-height: clamp(82px, 14svh, 160px) !important;
+    max-height: min(20svh, 190px) !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-runtime-status,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-status,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-runtime-status {
+    padding: 4px 6px !important;
+    gap: 4px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer {
+    grid-template-columns: minmax(0, 1fr) minmax(72px, auto) minmax(72px, auto) !important;
+    align-items: end !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer-controls,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls {
+    max-height: 86px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer .lifeos-button,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer .lifeos-button,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer .lifeos-button {
+    width: auto !important;
+    min-height: 34px !important;
+    padding: 5px 8px !important;
+    font-size: 12px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer textarea,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer textarea,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer textarea {
+    min-height: 44px !important;
+    height: min(var(--lifeos-chat-composer-height, 54px), 72px) !important;
+    max-height: 72px !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .lifeos-chat-view-host .lifeos-chat-control-summary,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-control-summary,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-control-summary {
+    max-height: 44px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer-controls,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls {
+    max-height: 72px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-runtime-status,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-status,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-runtime-status {
+    display: none !important;
+  }
+}
+
+.lifeos-theme-night-owl :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero, .lifeos-stat-card, .lifeos-card-subtle),
+body.lifeos-theme-night-owl .lifeos-root :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero, .lifeos-stat-card, .lifeos-card-subtle),
+.lifeos-theme-liquid-glass.lifeos-theme-night-owl :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero, .lifeos-stat-card, .lifeos-card-subtle),
+body.lifeos-theme-liquid-glass.lifeos-theme-night-owl .lifeos-root :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero, .lifeos-stat-card, .lifeos-card-subtle),
+body.lifeos-theme-night-owl .lifeos-root.lifeos-theme-liquid-glass :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero, .lifeos-stat-card, .lifeos-card-subtle),
+.lifeos-theme-anime-moonlit :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero, .lifeos-stat-card, .lifeos-card-subtle),
+body.lifeos-theme-anime-moonlit .lifeos-root :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero, .lifeos-stat-card, .lifeos-card-subtle),
+.lifeos-theme-liquid-glass.lifeos-theme-anime-moonlit :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero, .lifeos-stat-card, .lifeos-card-subtle),
+body.lifeos-theme-liquid-glass.lifeos-theme-anime-moonlit .lifeos-root :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero, .lifeos-stat-card, .lifeos-card-subtle),
+body.lifeos-theme-anime-moonlit .lifeos-root.lifeos-theme-liquid-glass :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero, .lifeos-stat-card, .lifeos-card-subtle) {
+  background-color: rgba(12, 19, 35, 0.94) !important;
+  background-image: linear-gradient(160deg, rgba(12, 19, 35, 0.96), rgba(18, 27, 46, 0.92)) !important;
+  color: #f8fbff !important;
+  border-color: rgba(160, 181, 226, 0.24) !important;
+}
+
+.lifeos-theme-night-owl :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero, .lifeos-stat-card, .lifeos-card-subtle) *,
+body.lifeos-theme-night-owl .lifeos-root :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero, .lifeos-stat-card, .lifeos-card-subtle) *,
+.lifeos-theme-anime-moonlit :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero, .lifeos-stat-card, .lifeos-card-subtle) *,
+body.lifeos-theme-anime-moonlit .lifeos-root :is(.lifeos-hero, .lifeos-page-header, .lifeos-settings-hero, .lifeos-stat-card, .lifeos-card-subtle) * {
+  color: inherit !important;
+}
+
+@media (min-width: 1101px) {
+  .lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-primary-controls {
+    grid-template-columns: minmax(230px, 0.95fr) minmax(0, 1.35fr) minmax(220px, 0.8fr) !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-skill-control.is-collapsed,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-skill-control.is-collapsed,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-skill-control.is-collapsed {
+    min-width: 150px !important;
+    max-width: none !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-skill-control.is-collapsed .lifeos-chat-skill-hint,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-skill-control.is-collapsed .lifeos-chat-skill-hint,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-skill-control.is-collapsed .lifeos-chat-skill-hint {
+    display: block !important;
+    width: 100% !important;
+    min-width: 150px !important;
+    max-width: 100% !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+}
+
+/* Life OS chat composer visibility final pass: keep controls and textarea fully visible. */
+.lifeos-chat-view-host .lifeos-chat-composer,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  grid-auto-flow: row !important;
+  grid-auto-rows: auto !important;
+  align-items: end !important;
+  gap: 8px !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls,
+.lifeos-chat-view-host .lifeos-chat-composer-controls.has-expanded-skill-picker,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls.has-expanded-skill-picker,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls.has-expanded-skill-picker {
+  grid-column: 1 / -1 !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-primary-controls {
+  grid-template-columns: minmax(190px, 0.9fr) minmax(0, 1.55fr) minmax(210px, 0.85fr) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-toggles,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-toggles,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-toggles {
+  min-width: min(220px, 100%) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-attachment-bar,
+.lifeos-chat-view-host .lifeos-chat-attachment-list,
+.lifeos-chat-view-host .lifeos-chat-composer-resize-handle,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-attachment-bar,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-attachment-list,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-resize-handle,
+.lifeos-root.lifeos-chat-root .lifeos-chat-attachment-bar,
+.lifeos-root.lifeos-chat-root .lifeos-chat-attachment-list,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-resize-handle {
+  grid-column: 1 / -1 !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer textarea,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer textarea,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer textarea {
+  grid-column: 1 / 2 !important;
+  width: 100% !important;
+  min-height: 64px !important;
+  height: var(--lifeos-chat-composer-height, 82px) !important;
+  max-height: min(34svh, 320px) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-send-actions,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-send-actions,
+.lifeos-root.lifeos-chat-root .lifeos-chat-send-actions {
+  grid-column: 2 / 3 !important;
+  display: grid !important;
+  gap: 6px !important;
+  align-self: end !important;
+  justify-self: end !important;
+  min-width: 108px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-send-actions .lifeos-button,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-send-actions .lifeos-button,
+.lifeos-root.lifeos-chat-root .lifeos-chat-send-actions .lifeos-button {
+  width: 100% !important;
+  min-height: 42px !important;
+  justify-content: center !important;
+  white-space: nowrap !important;
+}
+
+@media (max-width: 900px) {
+  .lifeos-chat-view-host .lifeos-chat-composer,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-primary-controls {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer textarea,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer textarea,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer textarea,
+  .lifeos-chat-view-host .lifeos-chat-send-actions,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-send-actions,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-send-actions {
+    grid-column: 1 / -1 !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-send-actions,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-send-actions,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-send-actions {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    justify-self: stretch !important;
+    min-width: 0 !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-send-actions .lifeos-button,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-send-actions .lifeos-button,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-send-actions .lifeos-button {
+    flex: 1 1 120px !important;
+  }
+}
+
+/* Life OS chat compact composer controls final pass: keep advanced settings tucked away. */
+.lifeos-chat-view-host .lifeos-chat-composer-controls,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  gap: 5px 10px !important;
+  align-items: center !important;
+  padding: 6px 8px !important;
+  border-radius: 16px !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-primary-controls {
+  display: grid !important;
+  grid-template-columns: minmax(190px, 0.95fr) minmax(170px, 0.7fr) minmax(260px, 1fr) !important;
+  gap: 8px !important;
+  align-items: center !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-skill-control.is-collapsed,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-skill-control.is-collapsed,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-skill-control.is-collapsed {
+  gap: 3px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-skill-control.is-collapsed .lifeos-chat-selected-skills,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-skill-control.is-collapsed .lifeos-chat-selected-skills,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-skill-control.is-collapsed .lifeos-chat-selected-skills {
+  flex-wrap: nowrap !important;
+  overflow: hidden !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-skill-control.is-collapsed .lifeos-chat-skill-hint,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-skill-control.is-collapsed .lifeos-chat-skill-hint,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-skill-control.is-collapsed .lifeos-chat-skill-hint {
+  display: none !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-primary-controls > .lifeos-chat-chip-controls,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-primary-controls > .lifeos-chat-chip-controls,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-primary-controls > .lifeos-chat-chip-controls {
+  flex-wrap: nowrap !important;
+  gap: 5px !important;
+  overflow: hidden !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chip-group,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chip-group,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chip-group {
+  flex-wrap: nowrap !important;
+  min-width: 0 !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chip,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chip,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chip,
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-skill-chip,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-skill-chip,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-skill-chip {
+  min-height: 26px !important;
+  height: 26px !important;
+  padding: 3px 9px !important;
+  font-size: 11px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-provider-switch,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-provider-switch,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-provider-switch {
+  width: 100% !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-provider-head,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-provider-head,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-provider-head {
+  justify-content: flex-start !important;
+  gap: 7px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-provider-current,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-provider-current,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-provider-current {
+  max-width: min(360px, 58vw) !important;
+  font-size: 11px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-provider-toggle,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-provider-toggle,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-provider-toggle {
+  min-height: 26px !important;
+  padding: 3px 9px !important;
+  font-size: 11px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-toggles,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-toggles,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-toggles {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  gap: 6px !important;
+  min-width: 0 !important;
+  align-items: center !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-toggle-card,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-toggle-card,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-toggle-card {
+  min-height: 34px !important;
+  padding: 5px 8px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-toggle-hint,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-toggle-hint,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-toggle-hint {
+  display: none !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-advanced-controls,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-advanced-controls,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-advanced-controls {
+  grid-column: 1 / -1 !important;
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-advanced-controls summary,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-advanced-controls summary,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-advanced-controls summary {
+  width: fit-content !important;
+  min-height: 20px !important;
+  padding: 0 2px !important;
+  font-size: 11px !important;
+  line-height: 20px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-advanced-controls:not([open]),
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-advanced-controls:not([open]),
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-advanced-controls:not([open]) {
+  height: 20px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-advanced-controls[open],
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-advanced-controls[open],
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-advanced-controls[open] {
+  padding-top: 6px !important;
+  border-top: 1px solid color-mix(in srgb, var(--lifeos-border) 65%, transparent) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-advanced-grid,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-advanced-grid,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-advanced-grid {
+  display: grid !important;
+  grid-template-columns: repeat(5, minmax(120px, 1fr)) !important;
+  gap: 8px !important;
+  align-items: start !important;
+  padding-top: 6px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-advanced-grid .lifeos-project-scope-select,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-advanced-grid .lifeos-project-scope-select,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-advanced-grid .lifeos-project-scope-select {
+  min-height: 28px !important;
+  font-size: 11px !important;
+}
+
+@media (max-width: 1280px) {
+  .lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-primary-controls {
+    grid-template-columns: minmax(180px, 1fr) minmax(140px, 0.6fr) !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-provider-switch,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-provider-switch,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-provider-switch {
+    grid-column: 1 / -1 !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .lifeos-chat-view-host .lifeos-chat-composer-controls,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls,
+  .lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+  .lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-advanced-grid,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-advanced-grid,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-advanced-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-toggles,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-toggles,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-toggles {
+    grid-column: 1 / -1 !important;
+    grid-row: auto !important;
+    justify-content: flex-start !important;
+  }
 }

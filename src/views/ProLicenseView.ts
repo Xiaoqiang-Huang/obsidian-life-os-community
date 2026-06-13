@@ -2,7 +2,13 @@ import { ItemView, Notice, Platform, TFile, WorkspaceLeaf, setIcon } from "obsid
 import { PRO_LICENSE_VIEW_TYPE } from "../constants";
 import { LicenseClient, type CreateOrderResult, type PaymentOrder, type ActivationResult, type RedeemResult } from "../licensing/license-client";
 import { buildAccountCenterUrl, buildDeviceQuotaMessage, getPaymentPresentation, isDeviceQuotaError } from "../licensing/mobile-payment";
-import type { LicenseSku, LicenseStateSnapshot, LicenseStatusLabel } from "../licensing/license-types";
+import {
+  LIFEOS_CURRENT_LIFETIME_PRO_SKU,
+  LIFEOS_CURRENT_MONTHLY_PRO_SKU,
+  type LicenseSku,
+  type LicenseStateSnapshot,
+  type LicenseStatusLabel
+} from "../licensing/license-types";
 import { resolveLicenseStatus } from "../licensing/entitlement";
 import { verifyLicenseEntitlementToken } from "../licensing/entitlement-token";
 import type PersonalLifeSystemPlugin from "../main";
@@ -22,17 +28,17 @@ const PRODUCT_COPY: Record<"monthly" | "lifetime", {
   maxDevices: string;
 }> = {
   monthly: {
-    sku: "pro_monthly_990",
+    sku: LIFEOS_CURRENT_MONTHLY_PRO_SKU,
     title: "月付 Pro",
-    price: "9.9 元 / 30 天",
+    price: "19.9 元 / 30 天",
     description: "设备数最多 3 台，适合先完整体验 Pro 工作流。",
     maxDevices: "设备数最多 3 台"
   },
   lifetime: {
-    sku: "pro_49",
+    sku: LIFEOS_CURRENT_LIFETIME_PRO_SKU,
     title: "买断 Pro",
-    price: "49 元一次买断",
-    description: "一次买断，长期使用基础 Pro 能力。",
+    price: "299 元一次买断",
+    description: "一次买断，长期使用全部 Pro 能力。",
     maxDevices: "设备数最多 5 台"
   }
 };

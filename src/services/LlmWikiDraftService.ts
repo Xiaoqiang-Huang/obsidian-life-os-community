@@ -2,8 +2,8 @@ import { App, TFile, normalizePath } from "obsidian";
 import type { DirectoryLanguage } from "../settings";
 import { LlmWikiPathService } from "./LlmWikiPathService";
 import { appendFile, ensureFolder } from "../utils/vault";
+import { buildKeywordLinkedMarkdown } from "./KeywordLinkService";
 import {
-  detectLlmWikiPrivacyLevel,
   normalizedLlmWikiSimilarity,
   replaceLlmWikiFrontmatterValue,
   simpleLlmWikiHash,
@@ -111,6 +111,33 @@ export class LlmWikiDraftService {
     return true;
   }
 
+  async markDraftSkipped(draftPath: string, skippedAt: string, reason = "User chose not to add this Draft to formal Wiki."): Promise<boolean> {
+    if (!this.isDraftPath(draftPath)) return false;
+
+    const draftFile = this.app.vault.getAbstractFileByPath(draftPath);
+    if (!(draftFile instanceof TFile)) return false;
+    if (!this.isCurrentDraftFile(draftPath, draftFile)) return false;
+
+    const current = await this.app.vault.read(draftFile);
+    if (!this.isPendingLlmWikiDraft(current)) return false;
+    const markdown = [
+      ["status", "skipped"],
+      ["skipped_at", skippedAt],
+      ["skipped_reason", reason]
+    ].reduce(
+      (nextMarkdown, [key, value]) => replaceLlmWikiFrontmatterValue(nextMarkdown, key, value),
+      current
+    );
+    if (!this.isCurrentDraftFile(draftPath, draftFile)) return false;
+    await this.app.vault.modify(draftFile, markdown);
+    try {
+      await this.appendSkippedLog(draftPath, skippedAt, reason);
+    } catch {
+      // Skipping should still remove the draft from the review queue even if the audit log cannot be appended.
+    }
+    return true;
+  }
+
   async executeAcceptance(
     draftPath: string,
     recommendation: LlmWikiAcceptanceRecommendation,
@@ -165,10 +192,6 @@ export class LlmWikiDraftService {
       return this.rejectedAcceptance("这不是待接受的 LLM Wiki Draft。", action, targetPath);
     }
 
-    if (this.isUnsafeDraftForAcceptance(current, body, draftFile.basename)) {
-      return this.rejectedAcceptance("敏感或本地限定 Draft 不允许写入正式 Wiki，已保持暂存。", action, targetPath);
-    }
-
     if (!this.isCurrentDraftFile(draftPath, draftFile)) {
       return this.rejectedAcceptance("Draft 已变化或不再是当前 Draft，未执行写入。", action, targetPath);
     }
@@ -185,6 +208,7 @@ export class LlmWikiDraftService {
         const block = `${mergeBlockMarkers.start}\n\n## Accepted Draft ${acceptedAt}\n\n${body}\n\n${mergeBlockMarkers.end}`;
         await this.app.vault.append(mergeTargetFile, `\n\n${block}`);
       }
+      await this.refreshFormalKeywordLinks(mergeTargetFile);
     } else {
       try {
         await this.createFormalWikiPage(targetPath, this.buildFormalWikiMarkdown(current, body));
@@ -241,7 +265,8 @@ export class LlmWikiDraftService {
   }
 
   private inferDraftTitle(markdown: string, basename = ""): string {
-    const firstLine = String(markdown || "").split(/\r?\n/, 1)[0] || "";
+    const body = this.stripFrontmatter(markdown).trimStart();
+    const firstLine = body.split(/\r?\n/, 1)[0] || "";
     const heading = firstLine.match(/^#\s+(.+)$/)?.[1]?.trim();
     return heading || String(basename || "").trim() || "LLM Wiki Draft";
   }
@@ -275,29 +300,20 @@ export class LlmWikiDraftService {
     return String(markdown || "").replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n)?/, "");
   }
 
-  private buildFormalWikiMarkdown(draftMarkdown: string, body: string): string {
+  private buildFormalWikiMarkdown(draftMarkdown: string, body: string, privacyOverride?: "normal" | "private"): string {
     const frontmatter = this.parseDraftFrontmatter(draftMarkdown) ?? {};
-    const privacyLevel = this.normalizeDraftPrivacyLevel(frontmatter.privacy_level);
-    const aiProcessingAllowed = this.isDraftAiProcessingAllowed(frontmatter.ai_processing_allowed) ? "true" : "false";
-    return [
+    const privacyLevel = privacyOverride ?? this.normalizeDraftPrivacyLevel(frontmatter.privacy_level);
+    const title = this.inferDraftTitle(draftMarkdown, "");
+    return buildKeywordLinkedMarkdown([
       "---",
       "type: llm-wiki-formal",
       `privacy_level: ${privacyLevel}`,
-      `ai_processing_allowed: ${aiProcessingAllowed}`,
+      "ai_processing_allowed: true",
       "---",
       "",
       body,
       ""
-    ].join("\n");
-  }
-
-  private isUnsafeDraftForAcceptance(markdown: string, body: string, fallbackTitle = ""): boolean {
-    const frontmatter = this.parseDraftFrontmatter(markdown);
-    if (this.normalizeDraftPrivacyLevel(frontmatter?.privacy_level) === "sensitive") return true;
-    if (!this.isDraftAiProcessingAllowed(frontmatter?.ai_processing_allowed)) return true;
-
-    const title = String(frontmatter?.title || "").trim() || this.inferDraftTitle(body, fallbackTitle);
-    return detectLlmWikiPrivacyLevel(`${title}\n${body}`) === "sensitive";
+    ].join("\n"), { title });
   }
 
   private isPendingLlmWikiDraft(markdown: string): boolean {
@@ -366,10 +382,6 @@ export class LlmWikiDraftService {
     return "normal";
   }
 
-  private isDraftAiProcessingAllowed(value: string | undefined): boolean {
-    return String(value ?? "true").trim().toLowerCase() !== "false";
-  }
-
   private parseYamlScalar(value: string): string {
     const trimmed = String(value || "").trim();
     if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
@@ -400,6 +412,15 @@ export class LlmWikiDraftService {
     return this.app.vault.create(targetPath, content);
   }
 
+  private async refreshFormalKeywordLinks(file: TFile): Promise<void> {
+    const current = await this.app.vault.read(file);
+    const title = this.inferDraftTitle(current, file.basename || "");
+    const next = buildKeywordLinkedMarkdown(current, { title });
+    if (next !== current) {
+      await this.app.vault.modify(file, next);
+    }
+  }
+
   private isCreateConflictError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error || "");
     return /already exists|file exists|path exists/i.test(message);
@@ -420,6 +441,14 @@ export class LlmWikiDraftService {
       this.app,
       this.paths.path("Wiki", "log.md"),
       `\n\n- accepted: ${this.normalizedPath(draftPath)}\n  - target: ${targetPath}\n  - at: ${acceptedAt}`
+    );
+  }
+
+  private async appendSkippedLog(draftPath: string, skippedAt: string, reason: string): Promise<void> {
+    await appendFile(
+      this.app,
+      this.paths.path("Wiki", "log.md"),
+      `\n\n- skipped: ${this.normalizedPath(draftPath)}\n  - at: ${skippedAt}\n  - reason: ${reason}`
     );
   }
 

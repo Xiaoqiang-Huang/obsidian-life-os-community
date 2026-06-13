@@ -1,6 +1,6 @@
 {
   "name": "obsidian-life-os",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "A local-first personal life system for Obsidian: diary, tasks, knowledge, memory, and AI-assisted reviews.",
   "main": "main.js",
   "scripts": {
@@ -18,11 +18,20 @@
   ],
   "author": "Xiaoqiang Huang",
   "license": "PolyForm-Noncommercial-1.0.0",
+  "dependencies": {
+    "@tesseract.js-data/chi_sim": "^1.0.0",
+    "@tesseract.js-data/eng": "^1.0.0",
+    "@ybouane/liquidglass": "^1.0.3",
+    "fflate": "^0.8.2",
+    "pdfjs-dist": "^6.0.227",
+    "tesseract.js": "^7.0.0"
+  },
   "devDependencies": {
     "@types/node": "^20.11.30",
     "builtin-modules": "^3.3.0",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.1",
     "obsidian": "^1.5.12",
+    "patch-package": "^8.0.1",
     "tslib": "^2.6.2",
     "typescript": "^5.4.5"
   }

@@ -1,5 +1,23 @@
 export type LicenseStatusLabel = "free" | "trial" | "monthly-pro" | "lifetime-pro";
-export type LicenseSku = "pro_monthly_990" | "pro_49" | "sponsor_99" | "sponsor_199";
+export type LicenseSku =
+  | "pro_monthly_990"
+  | "pro_monthly_1990"
+  | "pro_49"
+  | "pro_299"
+  | "sponsor_99"
+  | "sponsor_199";
+
+export const LIFEOS_CURRENT_MONTHLY_PRO_SKU: LicenseSku = "pro_monthly_1990";
+export const LIFEOS_CURRENT_LIFETIME_PRO_SKU: LicenseSku = "pro_299";
+
+export const LIFEOS_MONTHLY_PRO_SKUS: readonly LicenseSku[] = [
+  "pro_monthly_990",
+  LIFEOS_CURRENT_MONTHLY_PRO_SKU
+];
+
+export function isLifeOsMonthlyProSku(sku: LicenseSku): boolean {
+  return LIFEOS_MONTHLY_PRO_SKUS.includes(sku);
+}
 
 export interface LicenseRecordSnapshot {
   id: string;

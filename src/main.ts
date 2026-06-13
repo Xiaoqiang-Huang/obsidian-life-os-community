@@ -25,6 +25,7 @@ import {
   getCivilServiceInterviewThinkingModelPrompt,
   normalizeExamProfileType,
   normalizeDirectoryLanguage,
+  normalizeTaskFormDraft,
   normalizeThemeStyle,
   normalizeUiFrameworkSettings,
   setStoredAiApiKey,
@@ -66,6 +67,7 @@ import { showTodayTasks } from "./exam/tasks";
 import { showTrainingPlan } from "./exam/training-plan";
 import { showUploadMaterial } from "./exam/materials";
 import { showInterviewTrends } from "./exam/interview";
+import { destroyLifeOSLiquidGlassRuntime, refreshLifeOSLiquidGlassRuntime } from "./ui/liquid-glass-runtime";
 import { generateReport, showEmotionTracking, showDiarySearch } from "./reports";
 import { QuickCaptureModal } from "./modals/QuickCaptureModal";
 import { FirstRunModal as LifeOSFirstRunModal } from "./modals/FirstRunModal";
@@ -97,6 +99,8 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   private dailyMaintenanceRunDate = "";
   private midnightTimer: number | null = null;
   private modalTextareaObserver: MutationObserver | null = null;
+  private liquidGlassObserver: MutationObserver | null = null;
+  private liquidGlassRefreshTimer: number | null = null;
   private pendingChatPrompt = "";
   private readonly lifeOsViewTypes = [
     CHAT_VIEW_TYPE,
@@ -448,6 +452,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     }
     this.modalTextareaObserver?.disconnect();
     this.modalTextareaObserver = null;
+    this.stopLiquidGlassRuntime();
   }
 
   // ═══════════════════════════════════════════════════
@@ -471,6 +476,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.settings.directoryLanguage = normalizeDirectoryLanguage(this.settings.directoryLanguage);
     this.settings.examProfileType = normalizeExamProfileType(this.settings.examProfileType);
     this.settings.customExamProfileName = this.settings.customExamProfileName ?? "";
+    this.settings.lastTaskDraft = normalizeTaskFormDraft((storedData as Record<string, unknown>).lastTaskDraft);
     this.settings.importedAiSkills = normalizeImportedAiSkillRecords((storedData as Record<string, unknown>).importedAiSkills);
     this.settings.licenseInstallationId = normalizeInstallationId(this.settings.licenseInstallationId);
     this.settings.licenseApiBaseUrl = this.settings.licenseApiBaseUrl?.trim() || DEFAULT_SETTINGS.licenseApiBaseUrl;
@@ -530,6 +536,8 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       document.body.addClass(cls);
     }
     this.syncThemeTargets(themeStyle);
+    this.configureLiquidGlassRuntime(themeStyle);
+    this.refreshVisibleNames();
     this.queueLifeOsFileStyling();
     document.body.removeClass("pls-has-custom-bg");
     document.body.style.removeProperty("--pls-custom-bg");
@@ -547,6 +555,59 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       for (const cls of getThemeStyleClasses(themeStyle)) {
         element.addClass(cls);
       }
+    });
+  }
+
+  private configureLiquidGlassRuntime(themeStyle: ThemeStyle): void {
+    if (themeStyle !== "liquid-glass") {
+      this.stopLiquidGlassRuntime();
+      return;
+    }
+    if (!this.liquidGlassObserver) {
+      this.liquidGlassObserver = new MutationObserver(() => this.queueLiquidGlassRefresh());
+      this.liquidGlassObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+    }
+    this.queueLiquidGlassRefresh();
+  }
+
+  private queueLiquidGlassRefresh(): void {
+    if (this.settings.themeStyle !== "liquid-glass") return;
+    if (this.liquidGlassRefreshTimer) {
+      window.clearTimeout(this.liquidGlassRefreshTimer);
+    }
+    this.liquidGlassRefreshTimer = window.setTimeout(() => {
+      this.liquidGlassRefreshTimer = null;
+      void refreshLifeOSLiquidGlassRuntime();
+    }, 180);
+  }
+
+  private stopLiquidGlassRuntime(): void {
+    if (this.liquidGlassRefreshTimer) {
+      window.clearTimeout(this.liquidGlassRefreshTimer);
+      this.liquidGlassRefreshTimer = null;
+    }
+    this.liquidGlassObserver?.disconnect();
+    this.liquidGlassObserver = null;
+    destroyLifeOSLiquidGlassRuntime();
+  }
+
+  private refreshVisibleNames(): void {
+    const systemName = this.settings.systemName?.trim() || "Life OS";
+    const assistantName = this.settings.assistantName?.trim() || "Life OS";
+    document.querySelectorAll<HTMLElement>(".lifeos-brand-title, .pls-sidebar-title").forEach((element) => {
+      element.setText(systemName);
+    });
+    document.querySelectorAll<HTMLElement>(".lifeos-chat-top-copy h1").forEach((element) => {
+      element.setText(assistantName);
+    });
+    document.querySelectorAll<HTMLElement>(".lifeos-chat-welcome h2").forEach((element) => {
+      element.setText(`你好，我是 ${assistantName}`);
+    });
+    document.querySelectorAll<HTMLElement>(".lifeos-chat-bubble-ai .lifeos-chat-bubble-label").forEach((element) => {
+      element.setText(assistantName);
     });
   }
 
@@ -1303,7 +1364,15 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     const dailyAbstract = this.app.vault.getAbstractFileByPath(this.getTodayNotePath(date));
     if (!(dailyAbstract instanceof TFile)) return;
 
-    const carriedCount = await this.carryOpenTasksToDate(dailyAbstract, date, carryToDate);
+    const canAutoCarryover = hasProAccess(
+      this.settings.licenseSnapshot,
+      new Date(),
+      this.settings.licenseEntitlementToken
+    );
+    const carriedCount = canAutoCarryover ? await this.carryOpenTasksToDate(dailyAbstract, date, carryToDate) : 0;
+    if (!canAutoCarryover) {
+      console.log(`[personal-life-system] skipped automatic task carryover for ${date}; Pro is required`);
+    }
     if (!summaryExists) {
       console.log(`[personal-life-system] skipped automatic AI archive for ${date}; user confirmation is required for AI writeback`);
     }

@@ -14,6 +14,10 @@ export interface SummaryInfo {
   basename: string;
 }
 
+export type SummaryInfoByPeriod = Record<ReviewSummaryPeriod, SummaryInfo[]>;
+
+const REVIEW_SUMMARY_PERIODS: ReviewSummaryPeriod[] = ["Daily", "Weekly", "Monthly", "Yearly"];
+
 export class ReviewService {
   constructor(private app: App, private fs: FileSystemService, private settings?: PersonalLifeSystemSettings) {}
 
@@ -45,11 +49,26 @@ export class ReviewService {
   }
 
   listSummaries(period: ReviewSummaryPeriod): SummaryInfo[] {
-    const prefix = this.fs.path("Memory", "Summaries", period) + "/";
-    return this.app.vault.getMarkdownFiles()
-      .filter((file) => file.path.startsWith(prefix))
-      .sort((a, b) => b.basename.localeCompare(a.basename))
-      .map((file) => ({ title: file.basename, path: file.path, basename: file.basename }));
+    return this.listSummariesByPeriod()[period];
+  }
+
+  listSummariesByPeriod(): SummaryInfoByPeriod {
+    const groups = this.emptySummaryGroups();
+    const prefixes = new Map(REVIEW_SUMMARY_PERIODS.map((period) => [period, this.fs.path("Memory", "Summaries", period) + "/"]));
+
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      for (const period of REVIEW_SUMMARY_PERIODS) {
+        const prefix = prefixes.get(period);
+        if (!prefix || !file.path.startsWith(prefix)) continue;
+        groups[period].push({ title: file.basename, path: file.path, basename: file.basename });
+        break;
+      }
+    }
+
+    for (const period of REVIEW_SUMMARY_PERIODS) {
+      groups[period].sort((a, b) => b.basename.localeCompare(a.basename));
+    }
+    return groups;
   }
 
   async readHighlight(date = today()): Promise<string[]> {
@@ -144,5 +163,14 @@ export class ReviewService {
     const month = String(date.getMonth() + 1).padStart(2, "0");
     const day = String(date.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
+  }
+
+  private emptySummaryGroups(): SummaryInfoByPeriod {
+    return {
+      Daily: [],
+      Weekly: [],
+      Monthly: [],
+      Yearly: []
+    };
   }
 }

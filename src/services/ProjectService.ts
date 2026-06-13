@@ -3,6 +3,7 @@ import type { LifeOSProject, LifeOSProjectStatus, LifeOSProjectType, LifeOSTask 
 import { randomId } from "../utils/ids";
 import { ensureFile, readFile } from "../utils/vault";
 import type { FileSystemService } from "./FileSystemService";
+import { ProjectDocumentService } from "./ProjectDocumentService";
 import {
   buildProjectOverview,
   formatProjectForIndex,
@@ -45,6 +46,7 @@ export class ProjectService {
 
     const file = await ensureFile(this.app, this.fs.path("Projects", "index.md"), PROJECTS_INDEX_FALLBACK);
     await this.app.vault.append(file, ProjectService.formatProject(project));
+    await new ProjectDocumentService(this.app, this.fs).ensureProjectSpace(project);
     return project;
   }
 

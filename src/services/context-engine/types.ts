@@ -7,6 +7,7 @@ export interface ContextEngineBuildInput {
   chatMode?: ChatContextMode;
   date?: string;
   maxChars?: number;
+  projectScopeId?: string;
   fetchUrl?: (url: string) => Promise<string>;
   searchWeb?: (query: string) => Promise<string>;
 }
@@ -33,7 +34,7 @@ export interface ContextRetrievalPlan {
 export interface ContextSource {
   path: string;
   title: string;
-  type: "current-note" | "daily" | "task" | "memory" | "summary" | "knowledge" | "llm-wiki" | "graph" | "url";
+  type: "current-note" | "daily" | "task" | "project" | "memory" | "summary" | "knowledge" | "llm-wiki" | "graph" | "url";
   excerpt?: string;
 }
 

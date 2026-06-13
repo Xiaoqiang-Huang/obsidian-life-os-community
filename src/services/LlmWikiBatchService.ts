@@ -61,10 +61,11 @@ export class LlmWikiBatchService {
     throw new Error(`Could not create unique LLM Wiki batch manifest for ${safeId}`);
   }
 
-  async processShortSources(sources: CompileLlmWikiSourceInput[]): Promise<{ createdFiles: string[]; skipped: string[]; errors: string[] }> {
+  async processShortSources(sources: CompileLlmWikiSourceInput[]): Promise<{ createdFiles: string[]; skipped: string[]; errors: string[]; processedSourceIds: string[] }> {
     const createdFiles: string[] = [];
     const skipped: string[] = [];
     const errors: string[] = [];
+    const processedSourceIds: string[] = [];
 
     for (const source of sources) {
       const materialLength = classifyLlmWikiMaterialLength(source.rawContent);
@@ -81,12 +82,13 @@ export class LlmWikiBatchService {
 
         const draft = await this.compiler.compileSourceToDraft(source);
         createdFiles.push(draft.path);
+        processedSourceIds.push(source.sourceId);
       } catch (error) {
         errors.push(`${source.sourceId}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
-    return { createdFiles, skipped, errors };
+    return { createdFiles, skipped, errors, processedSourceIds };
   }
 
   private sanitizeManifestId(id: string): string {

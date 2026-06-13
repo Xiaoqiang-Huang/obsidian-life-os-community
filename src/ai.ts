@@ -1,5 +1,5 @@
 import { Notice, Platform, requestUrl } from "obsidian";
-import { PersonalLifeSystemSettings, getExamAssistantPrompt, getExamProfileLabel, normalizeAiApiKeyInput, validateAiProviderConfig } from "./settings";
+import { PersonalLifeSystemSettings, getExamAssistantPrompt, getExamProfileLabel, normalizeAiApiKeyInput, validateAiProviderConfig, type AiReasoningEffort } from "./settings";
 import { stripCodeFences } from "./utils";
 
 export interface AiMessage {
@@ -27,12 +27,21 @@ export interface AiRequest {
   temperature?: number;
   responseFormat?: "text" | "json";
   model?: string;
+  reasoningEffort?: AiReasoningEffort;
+}
+
+export interface AiUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  estimated?: boolean;
 }
 
 export interface AiResponse {
   ok: boolean;
   text?: string;
   error?: string;
+  usage?: AiUsage;
 }
 
 export interface AiStreamCallbacks {
@@ -362,6 +371,42 @@ function extractAnthropicText(payload: unknown): string {
   return "";
 }
 
+function toPositiveTokenCount(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return undefined;
+  }
+  return Math.round(value);
+}
+
+function extractAiUsage(payload: unknown): AiUsage | undefined {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+
+  const data = payload as Record<string, unknown>;
+  const usage = (data.usage && typeof data.usage === "object" ? data.usage : data) as Record<string, unknown>;
+  const inputTokens =
+    toPositiveTokenCount(usage.prompt_tokens) ??
+    toPositiveTokenCount(usage.input_tokens) ??
+    toPositiveTokenCount(usage.promptTokens) ??
+    toPositiveTokenCount(usage.inputTokens);
+  const outputTokens =
+    toPositiveTokenCount(usage.completion_tokens) ??
+    toPositiveTokenCount(usage.output_tokens) ??
+    toPositiveTokenCount(usage.completionTokens) ??
+    toPositiveTokenCount(usage.outputTokens);
+  const totalTokens =
+    toPositiveTokenCount(usage.total_tokens) ??
+    toPositiveTokenCount(usage.totalTokens) ??
+    (inputTokens !== undefined || outputTokens !== undefined ? (inputTokens ?? 0) + (outputTokens ?? 0) : undefined);
+
+  if (inputTokens === undefined && outputTokens === undefined && totalTokens === undefined) {
+    return undefined;
+  }
+
+  return { inputTokens, outputTokens, totalTokens };
+}
+
 function extractApiErrorMessage(payload: unknown): string {
   if (!payload || typeof payload !== "object") {
     return "";
@@ -544,6 +589,30 @@ function withoutTemperature(body: Record<string, unknown>): Record<string, unkno
   return rest;
 }
 
+function normalizeReasoningEffort(value: unknown): AiReasoningEffort {
+  return value === "low" || value === "medium" || value === "high" || value === "max" ? value : "default";
+}
+
+function applyReasoningEffort(
+  body: Record<string, unknown>,
+  settings: PersonalLifeSystemSettings,
+  request: AiRequest
+): Record<string, unknown> {
+  const effort = normalizeReasoningEffort(request.reasoningEffort ?? settings.aiReasoningEffort);
+  if (effort === "default") return body;
+  return { ...body, reasoning: { effort } };
+}
+
+function bodyHasReasoningEffort(body: Record<string, unknown>): boolean {
+  const reasoning = body.reasoning;
+  return Boolean(reasoning && typeof reasoning === "object" && Object.prototype.hasOwnProperty.call(reasoning, "effort"));
+}
+
+function withoutReasoningEffort(body: Record<string, unknown>): Record<string, unknown> {
+  const { reasoning: _reasoning, ...rest } = body;
+  return rest;
+}
+
 export function isUnsupportedTemperatureError(error: string): boolean {
   const text = error.toLowerCase();
   if (!/(temperature|top_p|sampling|采样|温度)/i.test(text)) {
@@ -552,45 +621,78 @@ export function isUnsupportedTemperatureError(error: string): boolean {
   return /(not supported|unsupported|does not support|invalid|only.*default|must be|不支持|无效|固定|默认)/i.test(text);
 }
 
+export function isUnsupportedReasoningEffortError(error: string): boolean {
+  const text = String(error || "").toLowerCase();
+  if (!/(reasoning|effort|thinking|reasoning\.effort|reasoning_effort|推理)/i.test(text)) {
+    return false;
+  }
+  return /(not supported|unsupported|does not support|unknown|unrecognized|invalid|extra inputs|unexpected|不支持|无效|未知|未识别)/i.test(text);
+}
+
 function shouldRetryWithoutTemperature(body: Record<string, unknown>, error: string): boolean {
   return bodyHasTemperature(body) && isUnsupportedTemperatureError(error);
 }
 
+function shouldRetryWithoutReasoningEffort(body: Record<string, unknown>, error: string): boolean {
+  return bodyHasReasoningEffort(body) && isUnsupportedReasoningEffortError(error);
+}
+
 function getBodyAttempts(body: Record<string, unknown>, error?: string): Record<string, unknown>[] {
-  if (error && shouldRetryWithoutTemperature(body, error)) {
-    return [withoutTemperature(body)];
-  }
-  return [];
+  if (!error) return [];
+  const attempts: Record<string, unknown>[] = [];
+  const retryTemperature = shouldRetryWithoutTemperature(body, error);
+  const retryReasoning = shouldRetryWithoutReasoningEffort(body, error);
+  if (retryTemperature) attempts.push(withoutTemperature(body));
+  if (retryReasoning) attempts.push(withoutReasoningEffort(body));
+  if (retryTemperature && retryReasoning) attempts.push(withoutReasoningEffort(withoutTemperature(body)));
+  const seen = new Set<string>();
+  return attempts.filter((attempt) => {
+    const key = JSON.stringify(attempt);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function buildOpenAiBaseBody(
+  settings: PersonalLifeSystemSettings,
+  request: AiRequest
+): Record<string, unknown> {
+  return applyReasoningEffort(applyTemperature({
+    model: getRequestModel(settings, request),
+    messages: request.messages
+  }, settings, request), settings, request);
+}
+
+function buildAnthropicBaseBody(
+  settings: PersonalLifeSystemSettings,
+  request: AiRequest
+): Record<string, unknown> {
+  return applyTemperature({
+    model: getRequestModel(settings, request),
+    max_tokens: 1800,
+    system: extractTextFromMessageContent(request.messages.find((message) => message.role === "system")?.content),
+    messages: request.messages
+      .filter((message) => message.role !== "system")
+      .map((message) => ({
+        role: message.role === "assistant" ? "assistant" : "user",
+        content: toAnthropicContent(message.content)
+      }))
+  }, settings, request);
 }
 
 function buildAnthropicBody(
   settings: PersonalLifeSystemSettings,
   request: AiRequest
 ): Record<string, unknown> {
-  const system = extractTextFromMessageContent(request.messages.find((message) => message.role === "system")?.content);
-  const messages = request.messages
-    .filter((message) => message.role !== "system")
-    .map((message) => ({
-      role: message.role === "assistant" ? "assistant" : "user",
-      content: toAnthropicContent(message.content)
-    }));
-
-  return applyTemperature({
-    model: getRequestModel(settings, request),
-    max_tokens: 1800,
-    system,
-    messages
-  }, settings, request);
+  return buildAnthropicBaseBody(settings, request);
 }
 
 export function buildOpenAiBodies(
   settings: PersonalLifeSystemSettings,
   request: AiRequest
 ): Record<string, unknown>[] {
-  const baseBody = applyTemperature({
-    model: getRequestModel(settings, request),
-    messages: request.messages
-  }, settings, request);
+  const baseBody = buildOpenAiBaseBody(settings, request);
 
   if (request.responseFormat !== "json") {
     return [baseBody];
@@ -641,7 +743,7 @@ async function tryCandidates(
           continue;
         }
 
-        return { ok: true, text: stripCodeFences(text) };
+        return { ok: true, text: stripCodeFences(text), usage: extractAiUsage(response.json) };
       } catch (error) {
         lastError = extractRequestErrorMessage(error);
         attempts.push(...getBodyAttempts(attemptBody, lastError));
@@ -874,7 +976,7 @@ export class AiClient {
             const json = JSON.parse(text);
             const extracted = mode === "anthropic" ? extractAnthropicText(json) : extractOpenAiText(json);
             callbacks.onDone?.(extracted);
-            return { ok: true, text: extracted };
+            return { ok: true, text: extracted, usage: extractAiUsage(json) };
           } catch {
             return { ok: false, error: "无法解析响应。" };
           }
@@ -884,6 +986,7 @@ export class AiClient {
         const decoder = new TextDecoder();
         let fullText = "";
         let buffer = "";
+        let usage: AiUsage | undefined;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -899,6 +1002,7 @@ export class AiClient {
                 const data = line.slice(6);
                 try {
                   const chunk = JSON.parse(data);
+                  usage = extractAiUsage(chunk) ?? usage;
                   if (chunk.type === "content_block_delta") {
                     const text = chunk.delta?.text ?? "";
                     if (text) {
@@ -914,6 +1018,7 @@ export class AiClient {
                 if (data === "[DONE]") continue;
                 try {
                   const chunk = JSON.parse(data);
+                  usage = extractAiUsage(chunk) ?? usage;
                   const delta = chunk.choices?.[0]?.delta?.content;
                   if (typeof delta === "string" && delta) {
                     fullText += delta;
@@ -932,6 +1037,7 @@ export class AiClient {
             if (!dataLine || dataLine === "[DONE]") continue;
             try {
               const chunk = JSON.parse(dataLine);
+              usage = extractAiUsage(chunk) ?? usage;
               const text = mode === "anthropic"
                 ? (chunk.delta?.text ?? "")
                 : (chunk.choices?.[0]?.delta?.content ?? "");
@@ -947,10 +1053,10 @@ export class AiClient {
         if (finalText) {
           const displayText = finalizeStreamText(request, finalText);
           callbacks.onDone?.(displayText);
-          return { ok: true, text: displayText };
+          return { ok: true, text: displayText, usage };
         }
         callbacks.onDone?.("");
-        return { ok: true, text: "" };
+        return { ok: true, text: "", usage };
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") throw error;
         lastError = extractRequestErrorMessage(error);

@@ -132,14 +132,51 @@ export class LocalRetrievalService {
 
   private excerpt(markdown: string, keywords: string[]): string {
     const normalized = markdown.replace(/\r\n/g, "\n").trim();
-    const lower = normalized.toLowerCase();
+    const clean = normalized.replace(/^---\r?\n[\s\S]*?\r?\n---\s*/, "").trim();
+    if (!clean) return "";
+    const meaningfulKeywords = this.meaningfulExcerptKeywords(keywords);
+    if (meaningfulKeywords.length === 0 || clean.length <= EXCERPT_MAX_CHARS) return clean.slice(0, EXCERPT_MAX_CHARS);
+
+    const blocks = clean.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+    const best = blocks
+      .map((block, index) => ({ block, index, score: this.blockKeywordScore(block, meaningfulKeywords) }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score || a.index - b.index)[0];
+    if (!best) return clean.slice(0, EXCERPT_MAX_CHARS);
+    return this.excerptBlockAroundKeywords(best.block, meaningfulKeywords, EXCERPT_MAX_CHARS);
+  }
+
+  private blockKeywordScore(block: string, keywords: string[]): number {
+    const lower = block.toLowerCase();
+    let score = 0;
+    for (const keyword of keywords) {
+      const normalized = keyword.toLowerCase();
+      if (!normalized) continue;
+      if (lower.includes(normalized)) score += 12 + Math.min(normalized.length, 16);
+    }
+    return score;
+  }
+
+  private excerptBlockAroundKeywords(block: string, keywords: string[], maxChars: number): string {
+    if (block.length <= maxChars) return block;
+    const lower = block.toLowerCase();
     const keywordIndex = keywords
       .map((keyword) => lower.indexOf(keyword.toLowerCase()))
       .filter((index) => index >= 0)
       .sort((a, b) => a - b)[0] ?? 0;
     const start = Math.max(0, keywordIndex - 240);
-    const excerpt = normalized.slice(start, start + EXCERPT_MAX_CHARS);
-    return start > 0 ? `...${excerpt}`.slice(0, EXCERPT_MAX_CHARS) : excerpt;
+    const excerpt = block.slice(start, start + maxChars);
+    return start > 0 ? `...${excerpt}`.slice(0, maxChars) : excerpt;
+  }
+
+  private meaningfulExcerptKeywords(keywords: string[]): string[] {
+    const generic = new Set(["life", "os", "project", "projects", "文档", "项目", "分析", "回答", "根据"]);
+    return Array.from(new Set(
+      keywords
+        .map((keyword) => keyword.trim())
+        .filter((keyword) => keyword.length >= 2)
+        .filter((keyword) => !generic.has(keyword.toLowerCase()))
+    )).slice(0, 16);
   }
 
   private sourceFor(item: ContextInventoryItem, markdown: string): ContextSource {
