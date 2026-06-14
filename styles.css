@@ -41057,3 +41057,73 @@ body.lifeos-theme-anime-moonlit .lifeos-root :is(.lifeos-hero, .lifeos-page-head
   min-height: 0 !important;
   padding-bottom: 12px !important;
 }
+
+/* Life OS chat full-height desktop workspace: the chat surface should occupy
+   the available pane, with the composer anchored at the bottom. */
+@media (min-width: 901px) {
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .view-content,
+  .lifeos-chat-view-host .view-content,
+  .lifeos-chat-view-content,
+  .lifeos-chat-view-host .lifeos-root.lifeos-chat-root,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root,
+  .lifeos-chat-view-host .lifeos-shell.lifeos-chat-main-parent,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-shell.lifeos-chat-main-parent {
+    height: 100% !important;
+    min-height: 100% !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-shell.lifeos-chat-main-parent,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-shell.lifeos-chat-main-parent {
+    align-items: stretch !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-main.lifeos-chat-main-host,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-main.lifeos-chat-main-host,
+  .lifeos-root.lifeos-chat-root .lifeos-main.lifeos-chat-main-host {
+    display: grid !important;
+    height: 100% !important;
+    min-height: 100% !important;
+    grid-template-rows: minmax(0, 1fr) !important;
+    align-items: stretch !important;
+    overflow: hidden !important;
+    padding-bottom: clamp(18px, 2svh, 28px) !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-shell-focused,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-shell-focused,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-shell-focused {
+    height: 100% !important;
+    min-height: 0 !important;
+    align-self: stretch !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-main,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-main,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-main {
+    height: 100% !important;
+    min-height: 0 !important;
+    display: grid !important;
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto auto !important;
+    align-content: stretch !important;
+    overflow: hidden !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-log,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-log,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-log,
+  .lifeos-chat-view-host .lifeos-chat-log:has(.lifeos-chat-welcome),
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-log:has(.lifeos-chat-welcome),
+  .lifeos-root.lifeos-chat-root .lifeos-chat-log:has(.lifeos-chat-welcome) {
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: auto !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-welcome,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-welcome,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-welcome {
+    align-self: center !important;
+    justify-self: center !important;
+  }
+}
