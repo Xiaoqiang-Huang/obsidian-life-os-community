@@ -1,6 +1,6 @@
 {
   "name": "obsidian-life-os",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "A local-first personal life system for Obsidian: diary, tasks, knowledge, memory, and AI-assisted reviews.",
   "main": "main.js",
   "scripts": {
