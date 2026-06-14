@@ -41012,12 +41012,28 @@ body.lifeos-theme-anime-moonlit .lifeos-root :is(.lifeos-hero, .lifeos-page-head
   align-self: start !important;
 }
 
-/* Life OS chat compact flow: keep short conversations from leaving a viewport-sized
-   empty panel below the composer. */
+/* Life OS chat compact flow: fill the view background without stretching the
+   short conversation card. */
 .lifeos-chat-view-host .lifeos-root.lifeos-chat-root,
-.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root {
+  height: auto !important;
+  min-height: 100% !important;
+}
+
 .lifeos-chat-view-host .lifeos-shell.lifeos-chat-main-parent,
-.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-shell.lifeos-chat-main-parent,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-shell.lifeos-chat-main-parent {
+  height: auto !important;
+  min-height: 100% !important;
+  align-items: start !important;
+}
+
+.lifeos-chat-view-host .lifeos-sidebar,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-sidebar,
+.lifeos-root.lifeos-chat-root .lifeos-sidebar {
+  align-self: stretch !important;
+  min-height: 100% !important;
+}
+
 .lifeos-chat-view-host .lifeos-main.lifeos-chat-main-host,
 .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-main.lifeos-chat-main-host,
 .lifeos-chat-view-host .lifeos-chat-shell-focused,
