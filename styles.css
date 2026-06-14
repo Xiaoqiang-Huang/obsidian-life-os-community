@@ -40997,3 +40997,17 @@ body.lifeos-theme-anime-moonlit .lifeos-root :is(.lifeos-hero, .lifeos-page-head
 .lifeos-hidden-file-input {
   display: none;
 }
+
+/* Life OS chat transcript flow: avoid a dead flexible row under short replies. */
+.lifeos-chat-view-host .lifeos-chat-main,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-main,
+.lifeos-root.lifeos-chat-root .lifeos-chat-main {
+  grid-template-rows: auto auto auto auto auto auto !important;
+  align-content: start !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-log,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-log,
+.lifeos-root.lifeos-chat-root .lifeos-chat-log {
+  align-self: start !important;
+}
