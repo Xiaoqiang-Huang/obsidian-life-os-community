@@ -113,8 +113,13 @@ function renderGrid(parent: HTMLElement, weeks: HeatmapCell[][], options: Contri
       }
       const text = tooltipText(day, lang);
       const cell = column.createEl("button", {
-        cls: `lifeos-contrib-day level-${day.level}`,
-        attr: { type: "button", "aria-label": text, title: text }
+        cls: contributionDayClasses(day, options.plugin.settings),
+        attr: {
+          type: "button",
+          "aria-label": text,
+          title: text,
+          ...contributionDayAttributes(day)
+        }
       });
       cell.onmouseenter = () => showTooltip(tooltipHost, tooltip, cell, text);
       cell.onmouseleave = () => tooltip.hide();
@@ -123,6 +128,25 @@ function renderGrid(parent: HTMLElement, weeks: HeatmapCell[][], options: Contri
       cell.onclick = () => void openOrCreateDaily(options, day.date, lang);
     }
   }
+}
+
+function contributionDayClasses(day: DailyActivity, settings: PersonalLifeSystemPlugin["settings"]): string {
+  const classes = ["lifeos-contrib-day", `level-${day.level}`];
+  if (day.score > 0) classes.push("has-activity");
+  if (settings.heatmapIncludeDaily && (day.dailyNoteExists || day.dailyRecordCount > 0)) classes.push("has-daily");
+  if (settings.heatmapIncludeTasks && day.completedTaskCount > 0) classes.push("has-task");
+  if (settings.heatmapIncludeCheckins && day.checkinExists) classes.push("has-checkin");
+  if (settings.heatmapIncludeSummaries && day.summaryExists) classes.push("has-summary");
+  return classes.join(" ");
+}
+
+function contributionDayAttributes(day: DailyActivity): Record<string, string> {
+  return {
+    "data-lifeos-contrib-active": day.score > 0 ? "true" : "false",
+    "data-lifeos-contrib-level": String(day.level),
+    "data-lifeos-contrib-score": String(day.score),
+    "data-lifeos-contrib-checkin": day.checkinExists ? "true" : "false"
+  };
 }
 
 function showTooltip(parent: HTMLElement, tooltip: HTMLElement, cell: HTMLElement, text: string): void {

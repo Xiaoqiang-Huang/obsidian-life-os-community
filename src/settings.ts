@@ -1,5 +1,5 @@
 import type { LicenseStateSnapshot } from "./licensing/license-types";
-import type { ImportedAiSkillRecord } from "./services/AiSkillService";
+import type { AiSkillCustomCategory, ImportedAiSkillRecord } from "./services/AiSkillService";
 
 export type AiProviderType =
   | "auto"
@@ -80,6 +80,8 @@ export const THEME_STYLES = [
   "soft-saas",
   "obsidian",
   "compact",
+  "codex-light",
+  "codex-dark",
   "liquid-glass",
   "refractive-glass",
   "mesh-sunset",
@@ -480,6 +482,7 @@ export interface PersonalLifeSystemSettings {
   defaultChatContextMode: ChatContextMode;
   defaultAiSkillIds: string[];
   importedAiSkills: ImportedAiSkillRecord[];
+  customAiSkillCategories: AiSkillCustomCategory[];
   /** @deprecated use defaultAiSkillIds */
   defaultAiSkillId: string;
   lastTaskDraft: TaskFormDraft | null;
@@ -965,6 +968,7 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   defaultChatContextMode: "smart",
   defaultAiSkillIds: ["lifeos-general"],
   importedAiSkills: [],
+  customAiSkillCategories: [],
   defaultAiSkillId: "lifeos-general",
   lastTaskDraft: null,
   chatSendBehavior: "enterToSend",

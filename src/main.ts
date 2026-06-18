@@ -36,7 +36,7 @@ import {
 import { normalizeInstallationId } from "./licensing/installation-id";
 import { hasProAccess, requireProFeature } from "./licensing/entitlement";
 import { verifyLicenseEntitlementToken } from "./licensing/entitlement-token";
-import { normalizeImportedAiSkillRecords } from "./services/AiSkillService";
+import { normalizeCustomAiSkillCategories, normalizeImportedAiSkillRecords } from "./services/AiSkillService";
 import { PersonalLifeSystemSettingTab } from "./settings-tab";
 import {
   ensureFile,
@@ -91,10 +91,18 @@ import type {
   InterviewPracticeData,
   XingceQuestionData
 } from "./plugin-api";
+import type { ChatMessage } from "./types";
+
+export interface ActiveChatRuntimeState {
+  messages: ChatMessage[];
+  draftInput: string;
+  updatedAt: number;
+}
 
 export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin {
   settings: PersonalLifeSystemSettings;
   ai: AiClient;
+  activeChatState: ActiveChatRuntimeState = { messages: [], draftInput: "", updatedAt: 0 };
   private dailyMaintenancePromise: Promise<void> | null = null;
   private dailyMaintenanceRunDate = "";
   private midnightTimer: number | null = null;
@@ -477,6 +485,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.settings.examProfileType = normalizeExamProfileType(this.settings.examProfileType);
     this.settings.customExamProfileName = this.settings.customExamProfileName ?? "";
     this.settings.lastTaskDraft = normalizeTaskFormDraft((storedData as Record<string, unknown>).lastTaskDraft);
+    this.settings.customAiSkillCategories = normalizeCustomAiSkillCategories((storedData as Record<string, unknown>).customAiSkillCategories);
     this.settings.importedAiSkills = normalizeImportedAiSkillRecords((storedData as Record<string, unknown>).importedAiSkills);
     this.settings.licenseInstallationId = normalizeInstallationId(this.settings.licenseInstallationId);
     this.settings.licenseApiBaseUrl = this.settings.licenseApiBaseUrl?.trim() || DEFAULT_SETTINGS.licenseApiBaseUrl;

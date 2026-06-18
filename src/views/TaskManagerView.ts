@@ -66,6 +66,7 @@ export class TaskManagerView extends ItemView {
 
     if (open.length === 0 && done.length === 0) {
       this.renderGlobalEmpty(shellMain);
+      return;
     }
 
     const layout = shellMain.createDiv({ cls: "lifeos-project-task-layout" });

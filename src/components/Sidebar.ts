@@ -74,6 +74,7 @@ function renderNavItem(
   text.createSpan({ cls: "lifeos-nav-label", text: item.label });
   text.createSpan({ cls: "lifeos-nav-hint", text: item.hint });
   button.onclick = () => {
+    markNavigationPending(button);
     if (item.key === "dashboard") void plugin.activateDashboard();
     if (item.key === "tasks") void plugin.activateTasks();
     if (item.key === "memory") void plugin.activateMemory();
@@ -87,6 +88,16 @@ function renderNavItem(
     if (item.key === "checkins") void plugin.showCheckinModal();
     if (item.key === "settings") openSettings(plugin);
   };
+}
+
+function markNavigationPending(button: HTMLButtonElement): void {
+  button.addClass("is-pending");
+  const root = button.closest(".lifeos-root");
+  root?.addClass("is-navigating");
+  window.setTimeout(() => {
+    button.removeClass("is-pending");
+    root?.removeClass("is-navigating");
+  }, 360);
 }
 
 function openSettings(plugin: PersonalLifeSystemPlugin): void {

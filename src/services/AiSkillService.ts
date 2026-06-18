@@ -1,6 +1,6 @@
 import { BUILTIN_AI_SKILL_DATA } from "../generated/builtin-ai-skills";
 
-export type AiSkillCategory =
+export type BuiltInAiSkillCategory =
   | "system"
   | "tech-product"
   | "business-investing"
@@ -10,6 +10,22 @@ export type AiSkillCategory =
   | "workplace-reality"
   | "fictional-persona"
   | "other";
+
+export type AiSkillCategory = BuiltInAiSkillCategory | (string & {});
+
+export interface AiSkillCategoryMeta {
+  id: AiSkillCategory;
+  label: string;
+  description: string;
+  builtin?: boolean;
+}
+
+export interface AiSkillCustomCategory {
+  id: AiSkillCategory;
+  label: string;
+  description: string;
+  createdAt?: string;
+}
 
 export interface AiSkill {
   id: string;
@@ -42,7 +58,7 @@ export interface NormalizedGitHubSkillUrl {
   fileName: string;
 }
 
-export const AI_SKILL_CATEGORIES: Array<{ id: AiSkillCategory; label: string; description: string }> = [
+export const AI_SKILL_CATEGORIES: AiSkillCategoryMeta[] = [
   { id: "system", label: "系统", description: "Life OS 的默认综合助手。" },
   { id: "tech-product", label: "科技与产品", description: "产品判断、工程直觉、创业与技术决策。" },
   { id: "business-investing", label: "商业与投资", description: "商业判断、长期主义、谈判和投资视角；不是投资建议。" },
@@ -60,6 +76,7 @@ const MAX_SEPARATE_SPEAKERS = 12;
 const MAX_SKILL_TEXT_CHARS = 8000;
 const MAX_IMPORTED_SKILL_SOURCE_CHARS = 40000;
 export const IMPORTED_AI_SKILL_ID_PREFIX = "github-skill-";
+export const CUSTOM_AI_SKILL_CATEGORY_PREFIX = "custom-";
 
 const LEGACY_SKILL_ALIASES: Record<string, string> = {
   "steve-jobs": "steve-jobs-skill",
@@ -142,8 +159,26 @@ function skillPrompt(data: (typeof BUILTIN_AI_SKILL_DATA)[number]): string {
   ].filter(Boolean).join("\n");
 }
 
-function isAiSkillCategory(value: string | undefined): value is AiSkillCategory {
+function isBuiltInAiSkillCategory(value: string | undefined): value is BuiltInAiSkillCategory {
   return AI_SKILL_CATEGORIES.some((category) => category.id === value);
+}
+
+export function normalizeAiSkillCategoryId(value: unknown, fallback: AiSkillCategory = "other"): AiSkillCategory {
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  if (!trimmed) return fallback;
+  if (isBuiltInAiSkillCategory(trimmed)) return trimmed;
+  const slug = trimmed
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 72);
+  if (slug.startsWith(CUSTOM_AI_SKILL_CATEGORY_PREFIX) && slug.length > CUSTOM_AI_SKILL_CATEGORY_PREFIX.length) {
+    return slug;
+  }
+  return fallback;
 }
 
 function parseMarkdownFrontmatter(markdown: string): { metadata: Record<string, string>; body: string } {
@@ -197,6 +232,98 @@ function slugifySkillName(value: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 72);
   return slug || `skill-${hashText(value)}`;
+}
+
+function slugifyCustomCategoryLabel(value: string): string {
+  const slug = value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 56);
+  return slug || `category-${hashText(value)}`;
+}
+
+function compactCategoryText(value: string | undefined, fallback: string, maxChars: number): string {
+  const text = (value ?? "").replace(/\s+/g, " ").trim();
+  return (text || fallback).slice(0, maxChars);
+}
+
+export function createCustomAiSkillCategory(label: string, description = "", createdAt = new Date().toISOString()): AiSkillCustomCategory {
+  const cleanLabel = compactCategoryText(label, "", 48);
+  if (!cleanLabel) {
+    throw new Error("请输入自定义 Skill 分类名称。");
+  }
+  return {
+    id: `${CUSTOM_AI_SKILL_CATEGORY_PREFIX}${slugifyCustomCategoryLabel(cleanLabel)}`,
+    label: cleanLabel,
+    description: compactCategoryText(description, "用户自定义 Skill 分类。", 140),
+    createdAt
+  };
+}
+
+export function normalizeCustomAiSkillCategories(input: unknown): AiSkillCustomCategory[] {
+  if (!Array.isArray(input)) return [];
+  const normalized: AiSkillCustomCategory[] = [];
+  const seen = new Set<string>();
+
+  for (const item of input) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Partial<AiSkillCustomCategory>;
+    if (typeof record.label !== "string" || !record.label.trim()) continue;
+    const fallback = createCustomAiSkillCategory(record.label, record.description, record.createdAt);
+    const id = normalizeAiSkillCategoryId(record.id, fallback.id);
+    if (isBuiltInAiSkillCategory(id) || seen.has(id)) continue;
+    const category: AiSkillCustomCategory = {
+      id,
+      label: compactCategoryText(record.label, fallback.label, 48),
+      description: compactCategoryText(record.description, fallback.description, 140),
+      createdAt: typeof record.createdAt === "string" ? record.createdAt : fallback.createdAt
+    };
+    normalized.push(category);
+    seen.add(category.id);
+  }
+
+  return normalized;
+}
+
+export function ensureCustomAiSkillCategory(
+  existing: unknown,
+  label: string,
+  description = "",
+  createdAt = new Date().toISOString()
+): { categories: AiSkillCustomCategory[]; category: AiSkillCustomCategory } {
+  const categories = normalizeCustomAiSkillCategories(existing);
+  const draft = createCustomAiSkillCategory(label, description, createdAt);
+  const matched = categories.find((category) => category.id === draft.id || category.label.toLowerCase() === draft.label.toLowerCase());
+  if (matched) return { categories, category: matched };
+  return { categories: [...categories, draft], category: draft };
+}
+
+export function getAiSkillCategories(customCategories: unknown = []): AiSkillCategoryMeta[] {
+  const known = new Set(AI_SKILL_CATEGORIES.map((category) => category.id));
+  const custom = normalizeCustomAiSkillCategories(customCategories)
+    .filter((category) => !known.has(category.id))
+    .map((category): AiSkillCategoryMeta => ({
+      id: category.id,
+      label: category.label,
+      description: category.description || "用户自定义 Skill 分类。",
+      builtin: false
+    }));
+  return [
+    ...AI_SKILL_CATEGORIES.map((category) => ({ ...category, builtin: true })),
+    ...custom
+  ];
+}
+
+export function getAiSkillCategoryMeta(categoryId: AiSkillCategory, customCategories: unknown = []): AiSkillCategoryMeta {
+  return getAiSkillCategories(customCategories).find((category) => category.id === categoryId) ?? {
+    id: categoryId,
+    label: String(categoryId),
+    description: "用户自定义 Skill 分类。",
+    builtin: false
+  };
 }
 
 function importedSkillPrompt(record: ImportedAiSkillRecord): string {
@@ -412,6 +539,7 @@ export function buildImportedAiSkillRecord(input: {
   installedAt?: string;
   id?: string;
   localPath?: string;
+  category?: AiSkillCategory;
 }): ImportedAiSkillRecord {
   const markdown = input.markdown.replace(/\r\n/g, "\n").slice(0, MAX_IMPORTED_SKILL_SOURCE_CHARS).trim();
   if (!markdown) {
@@ -421,7 +549,7 @@ export function buildImportedAiSkillRecord(input: {
   const { metadata, body } = parseMarkdownFrontmatter(markdown);
   const name = (metadata.name || metadata.title || titleFromMarkdown(body) || "GitHub Skill").trim();
   const description = (metadata.description || fallbackDescription(body)).trim();
-  const category = isAiSkillCategory(metadata.category) ? metadata.category : "other";
+  const category = normalizeAiSkillCategoryId(input.category ?? metadata.category, "other");
   const idSource = input.id?.replace(new RegExp(`^${IMPORTED_AI_SKILL_ID_PREFIX}`), "") || name;
 
   return {
@@ -452,14 +580,15 @@ export function normalizeImportedAiSkillRecords(records: unknown): ImportedAiSki
         sourceUrl: record.sourceUrl,
         installedAt: typeof record.installedAt === "string" ? record.installedAt : undefined,
         id: typeof record.id === "string" ? record.id : undefined,
-        localPath: typeof record.localPath === "string" ? record.localPath : undefined
+        localPath: typeof record.localPath === "string" ? record.localPath : undefined,
+        category: normalizeAiSkillCategoryId(record.category, "other")
       });
       const merged: ImportedAiSkillRecord = {
         ...rebuilt,
         name: typeof record.name === "string" && record.name.trim() ? record.name.trim() : rebuilt.name,
         description: typeof record.description === "string" && record.description.trim() ? record.description.trim() : rebuilt.description,
         lens: typeof record.lens === "string" && record.lens.trim() ? record.lens.trim() : rebuilt.lens,
-        category: isAiSkillCategory(record.category) ? record.category : rebuilt.category
+        category: normalizeAiSkillCategoryId(record.category, rebuilt.category)
       };
       if (seen.has(merged.id)) continue;
       seen.add(merged.id);
@@ -556,7 +685,7 @@ export function getAiSkills(ids: string[] | undefined, importedSkills: AiSkill[]
   return normalized.map((id) => getAiSkill(id, importedSkills));
 }
 
-export function getAiSkillsByCategory(category: AiSkillCategory, importedSkills: AiSkill[] | undefined = []): AiSkill[] {
+export function getAiSkillsByCategory(category: AiSkillCategory | string, importedSkills: AiSkill[] | undefined = []): AiSkill[] {
   return allAiSkills(importedSkills).filter((item) => item.category === category);
 }
 
@@ -573,7 +702,12 @@ export function isAiSkillId(id: string | undefined, importedSkills: AiSkill[] | 
   return resolveSkillId(id, importedSkills) !== undefined;
 }
 
-export function composeAiSkillPrompt(ids: string[] | undefined, legacyId?: string, importedSkills: AiSkill[] | undefined = []): string {
+export function composeAiSkillPrompt(
+  ids: string[] | undefined,
+  legacyId?: string,
+  importedSkills: AiSkill[] | undefined = [],
+  customCategories: unknown = []
+): string {
   const skills = getAiSkills(normalizeAiSkillIds(ids, legacyId, importedSkills), importedSkills);
   const speakerSkills = skills.slice(0, MAX_SEPARATE_SPEAKERS);
   const detailedSkills = speakerSkills.slice(0, MAX_DETAILED_SKILLS);
@@ -582,7 +716,7 @@ export function composeAiSkillPrompt(ids: string[] | undefined, legacyId?: strin
   const selected = detailedSkills
     .map((item, index) => [
       `## Skill ${index + 1}: ${item.name}`,
-      `类别：${AI_SKILL_CATEGORIES.find((category) => category.id === item.category)?.label ?? item.category}`,
+      `类别：${getAiSkillCategoryMeta(item.category, customCategories).label}`,
       `视角：${item.lens}`,
       item.systemPrompt
     ].join("\n"))
@@ -590,7 +724,7 @@ export function composeAiSkillPrompt(ids: string[] | undefined, legacyId?: strin
   const lightweight = lightweightSkills.length > 0
     ? lightweightSkills.map((item, index) => [
       `## Skill ${detailedSkills.length + index + 1}: ${item.name}`,
-      `类别：${AI_SKILL_CATEGORIES.find((category) => category.id === item.category)?.label ?? item.category}`,
+      `类别：${getAiSkillCategoryMeta(item.category, customCategories).label}`,
       `视角：${item.lens}`,
       `方法论摘要：${item.description}`,
       "本轮只使用摘要级资料，不展开更长提示。"

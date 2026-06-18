@@ -4,7 +4,7 @@ import { Setting } from "obsidian";
 import type { AiProviderType, AiReasoningEffort, AssistantStyle, AssistantVerbosity, ChatContextMode, ChatMode, ChatSendBehavior, DirectoryLanguage, DisplayLanguage, ExamProfileType, HeatmapRange, LlmWikiCompileDepth, LlmWikiLongMaterialMode, LlmWikiSensitiveDefault, ThemeStyle } from "./settings";
 import { analyzeAiConnectionTestModels, DEFAULT_SETTINGS, EXAM_PROFILE_OPTIONS, getAiProviderPreset, getExamChatModeLabel, getExamProfileLabel, getStoredAiApiKey, getStoredAiProviderConfig, getThemeStyleClasses, normalizeAiApiKeyInput, normalizeThemeStyle, setStoredAiApiKey, setStoredAiProviderConfig, THEME_STYLES, validateAiProviderConfig } from "./settings";
 import { requireProFeature, resolveLicenseStatus } from "./licensing/entitlement";
-import { AI_SKILL_CATEGORIES, createImportedAiSkills, getAiSkills, getAiSkillsByCategory, normalizeAiSkillIds } from "./services/AiSkillService";
+import { createImportedAiSkills, getAiSkillCategories, getAiSkills, getAiSkillsByCategory, normalizeAiSkillIds } from "./services/AiSkillService";
 import { getUiThemeFamilies, getUiThemeMeta, getUiThemesByFamily } from "./ui/theme";
 import type { UiThemeDensity, UiThemeFamily, UiThemeMaterial, UiThemeMeta } from "./ui/types";
 import { installLifeOSResponsiveShell } from "./utils/responsive-shell";
@@ -98,7 +98,35 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       },
       "lifeos-theme-style-select"
     );
+    this.renderThemeQuickSwitch(card);
     this.renderThemeGallery(card);
+  }
+
+  private renderThemeQuickSwitch(parent: HTMLElement): void {
+    const current = normalizeThemeStyle(this.plugin.settings.themeStyle);
+    const row = parent.createDiv({ cls: "lifeos-theme-quick-row" });
+    row.createDiv({ cls: "lifeos-theme-quick-label", text: "快捷主题" });
+    const actions = row.createDiv({ cls: "lifeos-theme-quick-actions" });
+    for (const value of ["codex-light", "codex-dark"] as const) {
+      const button = actions.createEl("button", {
+        cls: ["lifeos-theme-quick-button", current === value ? "is-active" : ""].filter(Boolean).join(" "),
+        attr: {
+          type: "button",
+          "aria-pressed": current === value ? "true" : "false"
+        }
+      });
+      button.dataset.themeStyle = value;
+      button.createSpan({ cls: "lifeos-theme-quick-title", text: this.themeStyleLabel(value).split(" / ")[0] });
+      button.createSpan({ cls: "lifeos-theme-quick-subtitle", text: this.themePreviewDescription(value) });
+      button.onclick = async () => {
+        const scrollSnapshot = this.captureScrollPositions();
+        this.plugin.settings.themeStyle = value;
+        await this.saveImmediate(this.themeStyleNotice(value));
+        this.refreshThemeSelectionControls(value);
+        this.restoreScrollPositions(scrollSnapshot);
+        this.keepElementVisible(parent);
+      };
+    }
   }
 
   private renderBasics(parent: HTMLElement): void {
@@ -178,7 +206,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     skillBlock.createDiv({ cls: "lifeos-setting-description", text: `当前组合：${getAiSkills(selectedIds, importedSkills).map((skill) => skill.name).join(" + ")}` });
     const skillDetails = skillBlock.createEl("details", { cls: "lifeos-settings-skill-details" });
     skillDetails.createEl("summary", { text: "展开选择名人 Skill" });
-    for (const category of AI_SKILL_CATEGORIES) {
+    for (const category of getAiSkillCategories(this.plugin.settings.customAiSkillCategories)) {
       const skills = getAiSkillsByCategory(category.id, importedSkills);
       if (skills.length === 0) continue;
       const categoryBlock = skillDetails.createEl("details", { cls: "lifeos-settings-skill-category" });
@@ -454,7 +482,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
   private refreshThemeSelectionControls(value: ThemeStyle): void {
     const currentMeta = getUiThemeMeta(value);
     this.applyThemeFamilyFilter(currentMeta.family);
-    this.containerEl.querySelectorAll<HTMLButtonElement>(".lifeos-theme-swatch, .lifeos-theme-preview-card").forEach((button) => {
+    this.containerEl.querySelectorAll<HTMLButtonElement>(".lifeos-theme-swatch, .lifeos-theme-preview-card, .lifeos-theme-quick-button").forEach((button) => {
       const isActive = button.dataset.themeStyle === value;
       button.toggleClass("is-active", isActive);
       button.setAttribute("aria-pressed", isActive ? "true" : "false");
@@ -902,6 +930,8 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     if (value === "soft-saas") return "清爽工具";
     if (value === "obsidian") return "融入原生";
     if (value === "compact") return "高密浏览";
+    if (value === "codex-light") return "白底黑字";
+    if (value === "codex-dark") return "黑底浅字";
     if (value === "liquid-glass") return "通透现代";
     if (value === "refractive-glass") return "折射高光";
     if (value === "mesh-sunset") return "橙粉日落";
@@ -966,6 +996,8 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     if (value === "minimal-warm") return "简约温馨";
     if (value === "compact") return "紧凑模式";
     if (value === "obsidian") return "Obsidian 原生";
+    if (value === "codex-light") return "白昼 / Light";
+    if (value === "codex-dark") return "夜幕 / Dark";
     if (value === "liquid-glass") return "液态玻璃 / Liquid Glass";
     if (value === "refractive-glass") return "折射玻璃 / Refractive Glass";
     if (value === "mesh-sunset") return "暖日霞 / Mesh Sunset";

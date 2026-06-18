@@ -84,12 +84,19 @@ export class NewTaskModal extends Modal {
       reuseButton.title = "保存过一次任务后，可以在这里填入上次内容";
     }
     createButton(footer, "取消", () => this.close(), { ghost: true });
-    createButton(
+    const saveButton = createButton(
       footer,
       "保存任务",
       async () => {
+        saveButton.disabled = true;
         try {
+          await projectOptionsReady;
           const draft = this.buildTaskDraft(controls);
+          if (!draft.title) {
+            new Notice("请先填写任务标题。", 3000);
+            controls.title.focus();
+            return;
+          }
           await new TaskService(this.app, new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage)).createTask(draft);
           this.plugin.settings.lastTaskDraft = draft;
           let savedDraft = true;
@@ -104,10 +111,13 @@ export class NewTaskModal extends Modal {
           await this.onSaved?.();
         } catch (error) {
           new Notice(error instanceof Error ? error.message : "任务保存失败。");
+        } finally {
+          saveButton.disabled = false;
         }
       },
       { primary: true, icon: "plus" }
     );
+    title.focus();
   }
 
   private buildTaskDraft(controls: TaskDraftControls): TaskFormDraft {
@@ -153,13 +163,18 @@ export class NewTaskModal extends Modal {
   }
 
   private async loadProjectOptions(select: HTMLSelectElement): Promise<void> {
-    const projects = await new ProjectService(
-      this.app,
-      new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage)
-    ).loadProjects();
-    for (const item of projects) {
-      const option = select.createEl("option", { value: item.id, text: item.name });
-      if (item.id === this.defaultProjectId) option.selected = true;
+    try {
+      const projects = await new ProjectService(
+        this.app,
+        new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage)
+      ).loadProjects();
+      for (const item of projects) {
+        const option = select.createEl("option", { value: item.id, text: item.name });
+        if (item.id === this.defaultProjectId) option.selected = true;
+      }
+    } catch (error) {
+      console.warn("[Life OS] Failed to load project options for task modal", error);
+      new Notice("项目列表加载失败，本次任务会先保存为未归属。", 4000);
     }
   }
 

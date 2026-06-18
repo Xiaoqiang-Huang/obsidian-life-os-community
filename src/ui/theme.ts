@@ -50,6 +50,22 @@ const THEME_META: Partial<Record<ThemeStyle, ThemeMetaSeed>> = {
     recommended: false,
     tokens: palette("#0f766e", "#5fc3bb", "#eef9f8", "#f9fffd", "#ebfaf7", "#b8e4de", "#12231f", "#536561", "0 10px 20px rgba(15, 118, 110, 0.08)", 14, "dense")
   }),
+  "codex-light": theme("白昼", "White workspace with graphite text and blue focus accents.", {
+    group: "focus",
+    family: "focus",
+    material: "solid",
+    density: "normal",
+    recommended: true,
+    tokens: palette("#2563eb", "#111827", "#ffffff", "#ffffff", "#f7f7f8", "#d9d9de", "#111827", "#5f6672", "0 14px 34px rgba(17, 24, 39, 0.08)", 12, "codex-light")
+  }),
+  "codex-dark": theme("夜幕", "Near-black workspace with warm text and blue focus accents.", {
+    group: "night",
+    family: "dark",
+    material: "solid",
+    density: "compact",
+    recommended: true,
+    tokens: palette("#4f8cff", "#f4f2ed", "#0d0d0d", "#151515", "#1f1f1f", "#2f3033", "#f4f2ed", "#b8b8b0", "0 18px 44px rgba(0, 0, 0, 0.38)", 12, "codex-dark")
+  }),
   "liquid-glass": theme("LiquidGlass", "Shader-inspired liquid refraction, chromatic edge light, and layered glass depth.", {
     group: "glass",
     family: "glass",

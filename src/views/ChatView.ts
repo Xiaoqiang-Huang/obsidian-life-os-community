@@ -22,7 +22,7 @@ import {
   type AiDocumentEditCandidate,
   type AiDocumentEditTarget
 } from "../services/AiDocumentEditService";
-import { AI_SKILL_CATEGORIES, buildImportedAiSkillRecord, composeAiSkillPrompt, createImportedAiSkills, getAiSkills, getAiSkillsByCategory, normalizeAiSkillIds, normalizeGitHubSkillUrl, type AiSkill, type ImportedAiSkillRecord } from "../services/AiSkillService";
+import { buildImportedAiSkillRecord, composeAiSkillPrompt, createImportedAiSkills, ensureCustomAiSkillCategory, getAiSkillCategories, getAiSkillCategoryMeta, getAiSkills, getAiSkillsByCategory, normalizeAiSkillCategoryId, normalizeAiSkillIds, normalizeCustomAiSkillCategories, normalizeGitHubSkillUrl, type AiSkill, type AiSkillCategory, type AiSkillCustomCategory, type ImportedAiSkillRecord } from "../services/AiSkillService";
 import { LlmWikiIntakeService, type LlmWikiSaveInput, type LlmWikiSaveResult } from "../services/LlmWikiIntakeService";
 import { LlmWikiPathService } from "../services/LlmWikiPathService";
 import { LlmWikiUndoService } from "../services/LlmWikiUndoService";
@@ -39,6 +39,7 @@ import { appendWritebackItems, applyWritebackItems, openWritebackPreview, type W
 import { today } from "../utils/dates";
 import { renderMarkdownDisplay } from "../utils/markdown-render";
 import { writeFile as writeVaultFile } from "../utils/vault";
+import { randomId } from "../utils/ids";
 
 type UiChatMode = "chat" | "exam";
 type UiChatContextMode = "smart" | "semantic" | "global";
@@ -108,6 +109,8 @@ export class LifeOSChatView extends ItemView {
   private chatShellEl: HTMLElement | null = null;
   private sidePanelEl: HTMLElement | null = null;
   private runtimeStatusEl: HTMLElement | null = null;
+  private composerEl: HTMLElement | null = null;
+  private composerControlsEl: HTMLElement | null = null;
   private activeDrawerKind: "history" | "context" | null = null;
   private contextCards: ChatContextStatusCard[] = [];
   private mode: UiChatMode;
@@ -135,6 +138,7 @@ export class LifeOSChatView extends ItemView {
   private importedDocuments: ImportedDocument[] = [];
   private lastImportedDocuments: ImportedDocument[] = [];
   private importedAiSkills: AiSkill[] = [];
+  private readonly projectScopeControlId = randomId("lifeos-chat-project-scope");
 
   constructor(leaf: WorkspaceLeaf, private plugin: PersonalLifeSystemPlugin) {
     super(leaf);
@@ -157,7 +161,7 @@ export class LifeOSChatView extends ItemView {
 
   async onOpen(): Promise<void> {
     await this.plugin.ensureBaseStructure();
-    const draftInput = this.inputEl?.value ?? "";
+    const draftInput = this.inputEl?.value ?? this.plugin.activeChatState.draftInput ?? "";
     const importedSnapshot = [...this.importedDocuments];
     this.detachMobileViewportListener();
     this.detachComposerResizeDrag();
@@ -171,12 +175,15 @@ export class LifeOSChatView extends ItemView {
     this.sidePanelEl = null;
     this.chatShellEl = null;
     this.runtimeStatusEl = null;
+    this.composerEl = null;
+    this.composerControlsEl = null;
     this.fileInputEl = null;
     this.attachmentListEl = null;
     this.importedDocuments = importedSnapshot;
     this.importedAiSkills = createImportedAiSkills(this.plugin.settings.importedAiSkills);
     this.selectedSkillIds = normalizeAiSkillIds(this.plugin.settings.defaultAiSkillIds, this.plugin.settings.defaultAiSkillId, this.importedAiSkills);
     this.activeDrawerKind = null;
+    this.restoreActiveChatState();
     const main = createLifeOSShell(container as HTMLElement, this.plugin, "chat");
     main.addClass("lifeos-chat-main-host");
     main.parentElement?.addClass("lifeos-chat-main-parent");
@@ -191,6 +198,7 @@ export class LifeOSChatView extends ItemView {
       this.inputEl.value = pending;
       this.resizeComposer();
       this.inputEl.focus();
+      this.persistActiveChatState();
     } else if (draftInput && this.inputEl) {
       this.inputEl.value = draftInput;
       this.resizeComposer();
@@ -198,9 +206,38 @@ export class LifeOSChatView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.persistActiveChatState();
     this.detachMobileViewportListener();
     this.detachComposerResizeDrag();
     this.containerEl.removeClass("lifeos-chat-view-host");
+  }
+
+  private restoreActiveChatState(): void {
+    const messages = this.plugin.activeChatState.messages ?? [];
+    if (messages.length === 0) return;
+    this.messages = messages
+      .filter((message): message is ChatMessage => {
+        return Boolean(message)
+          && (message.role === "user" || message.role === "ai")
+          && typeof message.content === "string";
+      })
+      .map((message) => ({ role: message.role, content: message.content }));
+  }
+
+  private persistActiveChatState(): void {
+    this.plugin.activeChatState = {
+      messages: this.messages.map((message) => ({ role: message.role, content: message.content })),
+      draftInput: this.inputEl?.value ?? "",
+      updatedAt: Date.now()
+    };
+  }
+
+  private clearActiveChatState(): void {
+    this.plugin.activeChatState = {
+      messages: [],
+      draftInput: "",
+      updatedAt: Date.now()
+    };
   }
 
   private renderConversation(parent: HTMLElement, service: ChatService): void {
@@ -236,11 +273,13 @@ export class LifeOSChatView extends ItemView {
       createButton(quick, text, () => {
         this.inputEl.value = this.quickQuestionPrompt(text);
         this.resizeComposer();
+        this.persistActiveChatState();
         this.inputEl.focus();
       }, { ghost: true });
     }
 
     const composer = panel.createDiv({ cls: "lifeos-chat-composer" });
+    this.composerEl = composer;
     this.renderComposerControls(composer);
     const attachmentBar = composer.createDiv({ cls: "lifeos-chat-attachment-bar" });
     attachmentBar.dataset.accept = CHAT_IMPORT_ACCEPT;
@@ -301,7 +340,10 @@ export class LifeOSChatView extends ItemView {
       if (!files || files.length === 0) return;
       void this.handleAttachmentFiles(files);
     });
-    this.inputEl.addEventListener("input", () => this.resizeComposer());
+    this.inputEl.addEventListener("input", () => {
+      this.resizeComposer();
+      this.persistActiveChatState();
+    });
     this.inputEl.addEventListener("focus", () => this.keepComposerVisible(true));
     this.visualViewportHandler = () => {
       this.resizeComposer();
@@ -335,12 +377,14 @@ export class LifeOSChatView extends ItemView {
     addSummaryItem("写入", this.plugin.settings.autoApplyChatToDaily ? "确认后写入" : "不写入");
   }
 
-  private renderComposerControls(parent: HTMLElement): void {
+  private renderComposerControls(parent: HTMLElement, before: ChildNode | null = null): void {
     const controls = parent.createDiv({
       cls: this.isSkillPickerExpanded
         ? "lifeos-chat-controls lifeos-chat-composer-controls has-expanded-skill-picker"
         : "lifeos-chat-controls lifeos-chat-composer-controls"
     });
+    if (before && before.parentNode === parent) parent.insertBefore(controls, before);
+    this.composerControlsEl = controls;
     const primary = controls.createDiv({ cls: "lifeos-chat-primary-controls" });
     this.renderSkillSelect(primary);
     const modeBox = primary.createDiv({ cls: "lifeos-chat-chip-controls" });
@@ -485,6 +529,7 @@ export class LifeOSChatView extends ItemView {
     this.renderMessages();
     this.scrollLogToBottom();
     this.renderRuntimeStatus(service);
+    this.persistActiveChatState();
     if (service) {
       await service.saveConversation(this.messages, this.saveOptions("saved", this.lastContextBundle?.contextSources ?? []));
     }
@@ -780,15 +825,16 @@ export class LifeOSChatView extends ItemView {
   private setProviderSwitchExpanded(expanded: boolean): void {
     if (this.isProviderSwitchExpanded === expanded) return;
     this.isProviderSwitchExpanded = expanded;
-    void this.onOpen();
+    this.refreshComposerControls();
   }
 
   private renderSkillSelect(parent: HTMLElement): void {
     const group = parent.createDiv({ cls: this.isSkillPickerExpanded ? "lifeos-chat-skill-control is-expanded" : "lifeos-chat-skill-control is-collapsed" });
     const selectedSkills = getAiSkills(this.selectedSkillIds, this.importedAiSkills);
     const names = selectedSkills.map((skill) => skill.name).join(" + ");
+    const skillCategories = getAiSkillCategories(this.plugin.settings.customAiSkillCategories);
     const head = group.createDiv({ cls: "lifeos-chat-skill-head" });
-    const skillCount = AI_SKILL_CATEGORIES.reduce((total, category) => total + getAiSkillsByCategory(category.id, this.importedAiSkills).length, 0) - 1;
+    const skillCount = skillCategories.reduce((total, category) => total + getAiSkillsByCategory(category.id, this.importedAiSkills).length, 0) - 1;
     head.createSpan({ cls: "lifeos-chip-label", text: "名人 Skill（公开方法论）" });
     const toggle = head.createEl("button", {
       cls: "lifeos-muted-link lifeos-skill-expand-button",
@@ -822,26 +868,40 @@ export class LifeOSChatView extends ItemView {
 
     if (!this.isSkillPickerExpanded) return;
 
-    const picker = group.createDiv({ cls: "lifeos-skill-picker" });
-    const tools = picker.createDiv({ cls: "lifeos-skill-picker-tools" });
-    tools.createSpan({ text: "按分类选择，可多选。真人 Skill 是公开方法论镜片；角色 Skill 只借用具体角色的价值观和问题意识。" });
-    const toolActions = tools.createDiv({ cls: "lifeos-skill-picker-tool-actions" });
+    const picker = group.createDiv({ cls: "lifeos-skill-picker lifeos-skill-picker-redesigned" });
+    const panel = picker.createDiv({ cls: "lifeos-skill-picker-panel" });
+    panel.createDiv({ cls: "lifeos-skill-picker-title", text: "当前 Skill 组合" });
+    panel.createDiv({
+      cls: "lifeos-skill-picker-copy",
+      text: "多选会让 AI 按方法论分段回答；真人 Skill 使用公开方法论，角色 Skill 只借用价值观和问题意识。"
+    });
+    const current = panel.createDiv({ cls: "lifeos-skill-picker-current" });
+    current.createSpan({ cls: "lifeos-skill-picker-current-label", text: "已选" });
+    const currentList = current.createDiv({ cls: "lifeos-skill-picker-current-list" });
+    for (const skill of selectedSkills) {
+      const chip = currentList.createEl("button", {
+        cls: "lifeos-skill-chip is-active is-picker-current",
+        attr: { type: "button", title: `取消 ${skill.name}` }
+      });
+      chip.createSpan({ text: skill.name });
+      chip.onclick = () => this.toggleSkill(skill.id);
+    }
+    const toolActions = panel.createDiv({ cls: "lifeos-skill-picker-tool-actions" });
     createButton(toolActions, "安装 GitHub Skill", () => this.openGitHubSkillInstallModal(), { ghost: true, icon: "download" });
     const collapseButton = createButton(toolActions, "收起", () => this.setSkillPickerExpanded(false), { ghost: true });
     this.bindSkillPickerToggle(collapseButton, false);
     createButton(toolActions, "清空", () => {
       this.selectedSkillIds = ["lifeos-general"];
       this.persistSelectedSkills();
-      void this.onOpen();
+      this.refreshComposerControls();
     }, { ghost: true });
 
-    for (const category of AI_SKILL_CATEGORIES) {
+    const grid = picker.createDiv({ cls: "lifeos-skill-picker-grid" });
+    for (const category of skillCategories) {
       const skills = getAiSkillsByCategory(category.id, this.importedAiSkills);
       if (skills.length === 0) continue;
-      const details = picker.createEl("details", { cls: "lifeos-skill-category" });
-      if (category.id === "system" || this.selectedSkillIds.some((id) => skills.some((skill) => skill.id === id))) {
-        details.open = true;
-      }
+      const details = grid.createEl("details", { cls: "lifeos-skill-category" });
+      details.open = true;
       const summary = details.createEl("summary");
       summary.createSpan({ cls: "lifeos-skill-category-title", text: category.label });
       summary.createSpan({ cls: "lifeos-skill-category-count", text: `${skills.length}` });
@@ -864,7 +924,7 @@ export class LifeOSChatView extends ItemView {
     else next.add(id);
     this.selectedSkillIds = normalizeAiSkillIds(Array.from(next), undefined, this.importedAiSkills);
     this.persistSelectedSkills();
-    void this.onOpen();
+    this.refreshComposerControls();
   }
 
   private bindSkillPickerToggle(button: HTMLButtonElement, expanded: boolean): void {
@@ -893,19 +953,42 @@ export class LifeOSChatView extends ItemView {
   private setSkillPickerExpanded(expanded: boolean): void {
     if (this.isSkillPickerExpanded === expanded) return;
     this.isSkillPickerExpanded = expanded;
-    void this.onOpen();
+    this.refreshComposerControls();
+  }
+
+  private refreshComposerControls(): void {
+    const composer = this.composerEl;
+    const current = this.composerControlsEl;
+    if (!composer || !current || current.parentElement !== composer) {
+      void this.onOpen();
+      return;
+    }
+
+    const nextSibling = current.nextSibling;
+    const shouldRefocusInput = document.activeElement === this.inputEl;
+    current.remove();
+    this.renderComposerControls(composer, nextSibling);
+    if (shouldRefocusInput) this.inputEl?.focus({ preventScroll: true });
+    this.resizeComposer();
   }
 
   private openGitHubSkillInstallModal(): void {
     if (!requireProFeature(this.plugin, "aiSkillImport")) return;
-    new GitHubSkillInstallModal(this.app, this.plugin, (record) => this.installImportedAiSkill(record)).open();
+    new GitHubSkillInstallModal(this.app, this.plugin, (record, customCategory) => this.installImportedAiSkill(record, customCategory)).open();
   }
 
-  private async installImportedAiSkill(record: ImportedAiSkillRecord): Promise<void> {
+  private async installImportedAiSkill(record: ImportedAiSkillRecord, customCategory?: AiSkillCustomCategory): Promise<void> {
     if (!requireProFeature(this.plugin, "aiSkillImport")) return;
     const localPath = `${this.plugin.getRoot().replace(/\/+$/, "")}/Skills/Imported/${record.id}.md`;
     const savedRecord = { ...record, localPath };
     await writeVaultFile(this.app, localPath, record.markdown);
+
+    if (customCategory) {
+      this.plugin.settings.customAiSkillCategories = normalizeCustomAiSkillCategories([
+        ...normalizeCustomAiSkillCategories(this.plugin.settings.customAiSkillCategories).filter((item) => item.id !== customCategory.id),
+        customCategory
+      ]);
+    }
 
     const existing = this.plugin.settings.importedAiSkills ?? [];
     this.plugin.settings.importedAiSkills = [
@@ -964,10 +1047,15 @@ export class LifeOSChatView extends ItemView {
 
   private renderProjectScopeSelect(parent: HTMLElement): void {
     const group = parent.createDiv({ cls: "lifeos-chat-project-scope" });
-    group.createSpan({ cls: "lifeos-chip-label", text: "项目问答" });
+    const labelId = `${this.projectScopeControlId}-label`;
+    group.createEl("label", {
+      cls: "lifeos-chip-label",
+      text: "项目问答",
+      attr: { id: labelId, for: this.projectScopeControlId }
+    });
     const select = group.createEl("select", {
       cls: "lifeos-project-scope-select",
-      attr: { "aria-label": "选择 AI 助手项目范围" }
+      attr: { id: this.projectScopeControlId, "aria-labelledby": labelId }
     });
     select.createEl("option", { text: "全部项目", value: "" });
     select.value = this.selectedProjectScopeId;
@@ -994,7 +1082,7 @@ export class LifeOSChatView extends ItemView {
       this.selectedProjectScopeId = hasCurrent ? current : "";
       select.value = this.selectedProjectScopeId;
     } catch {
-      select.title = "项目列表暂时无法读取";
+      select.addClass("is-unavailable");
     }
   }
 
@@ -1073,6 +1161,7 @@ export class LifeOSChatView extends ItemView {
       this.resetContextCompression();
       this.renderMessages();
       this.scrollLogToBottom();
+      this.persistActiveChatState();
       this.closeSideDrawer();
     };
     createButton(row, "删除", async () => {
@@ -1353,6 +1442,7 @@ export class LifeOSChatView extends ItemView {
     this.messages.push(userMessage);
     this.renderMessages();
     this.scrollLogToBottom();
+    this.persistActiveChatState();
     const autoCompacted = this.maybeAutoCompactConversationContext(content, documents);
     if (autoCompacted) {
       new Notice("上下文接近窗口上限，已自动生成本地摘要。", 4000);
@@ -1361,6 +1451,7 @@ export class LifeOSChatView extends ItemView {
 
     if (!this.aiToggleEl.checked) {
       await service.saveConversation(this.messages, this.saveOptions("saved", []));
+      this.persistActiveChatState();
       new Notice("已保存记录。");
       return;
     }
@@ -1371,6 +1462,7 @@ export class LifeOSChatView extends ItemView {
       this.renderMessages();
       this.scrollLogToBottom();
       await service.saveConversation(this.messages, this.saveOptions("error", ["AI 未配置"]));
+      this.persistActiveChatState();
       new Notice(message, 6000);
       return;
     }
@@ -1379,6 +1471,7 @@ export class LifeOSChatView extends ItemView {
     this.messages.push(assistant);
     this.renderMessages();
     this.scrollLogToBottom();
+    this.persistActiveChatState();
     let assistantContent = this.logEl.lastElementChild?.querySelector(".lifeos-chat-bubble-content") as HTMLElement | null;
     this.abortController = new AbortController();
     this.isStreaming = true;
@@ -1443,6 +1536,7 @@ export class LifeOSChatView extends ItemView {
             streamed += token;
             assistant.content = streamed;
             if (assistantContent) assistantContent.setText(streamed);
+            this.persistActiveChatState();
             this.scrollLogToBottom();
           },
           onDone: (text) => {
@@ -1490,6 +1584,7 @@ export class LifeOSChatView extends ItemView {
       this.renderMessages();
       this.scrollLogToBottom();
       this.renderRuntimeStatus(service);
+      this.persistActiveChatState();
       await service.saveConversation(this.messages, this.saveOptions(runState.status, this.lastContextBundle?.contextSources));
       const requestedWriteTarget = this.detectRequestedWriteTarget(content);
       const writebackCandidates: RecognizedWritebackCandidates = {
@@ -1534,7 +1629,12 @@ export class LifeOSChatView extends ItemView {
       .filter((message) => message.content.trim())
       .map((message) => ({ role: message.role === "ai" ? "assistant" as const : "user" as const, content: message.content }));
     const selectedSkills = getAiSkills(this.selectedSkillIds, this.importedAiSkills);
-    const skillPrompt = composeAiSkillPrompt(this.selectedSkillIds, this.plugin.settings.defaultAiSkillId, this.importedAiSkills);
+    const skillPrompt = composeAiSkillPrompt(
+      this.selectedSkillIds,
+      this.plugin.settings.defaultAiSkillId,
+      this.importedAiSkills,
+      this.plugin.settings.customAiSkillCategories
+    );
     const skillNames = selectedSkills.map((skill) => skill.name).join(" + ");
     const selectedSkillGuard = [
       `本轮界面当前选中的 Skill：${skillNames || "Life OS 总管"}。`,
@@ -2081,6 +2181,7 @@ export class LifeOSChatView extends ItemView {
     this.importedDocuments = [];
     this.lastImportedDocuments = [];
     this.resetContextCompression();
+    this.clearActiveChatState();
     this.renderAttachmentList();
     this.renderMessages();
     this.inputEl.value = "";
@@ -2620,8 +2721,14 @@ class WritebackTargetChoiceModal extends Modal {
   }
 }
 
+const CUSTOM_SKILL_CATEGORY_SELECT_VALUE = "__lifeos_custom_skill_category__";
+
 class GitHubSkillInstallModal extends Modal {
   private urlInputEl!: HTMLInputElement;
+  private categorySelectEl!: HTMLSelectElement;
+  private customCategoryFieldsEl!: HTMLElement;
+  private customCategoryInputEl!: HTMLInputElement;
+  private customCategoryDescriptionEl!: HTMLInputElement;
   private statusEl!: HTMLElement;
   private previewEl!: HTMLElement;
   private installButtonEl!: HTMLButtonElement;
@@ -2630,7 +2737,7 @@ class GitHubSkillInstallModal extends Modal {
   constructor(
     app: App,
     private plugin: PersonalLifeSystemPlugin,
-    private onInstall: (record: ImportedAiSkillRecord) => Promise<void>
+    private onInstall: (record: ImportedAiSkillRecord, customCategory?: AiSkillCustomCategory) => Promise<void>
   ) {
     super(app);
   }
@@ -2638,13 +2745,27 @@ class GitHubSkillInstallModal extends Modal {
   onOpen(): void {
     this.contentEl.empty();
     this.contentEl.addClass("lifeos-github-skill-modal");
-    this.contentEl.createEl("h2", { text: "安装 GitHub Skill" });
-    this.contentEl.createEl("p", {
-      cls: "lifeos-github-skill-help",
-      text: "粘贴 GitHub 上的 SKILL.md 或 Markdown 文件链接。Life OS 只下载 Markdown，不安装代码。"
+
+    const hero = this.contentEl.createDiv({ cls: "lifeos-github-skill-hero" });
+    const titleRow = hero.createDiv({ cls: "lifeos-github-skill-title-row" });
+    titleRow.createDiv({ cls: "lifeos-github-skill-icon", text: "↓" });
+    const titleCopy = titleRow.createDiv({ cls: "lifeos-github-skill-title-copy" });
+    titleCopy.createDiv({ cls: "lifeos-github-skill-kicker", text: "GitHub / Markdown" });
+    titleCopy.createEl("h2", { text: "安装 GitHub Skill" });
+    titleCopy.createEl("p", {
+      text: "粘贴 SKILL.md 或 Markdown 文件链接。Life OS 只读取文本，不安装代码。"
     });
 
-    const form = this.contentEl.createDiv({ cls: "lifeos-github-skill-form" });
+    const body = this.contentEl.createDiv({ cls: "lifeos-github-skill-body" });
+    const setupGrid = body.createDiv({ cls: "lifeos-github-skill-setup-grid" });
+
+    const importCard = setupGrid.createDiv({ cls: "lifeos-github-skill-import-card" });
+    importCard.createDiv({ cls: "lifeos-github-skill-section-title", text: "来源链接" });
+    importCard.createDiv({
+      cls: "lifeos-github-skill-section-copy",
+      text: "支持 github.com 的文件页和 raw.githubusercontent.com 的 Markdown 原文地址。"
+    });
+    const form = importCard.createDiv({ cls: "lifeos-github-skill-form" });
     this.urlInputEl = form.createEl("input", {
       cls: "lifeos-input",
       attr: {
@@ -2654,8 +2775,50 @@ class GitHubSkillInstallModal extends Modal {
     });
     createButton(form, "获取预览", () => void this.previewSkill(), { ghost: true, icon: "search" });
 
-    this.statusEl = this.contentEl.createDiv({ cls: "lifeos-github-skill-status" });
-    this.previewEl = this.contentEl.createDiv({ cls: "lifeos-github-skill-preview" });
+    const categoryCard = setupGrid.createDiv({ cls: "lifeos-github-skill-category-card" });
+    categoryCard.createDiv({ cls: "lifeos-github-skill-section-title", text: "保存到分类" });
+    categoryCard.createDiv({
+      cls: "lifeos-github-skill-section-copy",
+      text: "默认按 Skill 元信息归类，也可以选择已有分类或新建分类。"
+    });
+    const categoryGrid = categoryCard.createDiv({ cls: "lifeos-github-skill-category-grid" });
+    const categoryField = categoryGrid.createDiv({ cls: "lifeos-field" });
+    categoryField.createEl("label", { text: "分类" });
+    this.categorySelectEl = categoryField.createEl("select", { cls: "lifeos-input lifeos-github-skill-category-select" });
+    this.categorySelectEl.onchange = () => {
+      this.syncCustomCategoryFields();
+      if (this.pendingRecord) this.renderPreview(this.pendingRecord);
+    };
+    this.customCategoryFieldsEl = categoryGrid.createDiv({ cls: "lifeos-github-skill-custom-fields is-hidden" });
+    const customNameField = this.customCategoryFieldsEl.createDiv({ cls: "lifeos-field" });
+    customNameField.createEl("label", { text: "新分类名称" });
+    this.customCategoryInputEl = customNameField.createEl("input", {
+      cls: "lifeos-input",
+      attr: { type: "text", placeholder: "例如：研究方法、写作顾问、我的角色库" }
+    });
+    this.customCategoryInputEl.oninput = () => {
+      if (this.pendingRecord) this.renderPreview(this.pendingRecord);
+    };
+    const customDescriptionField = this.customCategoryFieldsEl.createDiv({ cls: "lifeos-field" });
+    customDescriptionField.createEl("label", { text: "描述（可选）" });
+    this.customCategoryDescriptionEl = customDescriptionField.createEl("input", {
+      cls: "lifeos-input",
+      attr: { type: "text", placeholder: "这个分类适合放什么 Skill" }
+    });
+    this.populateCategoryOptions("other");
+
+    const previewShell = body.createDiv({ cls: "lifeos-github-skill-preview-shell" });
+    const previewToolbar = previewShell.createDiv({ cls: "lifeos-github-skill-preview-toolbar" });
+    const previewTitle = previewToolbar.createDiv({ cls: "lifeos-github-skill-preview-title" });
+    previewTitle.createDiv({ cls: "lifeos-github-skill-section-title", text: "预览与安装" });
+    previewTitle.createDiv({
+      cls: "lifeos-github-skill-section-copy",
+      text: "确认名称、描述和分类后再安装。"
+    });
+    this.statusEl = previewToolbar.createDiv({ cls: "lifeos-github-skill-status is-idle" });
+    this.setStatus("等待预览", "idle");
+    this.previewEl = previewShell.createDiv({ cls: "lifeos-github-skill-preview" });
+    this.renderPreviewEmpty();
 
     const actions = this.contentEl.createDiv({ cls: "lifeos-modal-actions" });
     createButton(actions, "取消", () => this.close(), { ghost: true });
@@ -2667,11 +2830,40 @@ class GitHubSkillInstallModal extends Modal {
     this.contentEl.empty();
   }
 
+  private populateCategoryOptions(selectedId: string): void {
+    this.categorySelectEl.empty();
+    const categories = getAiSkillCategories(this.plugin.settings.customAiSkillCategories);
+    const known = new Set(categories.map((category) => category.id));
+    for (const category of categories) {
+      const option = document.createElement("option");
+      option.value = String(category.id);
+      option.textContent = category.builtin === false ? `${category.label}（自定义）` : category.label;
+      this.categorySelectEl.appendChild(option);
+    }
+    const customOption = document.createElement("option");
+    customOption.value = CUSTOM_SKILL_CATEGORY_SELECT_VALUE;
+    customOption.textContent = "新建自定义分类...";
+    this.categorySelectEl.appendChild(customOption);
+    this.categorySelectEl.value = known.has(selectedId) ? selectedId : "other";
+    this.syncCustomCategoryFields();
+  }
+
+  private syncCustomCategoryFields(): void {
+    const isCustom = this.categorySelectEl.value === CUSTOM_SKILL_CATEGORY_SELECT_VALUE;
+    this.customCategoryFieldsEl.toggleClass("is-hidden", !isCustom);
+  }
+
+  private setStatus(message: string, state: "idle" | "loading" | "success" | "error"): void {
+    this.statusEl.classList.remove("is-idle", "is-loading", "is-success", "is-error");
+    this.statusEl.addClass(`is-${state}`);
+    this.statusEl.setText(message);
+  }
+
   private async previewSkill(): Promise<void> {
     this.pendingRecord = null;
     this.installButtonEl.disabled = true;
     this.previewEl.empty();
-    this.statusEl.setText("正在读取 GitHub Skill...");
+    this.setStatus("正在读取 Markdown", "loading");
 
     try {
       const normalized = normalizeGitHubSkillUrl(this.urlInputEl.value);
@@ -2683,36 +2875,73 @@ class GitHubSkillInstallModal extends Modal {
         installedAt: new Date().toISOString()
       });
       this.pendingRecord = record;
-      this.statusEl.setText(`预览已读取：${normalized.fileName}`);
+      if (this.categorySelectEl.value === "other") {
+        this.populateCategoryOptions(record.category);
+      }
+      this.setStatus(`已读取：${normalized.fileName}`, "success");
       this.renderPreview(record);
       this.installButtonEl.disabled = false;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.statusEl.setText(`读取失败：${message}`);
+      this.renderPreviewEmpty();
+      this.setStatus(`读取失败：${message}`, "error");
       new Notice(`GitHub Skill 读取失败：${message}`);
     }
+  }
+
+  private selectedCategoryLabel(record: ImportedAiSkillRecord): string {
+    if (this.categorySelectEl.value === CUSTOM_SKILL_CATEGORY_SELECT_VALUE) {
+      return this.customCategoryInputEl.value.trim() || "新建自定义分类";
+    }
+    const categoryId = normalizeAiSkillCategoryId(this.categorySelectEl.value, record.category);
+    return getAiSkillCategoryMeta(categoryId, this.plugin.settings.customAiSkillCategories).label;
+  }
+
+  private renderPreviewEmpty(): void {
+    this.previewEl.empty();
+    const empty = this.previewEl.createDiv({ cls: "lifeos-github-skill-preview-empty" });
+    empty.createDiv({ cls: "lifeos-github-skill-preview-empty-icon", text: "md" });
+    empty.createEl("strong", { text: "等待预览" });
+    empty.createEl("p", { text: "读取后会在这里确认 Skill 名称、分类和 Markdown 摘要。" });
   }
 
   private renderPreview(record: ImportedAiSkillRecord): void {
     this.previewEl.empty();
     const card = this.previewEl.createDiv({ cls: "lifeos-github-skill-preview-card" });
-    card.createEl("h3", { text: record.name });
-    card.createEl("p", { text: record.description });
+    const head = card.createDiv({ cls: "lifeos-github-skill-preview-head" });
+    const copy = head.createDiv({ cls: "lifeos-github-skill-preview-copy" });
+    copy.createEl("h3", { text: record.name });
+    copy.createEl("p", { text: record.description });
+    head.createSpan({ cls: "lifeos-github-skill-category-pill", text: this.selectedCategoryLabel(record) });
     card.createDiv({ cls: "lifeos-github-skill-source", text: record.sourceUrl });
     card.createEl("pre", { text: record.markdown.slice(0, 1200) });
   }
 
+  private resolveInstallCategory(): { categoryId: AiSkillCategory; customCategory?: AiSkillCustomCategory } {
+    if (this.categorySelectEl.value === CUSTOM_SKILL_CATEGORY_SELECT_VALUE) {
+      const result = ensureCustomAiSkillCategory(
+        this.plugin.settings.customAiSkillCategories,
+        this.customCategoryInputEl.value,
+        this.customCategoryDescriptionEl.value
+      );
+      return { categoryId: result.category.id, customCategory: result.category };
+    }
+    return {
+      categoryId: normalizeAiSkillCategoryId(this.categorySelectEl.value, "other")
+    };
+  }
+
   private async installSkill(): Promise<void> {
     if (!this.pendingRecord) return;
-    const record = this.pendingRecord;
     this.installButtonEl.disabled = true;
-    this.statusEl.setText("正在安装 Skill...");
+    this.setStatus("正在安装 Skill...", "loading");
     try {
-      await this.onInstall(record);
+      const { categoryId, customCategory } = this.resolveInstallCategory();
+      await this.onInstall({ ...this.pendingRecord, category: categoryId }, customCategory);
       this.close();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.statusEl.setText(`安装失败：${message}`);
+      this.setStatus(`安装失败：${message}`, "error");
       this.installButtonEl.disabled = false;
       new Notice(`GitHub Skill 安装失败：${message}`);
     }
