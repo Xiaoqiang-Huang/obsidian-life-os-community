@@ -634,9 +634,40 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   private registerModalTextareaEnhancer(): void {
     const keepModalFieldVisible = (field: HTMLElement) => {
       window.setTimeout(() => {
-        if (document.activeElement !== field) return;
-        field.scrollIntoView({ block: "center", inline: "nearest" });
-      }, 80);
+        if (document.activeElement !== field || !field.isConnected) return;
+
+        const viewport = window.visualViewport;
+        const viewportTop = viewport?.offsetTop ?? 0;
+        const viewportBottom = viewportTop + (viewport?.height ?? window.innerHeight ?? document.documentElement.clientHeight);
+        const safeTop = viewportTop + 16;
+        const safeBottom = Math.max(safeTop + 80, viewportBottom - 24);
+        const rect = field.getBoundingClientRect();
+        const scrollContainer = field.closest<HTMLElement>(
+          ".lifeos-modal-body, .lifeos-v2-modal-body, .lifeos-github-skill-body, .modal-content"
+        );
+
+        if (scrollContainer && scrollContainer.scrollHeight > scrollContainer.clientHeight + 1) {
+          const containerRect = scrollContainer.getBoundingClientRect();
+          const containerTop = Math.max(containerRect.top, safeTop);
+          const containerBottom = Math.min(containerRect.bottom, safeBottom);
+          const topDelta = rect.top - containerTop;
+          const bottomDelta = rect.bottom - containerBottom;
+
+          if (bottomDelta > 0) {
+            scrollContainer.scrollTop += bottomDelta + 12;
+            return;
+          }
+
+          if (topDelta < 0) {
+            scrollContainer.scrollTop += topDelta - 12;
+            return;
+          }
+        }
+
+        if (rect.top < safeTop || rect.bottom > safeBottom) {
+          field.scrollIntoView({ block: "nearest", inline: "nearest" });
+        }
+      }, 120);
     };
 
     const enhanceTextarea = (textarea: HTMLTextAreaElement) => {
@@ -699,6 +730,8 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
         : 0;
       root.style.setProperty("--lifeos-visual-viewport-height", `${height}px`);
       root.style.setProperty("--lifeos-keyboard-inset", `${keyboardInset}px`);
+      root.classList.toggle("lifeos-soft-keyboard-active", keyboardInset > 80);
+      document.body?.classList.toggle("lifeos-soft-keyboard-active", keyboardInset > 80);
     };
 
     update();
@@ -710,6 +743,8 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       window.visualViewport?.removeEventListener("scroll", update);
       root.style.removeProperty("--lifeos-visual-viewport-height");
       root.style.removeProperty("--lifeos-keyboard-inset");
+      root.classList.remove("lifeos-soft-keyboard-active");
+      document.body?.classList.remove("lifeos-soft-keyboard-active");
     });
   }
 
