@@ -23,6 +23,13 @@ export type AiEditTarget =
       text: string;
     }
   | {
+      kind: "reading-selection";
+      file: TFile;
+      text: string;
+      startOffset: number | null;
+      endOffset: number | null;
+    }
+  | {
       kind: "markdown-file";
       file: TFile;
       text: string;
@@ -385,7 +392,7 @@ export class AiEditPopoverController {
     const responseFormat = target.kind === "canvas" ? "json" : "text";
     const system = target.kind === "canvas"
       ? "你是 Obsidian Canvas 编辑助手。只输出完整合法的 .canvas JSON，必须包含 nodes 和 edges 数组，不要解释或代码围栏。"
-      : target.kind === "selection"
+      : isTextSelectionTarget(target)
         ? "你是文本编辑助手。只输出修改后的选中文本，不要解释、标题、代码围栏或 AI 署名。"
         : "你是 Markdown 文档编辑助手。只输出完整修改后的 Markdown，不要解释、代码围栏或 AI 署名。";
     const messages = [
@@ -488,6 +495,20 @@ export class AiEditPopoverController {
           return;
         }
         target.editor.replaceRange(this.previewText, target.from, target.to);
+      } else if (target.kind === "reading-selection") {
+        if (target.startOffset === null || target.endOffset === null) {
+          new Notice("阅读模式中的这段文字无法唯一定位。请切换到编辑模式后重新选择再写回。");
+          return;
+        }
+        const currentDocument = await this.app.vault.read(target.file);
+        if (currentDocument.slice(target.startOffset, target.endOffset) !== target.text) {
+          new Notice("原文内容已经变化，请重新选择后再应用。");
+          return;
+        }
+        const nextDocument = currentDocument.slice(0, target.startOffset)
+          + this.previewText
+          + currentDocument.slice(target.endOffset);
+        await this.app.vault.modify(target.file, nextDocument);
       } else {
         await this.app.vault.modify(target.file, this.previewText);
       }
@@ -523,7 +544,7 @@ export class AiEditPopoverController {
       `用户问题：${question}`,
       `目标文件：${normalizePath(target.file.path)}`,
       target.kind === "canvas" && target.nodeHint ? `当前节点提示：${target.nodeHint}` : "",
-      target.kind === "selection" ? "当前选区：" : target.kind === "canvas" ? "当前 Canvas JSON：" : "当前文档：",
+      isTextSelectionTarget(target) ? "当前选区：" : target.kind === "canvas" ? "当前 Canvas JSON：" : "当前文档：",
       limitText(target.text, target.kind === "canvas" ? 120_000 : 40_000)
     ].filter(Boolean).join("\n\n");
   }
@@ -598,13 +619,18 @@ export class AiEditPopoverController {
   }
 
   private describeTarget(target: AiEditTarget): string {
-    if (target.kind === "selection") return `${target.file.basename} · 选中文本`;
+    if (isTextSelectionTarget(target)) return `${target.file.basename} · 选中文本`;
     if (target.kind === "canvas") return `${target.file.basename} · Canvas`;
     return `${target.file.basename} · Markdown`;
   }
 
   private contextLine(target: AiEditTarget): string {
     if (target.kind === "selection") return `当前选区 ${target.text.trim().length} 个字符；确认后只替换这段文字。`;
+    if (target.kind === "reading-selection") {
+      return target.startOffset === null
+        ? `阅读模式选区 ${target.text.trim().length} 个字符；可以问答，写回前需切换编辑模式重新选择。`
+        : `阅读模式选区 ${target.text.trim().length} 个字符；已唯一定位，确认后只替换这段文字。`;
+    }
     if (target.kind === "canvas") return "生成完整 Canvas JSON 预览；确认后才覆盖白板文件。";
     return "生成完整 Markdown 预览；确认后才覆盖当前文档。";
   }
@@ -722,6 +748,10 @@ export function normalizeCanvasJson(raw: string): string {
     throw new Error("Canvas JSON 必须包含 nodes 和 edges 数组。");
   }
   return JSON.stringify(parsed, null, 2);
+}
+
+function isTextSelectionTarget(target: AiEditTarget): target is Extract<AiEditTarget, { kind: "selection" | "reading-selection" }> {
+  return target.kind === "selection" || target.kind === "reading-selection";
 }
 
 function cleanAiText(raw: string): string {

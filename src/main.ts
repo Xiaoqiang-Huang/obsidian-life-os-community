@@ -1958,26 +1958,56 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     if (this.aiEditSelectionTimer !== null) window.clearTimeout(this.aiEditSelectionTimer);
     this.aiEditSelectionTimer = window.setTimeout(() => {
       this.aiEditSelectionTimer = null;
-      const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-      if (!view?.file) return;
-      const selected = view.editor.getSelection();
-      if (selected.trim().length < 2) return;
+      void this.openAiEditFromActiveSelection(anchor);
+    }, 180);
+  }
+
+  private async openAiEditFromActiveSelection(anchor?: AiEditAnchor): Promise<void> {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view?.file) return;
+    const editorSelection = view.editor.getSelection();
+    const domSelection = window.getSelection();
+    const readingSelection = domSelection && !domSelection.isCollapsed
+      ? domSelection.toString().trim()
+      : "";
+    const rect = this.currentSelectionRect();
+    const resolvedAnchor = anchor ?? {
+      x: rect ? rect.right : this.aiEditPointer?.x ?? Math.round(window.innerWidth / 2),
+      y: rect ? rect.bottom : this.aiEditPointer?.y ?? Math.round(window.innerHeight * 0.4),
+      avoidRect: rect,
+      placement: "text-selection"
+    };
+
+    if (editorSelection.trim().length >= 2) {
       const from = cloneEditorPosition(view.editor.getCursor("from"));
       const to = cloneEditorPosition(view.editor.getCursor("to"));
-      const key = `${view.file.path}:${from.line}:${from.ch}:${to.line}:${to.ch}:${selected}`;
-      const now = Date.now();
-      if (key === this.lastAiEditSelectionKey && now - this.lastAiEditSelectionAt < 1400) return;
-      this.lastAiEditSelectionKey = key;
-      this.lastAiEditSelectionAt = now;
-      const rect = this.currentSelectionRect();
-      const resolvedAnchor = anchor ?? {
-        x: rect ? rect.right : this.aiEditPointer?.x ?? Math.round(window.innerWidth / 2),
-        y: rect ? rect.bottom : this.aiEditPointer?.y ?? Math.round(window.innerHeight * 0.4),
-        avoidRect: rect,
-        placement: "text-selection"
-      };
+      const key = `${view.file.path}:${from.line}:${from.ch}:${to.line}:${to.ch}:${editorSelection}`;
+      if (this.isDuplicateAiEditSelection(key)) return;
       this.openAiEditForEditorSelection(view.editor, view.file, resolvedAnchor);
-    }, 180);
+      return;
+    }
+
+    if (readingSelection.length < 2) return;
+    const key = `reading:${view.file.path}:${readingSelection}`;
+    if (this.isDuplicateAiEditSelection(key)) return;
+    const documentText = await this.app.vault.read(view.file);
+    const first = documentText.indexOf(readingSelection);
+    const unique = first >= 0 && documentText.indexOf(readingSelection, first + readingSelection.length) === -1;
+    this.aiEditPopover?.open({
+      kind: "reading-selection",
+      file: view.file,
+      text: readingSelection,
+      startOffset: unique ? first : null,
+      endOffset: unique ? first + readingSelection.length : null
+    }, resolvedAnchor);
+  }
+
+  private isDuplicateAiEditSelection(key: string): boolean {
+    const now = Date.now();
+    if (key === this.lastAiEditSelectionKey && now - this.lastAiEditSelectionAt < 1400) return true;
+    this.lastAiEditSelectionKey = key;
+    this.lastAiEditSelectionAt = now;
+    return false;
   }
 
   private openAiEditForEditorSelection(editor: Editor, file: TFile | null, anchor: AiEditAnchor): void {

@@ -251,6 +251,34 @@ const runtimeSmokeExpression = `(async () => {
   const panelLeaves = app.workspace.getLeavesOfType(${JSON.stringify(panelViewType)}).length;
   const panel = document.querySelector(".lifeos-ai-edit-popover.is-panel");
   const panelTabs = Array.from(panel?.querySelectorAll(".lifeos-ai-edit-tab") || []).map((item) => item.textContent?.trim() || "");
+
+  app.workspace.detachLeavesOfType(${JSON.stringify(panelViewType)});
+  plugin.aiEditPopover?.close?.();
+  app.workspace.setActiveLeaf(leaf, { focus: true });
+  await wait(350);
+  editor.setCursor({ line: 1, ch: 0 });
+  const previewCommandId = ["markdown:toggle-preview", "editor:toggle-source"]
+    .find((id) => app.commands?.commands?.[id]);
+  if (previewCommandId) await app.commands.executeCommandById(previewCommandId);
+  await wait(700);
+  const previewParagraph = document.querySelector(".markdown-preview-view p, .markdown-reading-view p, .markdown-rendered p");
+  const textNode = previewParagraph?.firstChild;
+  let readingSelectedText = "";
+  if (textNode && textNode.nodeType === Node.TEXT_NODE) {
+    const range = document.createRange();
+    const length = Math.min(18, textNode.textContent?.length || 0);
+    range.setStart(textNode, 0);
+    range.setEnd(textNode, length);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    readingSelectedText = selection?.toString() || "";
+    document.dispatchEvent(new Event("selectionchange"));
+    await wait(650);
+  }
+  const readingFloating = document.querySelector(".lifeos-ai-edit-popover:not(.is-panel)");
+  const readingContext = readingFloating?.querySelector(".lifeos-ai-edit-context")?.textContent?.trim() || "";
+  const readingTabs = Array.from(readingFloating?.querySelectorAll(".lifeos-ai-edit-tab") || []).map((item) => item.textContent?.trim() || "");
   const errors = (window.__lifeosAiEditRuntimeErrors || []).slice(-10);
   const result = {
     ok: !!floating
@@ -265,6 +293,12 @@ const runtimeSmokeExpression = `(async () => {
       && !!panel
       && panelTabs.includes("问答")
       && panelTabs.includes("编辑")
+      && !!previewCommandId
+      && readingSelectedText.length > 0
+      && !!readingFloating
+      && readingTabs.includes("问答")
+      && readingTabs.includes("编辑")
+      && readingContext.includes("阅读模式选区")
       && errors.length === 0,
     version: plugin.manifest?.version || "",
     commandPresent: !!command,
@@ -276,6 +310,11 @@ const runtimeSmokeExpression = `(async () => {
     panelLeaves,
     panelPresent: !!panel,
     panelTabs,
+    previewCommandId,
+    readingSelectedText,
+    readingFloatingPresent: !!readingFloating,
+    readingTabs,
+    readingContext,
     errors
   };
   app.workspace.detachLeavesOfType(${JSON.stringify(panelViewType)});
