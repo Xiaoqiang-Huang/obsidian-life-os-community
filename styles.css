@@ -49138,3 +49138,484 @@ body.lifeos-theme-night-owl .modal:has(.lifeos-github-skill-modal) .lifeos-modal
   }
 }
 /* Life OS community mobile modal final lock end */
+
+/* Life OS AI edit popover */
+.lifeos-ai-edit-popover {
+  position: fixed;
+  z-index: 10020;
+  left: 0;
+  top: 0;
+  width: min(520px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, #60a5fa 22%);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--background-primary) 96%, #eff6ff 4%);
+  color: var(--text-normal);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22), 0 4px 16px rgba(15, 23, 42, 0.12);
+  opacity: 0;
+  transform: translateY(4px) scale(0.99);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.lifeos-ai-edit-popover.is-positioned,
+.lifeos-ai-edit-popover.is-panel {
+  opacity: 1;
+  transform: none;
+}
+
+.lifeos-ai-edit-popover.is-panel {
+  position: static;
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  min-height: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.lifeos-ai-edit-panel-view {
+  height: 100%;
+  padding: 0 !important;
+  overflow: auto;
+}
+
+.lifeos-ai-edit-panel-empty {
+  padding: 28px 18px;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.6;
+}
+
+.lifeos-ai-edit-popover-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: color-mix(in srgb, var(--background-secondary) 82%, transparent 18%);
+}
+
+.lifeos-ai-edit-popover-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: #2563eb;
+  background: color-mix(in srgb, #dbeafe 78%, var(--background-primary) 22%);
+}
+
+.lifeos-ai-edit-popover-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.lifeos-ai-edit-popover-heading {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.lifeos-ai-edit-popover-heading strong {
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.lifeos-ai-edit-popover-heading span {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-ai-edit-popover-close {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.lifeos-ai-edit-popover-close:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.lifeos-ai-edit-tab-bar {
+  display: flex;
+  gap: 4px;
+  padding: 6px 14px 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: color-mix(in srgb, var(--background-secondary) 72%, transparent 28%);
+}
+
+.lifeos-ai-edit-tab {
+  min-height: 34px;
+  padding: 6px 16px;
+  border: 0;
+  border-radius: 9px 9px 0 0;
+  color: var(--text-muted);
+  background: transparent;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.lifeos-ai-edit-tab.is-active {
+  color: var(--text-normal);
+  background: var(--background-primary);
+  font-weight: 650;
+  box-shadow: inset 0 2px 0 #3b82f6;
+}
+
+.lifeos-ai-edit-popover-body {
+  min-height: 0;
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  overflow: auto;
+}
+
+.lifeos-ai-edit-context {
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, #93c5fd 22%);
+  border-radius: 10px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--background-secondary) 84%, #eff6ff 16%);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.lifeos-ai-edit-skill-panel {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-secondary);
+}
+
+.lifeos-ai-edit-skill-summary {
+  min-height: 38px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.lifeos-ai-edit-skill-summary::-webkit-details-marker {
+  display: none;
+}
+
+.lifeos-ai-edit-skill-label {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.lifeos-ai-edit-skill-current {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-normal);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-ai-edit-skill-groups {
+  max-height: 220px;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  overflow: auto;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.lifeos-ai-edit-skill-category {
+  display: grid;
+  gap: 6px;
+}
+
+.lifeos-ai-edit-skill-category-head {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.lifeos-ai-edit-skill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lifeos-ai-edit-skill-chip {
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: var(--background-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.lifeos-ai-edit-skill-chip.is-active {
+  border-color: color-mix(in srgb, #3b82f6 62%, var(--background-modifier-border) 38%);
+  color: #1d4ed8;
+  background: color-mix(in srgb, #dbeafe 78%, var(--background-primary) 22%);
+}
+
+.lifeos-ai-edit-answer-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lifeos-ai-edit-answer-copy {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.lifeos-ai-edit-answer-modes {
+  display: flex;
+  gap: 4px;
+}
+
+.lifeos-ai-edit-answer-mode {
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  background: var(--background-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.lifeos-ai-edit-answer-mode.is-active {
+  border-color: #60a5fa;
+  color: #1d4ed8;
+  background: color-mix(in srgb, #dbeafe 72%, var(--background-primary) 28%);
+}
+
+.lifeos-ai-edit-command {
+  width: 100%;
+  min-height: 76px;
+  max-height: 180px;
+  resize: vertical;
+  padding: 10px 11px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.lifeos-ai-edit-command:focus {
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #60a5fa 22%, transparent 78%);
+}
+
+.lifeos-ai-edit-preview {
+  min-height: 120px;
+  max-height: min(360px, 42vh);
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-primary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.lifeos-ai-edit-preview.is-empty {
+  display: grid;
+  place-items: center;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.lifeos-ai-edit-preview.is-error {
+  border-color: color-mix(in srgb, #ef4444 54%, var(--background-modifier-border) 46%);
+  color: var(--text-error);
+  background: color-mix(in srgb, #fee2e2 30%, var(--background-primary) 70%);
+}
+
+.lifeos-ai-edit-preview.is-streaming {
+  border-color: color-mix(in srgb, #3b82f6 46%, var(--background-modifier-border) 54%);
+}
+
+.lifeos-ai-edit-preview pre {
+  margin: 8px 0 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.lifeos-ai-edit-history {
+  display: grid;
+  gap: 5px;
+}
+
+.lifeos-ai-edit-history-item {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+  padding: 6px 8px;
+  border-left: 3px solid #f59e0b;
+  border-radius: 0 7px 7px 0;
+  background: color-mix(in srgb, #fef3c7 48%, var(--background-primary) 52%);
+  font-size: 12px;
+}
+
+.lifeos-ai-edit-history-num {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: #fff;
+  background: #f59e0b;
+  font-size: 10px;
+}
+
+.lifeos-ai-edit-history-text {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-normal);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-ai-edit-history-undo {
+  justify-self: start;
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid color-mix(in srgb, #f59e0b 48%, var(--background-modifier-border) 52%);
+  border-radius: 7px;
+  color: #b45309;
+  background: var(--background-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.lifeos-ai-edit-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 11px 14px 13px;
+  border-top: 1px solid var(--background-modifier-border);
+  background: color-mix(in srgb, var(--background-secondary) 78%, transparent 22%);
+}
+
+.lifeos-ai-edit-action {
+  min-height: 34px;
+  padding: 7px 13px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 9px;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.lifeos-ai-edit-action:hover:not(:disabled) {
+  border-color: #60a5fa;
+}
+
+.lifeos-ai-edit-action-primary {
+  border-color: #2563eb;
+  color: #fff;
+  background: linear-gradient(135deg, #2563eb, #4f46e5);
+}
+
+.lifeos-ai-edit-action-ghost {
+  margin-right: auto;
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.lifeos-ai-edit-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.theme-dark .lifeos-ai-edit-popover {
+  border-color: color-mix(in srgb, var(--background-modifier-border) 72%, #60a5fa 28%);
+  background: color-mix(in srgb, var(--background-primary) 96%, #0f172a 4%);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.48), 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.theme-dark .lifeos-ai-edit-popover-icon,
+.theme-dark .lifeos-ai-edit-skill-chip.is-active,
+.theme-dark .lifeos-ai-edit-answer-mode.is-active {
+  color: #bfdbfe;
+  background: rgba(37, 99, 235, 0.22);
+}
+
+.theme-dark .lifeos-ai-edit-context {
+  background: rgba(30, 64, 175, 0.12);
+}
+
+.theme-dark .lifeos-ai-edit-history-item {
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.theme-dark .lifeos-ai-edit-history-undo {
+  color: #fbbf24;
+}
+
+@media (max-width: 640px) {
+  .lifeos-ai-edit-popover:not(.is-panel) {
+    left: 8px !important;
+    right: 8px !important;
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+    top: auto !important;
+    width: auto !important;
+    max-height: min(78vh, calc(100vh - 16px - env(safe-area-inset-bottom, 0px))) !important;
+    border-radius: 16px;
+  }
+
+  .lifeos-ai-edit-popover-header {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+  }
+
+  .lifeos-ai-edit-popover-body {
+    padding: 10px;
+  }
+
+  .lifeos-ai-edit-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 10px;
+  }
+
+  .lifeos-ai-edit-action {
+    width: 100%;
+  }
+
+  .lifeos-ai-edit-action-ghost {
+    margin-right: 0;
+  }
+
+  .lifeos-ai-edit-action-primary {
+    grid-column: 1 / -1;
+  }
+}
+/* Life OS AI edit popover end */

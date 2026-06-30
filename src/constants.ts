@@ -10,6 +10,7 @@ export const CHECKIN_VIEW_TYPE = "personal-life-system-checkin";
 export const USER_GUIDE_VIEW_TYPE = "personal-life-system-user-guide";
 export const PRO_LICENSE_VIEW_TYPE = "personal-life-system-pro-license";
 export const PRO_COMPARE_VIEW_TYPE = "personal-life-system-pro-compare";
+export const AI_EDIT_PANEL_VIEW_TYPE = "personal-life-system-ai-edit-panel";
 
 export const DEFAULT_LIGHT_DAILY_TEMPLATE = `---
 type: daily-note

@@ -1,5 +1,6 @@
-import { Notice, Plugin, TFile, type WorkspaceLeaf } from "obsidian";
+import { MarkdownView, Notice, Plugin, TFile, type Editor, type WorkspaceLeaf } from "obsidian";
 import {
+  AI_EDIT_PANEL_VIEW_TYPE,
   CALENDAR_VIEW_TYPE,
   CHECKIN_VIEW_TYPE,
   CHAT_VIEW_TYPE,
@@ -59,6 +60,8 @@ import { CheckinView } from "./views/CheckinView";
 import { UserGuideView } from "./views/UserGuideView";
 import { ProCompareView } from "./views/ProCompareView";
 import { ProLicenseView } from "./views/ProLicenseView";
+import { AiEditPanelView } from "./views/AiEditPanelView";
+import { AiEditPopoverController, cloneEditorPosition, type AiEditAnchor } from "./ui/AiEditPopover";
 import { CalendarView } from "./calendar-view";
 import { MemoryView } from "./memory-view";
 import { showXingceStats } from "./exam/xingce-stats";
@@ -103,6 +106,11 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   settings: PersonalLifeSystemSettings;
   ai: AiClient;
   activeChatState: ActiveChatRuntimeState = { messages: [], draftInput: "", updatedAt: 0 };
+  aiEditPopover: AiEditPopoverController | null = null;
+  private aiEditSelectionTimer: number | null = null;
+  private aiEditPointer: { x: number; y: number } | null = null;
+  private lastAiEditSelectionKey = "";
+  private lastAiEditSelectionAt = 0;
   private dailyMaintenancePromise: Promise<void> | null = null;
   private dailyMaintenanceRunDate = "";
   private midnightTimer: number | null = null;
@@ -157,11 +165,14 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.registerView(USER_GUIDE_VIEW_TYPE, (leaf) => new UserGuideView(leaf, this));
     this.registerView(PRO_COMPARE_VIEW_TYPE, (leaf) => new ProCompareView(leaf, this));
     this.registerView(PRO_LICENSE_VIEW_TYPE, (leaf) => new ProLicenseView(leaf, this));
+    this.registerView(AI_EDIT_PANEL_VIEW_TYPE, (leaf) => new AiEditPanelView(leaf, this));
     this.registerView(
       CALENDAR_VIEW_TYPE,
       (leaf) => new CalendarView(leaf, this)
     );
     this.registerLifeOsFileStyling();
+    this.aiEditPopover = new AiEditPopoverController(this.app, this);
+    this.registerAiEditPopover();
 
     this.addRibbonIcon("layout-dashboard", "Life OS Dashboard", () => {
       void this.activateDashboard();
@@ -460,6 +471,13 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     }
     this.modalTextareaObserver?.disconnect();
     this.modalTextareaObserver = null;
+    if (this.aiEditSelectionTimer !== null) {
+      window.clearTimeout(this.aiEditSelectionTimer);
+      this.aiEditSelectionTimer = null;
+    }
+    this.aiEditPopover?.close();
+    this.aiEditPopover = null;
+    this.app.workspace.detachLeavesOfType(AI_EDIT_PANEL_VIEW_TYPE);
     this.stopLiquidGlassRuntime();
   }
 
@@ -1871,6 +1889,206 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
 
   async showDiarySearch(): Promise<void> {
     await showDiarySearch(this.app, this);
+  }
+
+  private registerAiEditPopover(): void {
+    this.addCommand({
+      id: "lifeos-ai-edit-selection",
+      name: "AI 修改选中文本",
+      editorCallback: (editor, view) => {
+        this.openAiEditForEditorSelection(editor, view.file, this.defaultAiEditAnchor());
+      }
+    });
+
+    this.addCommand({
+      id: "lifeos-ai-edit-current-whiteboard",
+      name: "AI 修改当前白板",
+      callback: () => void this.openAiEditForActiveCanvas(this.defaultAiEditAnchor())
+    });
+
+    this.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, view) => {
+      if (!(view.file instanceof TFile) || !editor.getSelection().trim()) return;
+      menu.addItem((item) => {
+        item
+          .setTitle("AI 修改选中文本")
+          .setIcon("sparkles")
+          .onClick(() => this.openAiEditForEditorSelection(editor, view.file, this.defaultAiEditAnchor()));
+      });
+    }));
+
+    this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
+      if (!(file instanceof TFile) || !this.isAiEditableFile(file)) return;
+      menu.addItem((item) => {
+        item
+          .setTitle(file.extension === "canvas" ? "AI 调整白板" : "AI 修改文档")
+          .setIcon(file.extension === "canvas" ? "layout-dashboard" : "sparkles")
+          .onClick(() => void this.openAiEditForFile(file, this.defaultAiEditAnchor()));
+      });
+    }));
+
+    this.registerDomEvent(document, "mousedown", (event: MouseEvent) => {
+      if (event.button === 0) this.aiEditPointer = { x: event.clientX, y: event.clientY };
+    });
+
+    this.registerDomEvent(document, "mouseup", (event: MouseEvent) => {
+      if (event.button !== 0) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (!target || this.shouldIgnoreAiEditTarget(target)) return;
+      const activeFile = this.app.workspace.getActiveFile();
+      if (activeFile instanceof TFile && this.isCanvasFile(activeFile) && target.closest(".canvas-wrapper, .canvas, .canvas-viewport, .canvas-node")) {
+        void this.openAiEditForFile(activeFile, {
+          x: event.clientX,
+          y: event.clientY,
+          avoidRect: this.elementAvoidRect(target.closest<HTMLElement>(".canvas-node") ?? target, 12),
+          placement: "canvas"
+        }, this.canvasNodeHint(target));
+        return;
+      }
+      this.scheduleAiEditFromActiveSelection({ x: event.clientX, y: event.clientY, avoidRect: this.currentSelectionRect() });
+    });
+
+    this.registerDomEvent(document, "selectionchange", () => {
+      const activeElement = document.activeElement;
+      if (activeElement instanceof HTMLElement && this.shouldIgnoreAiEditTarget(activeElement)) return;
+      this.scheduleAiEditFromActiveSelection();
+    });
+  }
+
+  private scheduleAiEditFromActiveSelection(anchor?: AiEditAnchor): void {
+    if (this.aiEditSelectionTimer !== null) window.clearTimeout(this.aiEditSelectionTimer);
+    this.aiEditSelectionTimer = window.setTimeout(() => {
+      this.aiEditSelectionTimer = null;
+      const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (!view?.file) return;
+      const selected = view.editor.getSelection();
+      if (selected.trim().length < 2) return;
+      const from = cloneEditorPosition(view.editor.getCursor("from"));
+      const to = cloneEditorPosition(view.editor.getCursor("to"));
+      const key = `${view.file.path}:${from.line}:${from.ch}:${to.line}:${to.ch}:${selected}`;
+      const now = Date.now();
+      if (key === this.lastAiEditSelectionKey && now - this.lastAiEditSelectionAt < 1400) return;
+      this.lastAiEditSelectionKey = key;
+      this.lastAiEditSelectionAt = now;
+      const rect = this.currentSelectionRect();
+      const resolvedAnchor = anchor ?? {
+        x: rect ? rect.right : this.aiEditPointer?.x ?? Math.round(window.innerWidth / 2),
+        y: rect ? rect.bottom : this.aiEditPointer?.y ?? Math.round(window.innerHeight * 0.4),
+        avoidRect: rect,
+        placement: "text-selection"
+      };
+      this.openAiEditForEditorSelection(view.editor, view.file, resolvedAnchor);
+    }, 180);
+  }
+
+  private openAiEditForEditorSelection(editor: Editor, file: TFile | null, anchor: AiEditAnchor): void {
+    if (!(file instanceof TFile)) return;
+    const selected = editor.getSelection();
+    if (!selected.trim()) return;
+    this.aiEditPopover?.open({
+      kind: "selection",
+      file,
+      editor,
+      from: cloneEditorPosition(editor.getCursor("from")),
+      to: cloneEditorPosition(editor.getCursor("to")),
+      text: selected
+    }, anchor);
+  }
+
+  private async openAiEditForActiveCanvas(anchor: AiEditAnchor): Promise<void> {
+    const file = this.app.workspace.getActiveFile();
+    if (!(file instanceof TFile) || !this.isCanvasFile(file)) {
+      new Notice("请先打开一个 Obsidian Canvas 白板。");
+      return;
+    }
+    await this.openAiEditForFile(file, anchor);
+  }
+
+  private async openAiEditForFile(file: TFile, anchor: AiEditAnchor, nodeHint?: string): Promise<void> {
+    if (!this.isAiEditableFile(file)) {
+      new Notice("目前支持 Markdown 文档和 Obsidian Canvas 白板。");
+      return;
+    }
+    const content = await this.app.vault.read(file);
+    this.aiEditPopover?.open(
+      this.isCanvasFile(file)
+        ? { kind: "canvas", file, text: content, nodeHint }
+        : { kind: "markdown-file", file, text: content },
+      anchor
+    );
+  }
+
+  async dockAiEditToSidebar(): Promise<void> {
+    let leaf = this.app.workspace.getLeavesOfType(AI_EDIT_PANEL_VIEW_TYPE)[0];
+    if (!leaf) {
+      leaf = this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf("tab");
+      await leaf.setViewState({ type: AI_EDIT_PANEL_VIEW_TYPE, active: true });
+    }
+    this.app.workspace.revealLeaf(leaf);
+    if (leaf.view instanceof AiEditPanelView) leaf.view.refresh();
+  }
+
+  async undockAiEditFromSidebar(): Promise<void> {
+    this.app.workspace.detachLeavesOfType(AI_EDIT_PANEL_VIEW_TYPE);
+  }
+
+  private currentSelectionRect(): AiEditAnchor["avoidRect"] {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return undefined;
+    const rects = Array.from(selection.getRangeAt(0).getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
+    if (!rects.length) return undefined;
+    const left = Math.min(...rects.map((rect) => rect.left));
+    const top = Math.min(...rects.map((rect) => rect.top));
+    const right = Math.max(...rects.map((rect) => rect.right));
+    const bottom = Math.max(...rects.map((rect) => rect.bottom));
+    return { left, top, right, bottom, width: right - left, height: bottom - top };
+  }
+
+  private elementAvoidRect(element: HTMLElement, padding: number): AiEditAnchor["avoidRect"] {
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return undefined;
+    const left = rect.left - padding;
+    const top = rect.top - padding;
+    const right = rect.right + padding;
+    const bottom = rect.bottom + padding;
+    return { left, top, right, bottom, width: right - left, height: bottom - top };
+  }
+
+  private shouldIgnoreAiEditTarget(target: HTMLElement): boolean {
+    return Boolean(target.closest([
+      ".lifeos-ai-edit-popover",
+      ".lifeos-ai-edit-panel-view",
+      ".modal-container",
+      ".menu",
+      ".suggestion-container",
+      ".view-header",
+      ".workspace-tab-header",
+      ".status-bar",
+      "input",
+      "textarea",
+      "select",
+      "button",
+      "a"
+    ].join(",")));
+  }
+
+  private canvasNodeHint(target: HTMLElement): string | undefined {
+    const text = target.closest(".canvas-node")?.textContent?.replace(/\s+/g, " ").trim();
+    return text ? text.slice(0, 260) : undefined;
+  }
+
+  private isAiEditableFile(file: TFile): boolean {
+    return file.extension === "md" || this.isCanvasFile(file);
+  }
+
+  private isCanvasFile(file: TFile): boolean {
+    return file.extension === "canvas" || file.path.toLowerCase().endsWith(".canvas");
+  }
+
+  private defaultAiEditAnchor(): AiEditAnchor {
+    return {
+      x: Math.round(window.innerWidth / 2),
+      y: Math.round(Math.max(120, Math.min(window.innerHeight - 180, window.innerHeight * 0.42)))
+    };
   }
 
   private registerLifeOsFileStyling(): void {
