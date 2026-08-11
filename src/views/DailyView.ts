@@ -7,10 +7,10 @@ import { createLifeOSShell } from "../components/LifeOSComponent";
 import { DAILY_VIEW_TYPE } from "../constants";
 import type PersonalLifeSystemPlugin from "../main";
 import { QuickCaptureModal } from "../modals/QuickCaptureModal";
+import { AiWorkspaceService } from "../services/AiWorkspaceService";
 import { DailyNoteService } from "../services/DailyNoteService";
 import { DisplayFormatService } from "../services/DisplayFormatService";
 import { FileSystemService } from "../services/FileSystemService";
-import { ReviewService } from "../services/ReviewService";
 import { today } from "../utils/dates";
 import { extractQuickRecordEntries, latestQuickRecord } from "../utils/quick-records";
 import { renderMarkdownDisplay } from "../utils/markdown-render";
@@ -85,6 +85,7 @@ export class DailyView extends ItemView {
     const rightColumn = layout.createDiv({ cls: "lifeos-daily-column lifeos-daily-column-side" });
 
     await this.renderTodayCard(leftColumn, exists, file);
+    await this.renderProjectActivityCard(leftColumn, date);
     this.renderPromptCard(leftColumn);
     await this.renderRecent(rightColumn);
     await this.renderRecentQuickCard(rightColumn, file);
@@ -159,6 +160,73 @@ export class DailyView extends ItemView {
     createButton(actions, "\u9ad8\u7ea7\uff1a\u6253\u5f00 Markdown \u6587\u4ef6", () => void this.app.workspace.getLeaf(false).openFile(file), {
       ghost: true,
       icon: "file-text"
+    });
+  }
+
+  private async renderProjectActivityCard(parent: HTMLElement, date: string): Promise<void> {
+    const service = new AiWorkspaceService(
+      this.app,
+      new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage),
+      this.plugin.settings,
+      this.plugin.ai
+    );
+    const state = await service.loadState();
+    const pending = state.dailyFacts.filter((fact) => fact.date === date && fact.status === "pending");
+    const confirmed = state.dailyFacts.filter((fact) => fact.date === date && fact.status === "confirmed");
+    const card = createCard(parent, "lifeos-panel lifeos-daily-project-context-card");
+    const title = card.createDiv({ cls: "lifeos-card-title" });
+    setIcon(title.createSpan(), "git-branch");
+    title.createSpan({ text: "\u4eca\u65e5\u9879\u76ee\u4e0a\u4e0b\u6587" });
+    title.createSpan({
+      cls: "lifeos-daily-project-context-count",
+      text: pending.length > 0 ? `${pending.length} \u6761\u5f85\u786e\u8ba4` : `${confirmed.length} \u6761\u5df2\u5199\u5165`
+    });
+
+    const selected = new Set(pending.map((fact) => fact.id));
+    if (pending.length === 0) {
+      card.createEl("p", {
+        cls: "lifeos-daily-project-context-empty",
+        text: confirmed.length > 0
+          ? "\u5df2\u786e\u8ba4\u7684\u9879\u76ee\u6d3b\u52a8\u5df2\u5199\u5165\u4eca\u65e5\u65e5\u62a5\uff0c\u4e0d\u4f1a\u8986\u76d6\u4f60\u7f16\u8f91\u7684\u6b63\u6587\u3002"
+          : "\u5bfc\u5165\u5e76\u6574\u7406\u9879\u76ee\u4f1a\u8bdd\u540e\uff0c\u53ef\u786e\u8ba4\u7684\u4eca\u65e5\u6d3b\u52a8\u4f1a\u51fa\u73b0\u5728\u8fd9\u91cc\u3002"
+      });
+    } else {
+      const list = card.createDiv({ cls: "lifeos-daily-project-context-list" });
+      for (const fact of pending) {
+        const label = list.createEl("label", { cls: "lifeos-daily-project-context-row" });
+        const checkbox = label.createEl("input", { attr: { type: "checkbox" } });
+        checkbox.checked = true;
+        checkbox.addEventListener("change", () => {
+          if (checkbox.checked) selected.add(fact.id);
+          else selected.delete(fact.id);
+        });
+        const copy = label.createDiv();
+        copy.createEl("strong", { text: fact.text });
+        copy.createEl("span", { text: `\u6765\u81ea\u9879\u76ee\u4f1a\u8bdd \u00b7 ${fact.sourceNodeIds.length} \u4e2a\u8bc1\u636e\u8282\u70b9` });
+      }
+    }
+
+    const actions = card.createDiv({ cls: "lifeos-card-actions" });
+    if (pending.length > 0) {
+      createButton(actions, "\u5199\u5165\u4eca\u65e5\u65e5\u62a5", () => void (async () => {
+        if (selected.size === 0) {
+          new Notice("\u8bf7\u5148\u9009\u62e9\u81f3\u5c11\u4e00\u6761\u9879\u76ee\u6d3b\u52a8\u3002");
+          return;
+        }
+        await service.confirmDailyFacts([...selected]);
+        new Notice("\u5df2\u5199\u5165\u4eca\u65e5\u65e5\u62a5\uff0c\u624b\u5199\u5185\u5bb9\u4fdd\u6301\u4e0d\u53d8\u3002", 5000);
+        await this.render();
+      })(), { icon: "notebook-pen", primary: true });
+      createButton(actions, "\u5ffd\u7565\u6240\u9009", () => void (async () => {
+        if (selected.size === 0) return;
+        await service.dismissDailyFacts([...selected]);
+        new Notice("\u5df2\u5ffd\u7565\u6240\u9009\u9879\u76ee\u6d3b\u52a8\u3002", 4000);
+        await this.render();
+      })(), { icon: "eye-off", ghost: true });
+    }
+    createButton(actions, "\u6253\u5f00\u9879\u76ee\u4e0a\u4e0b\u6587", () => void this.plugin.activateAiWorkspace(), {
+      icon: "git-branch",
+      ghost: true
     });
   }
 
@@ -279,13 +347,7 @@ export class DailyView extends ItemView {
   }
 
   private async generateReview(): Promise<void> {
-    const file = await new ReviewService(
-      this.app,
-      new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage),
-      this.plugin.settings
-    ).generateDailyReview();
-    new Notice("\u4eca\u65e5\u590d\u76d8\u5df2\u751f\u6210\u3002", 5000);
-    await this.app.workspace.getLeaf(false).openFile(file);
+    await this.plugin.generateReport("daily");
   }
 
   private dailyService(): DailyNoteService {

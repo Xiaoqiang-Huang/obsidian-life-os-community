@@ -5,14 +5,13 @@ import { parseTaskLine } from "../utils/markdown";
 import { LlmWikiContextService } from "./LlmWikiContextService";
 import { buildProjectOverview, formatProjectOverviewForAi, parseProjectIndex } from "./project-context";
 import { AiRetrievalPlanner } from "./context-engine/AiRetrievalPlanner";
-import { ContextCandidateService } from "./context-engine/ContextCandidateService";
+import { AdaptiveRetrievalService } from "./context-engine/AdaptiveRetrievalService";
 import { ContextComposer } from "./context-engine/ContextComposer";
 import { GraphContextService } from "./context-engine/GraphContextService";
-import { LocalRetrievalService } from "./context-engine/LocalRetrievalService";
+import { HybridRetrievalService } from "./context-engine/HybridRetrievalService";
 import { ObsidianMetadataService } from "./context-engine/ObsidianMetadataService";
 import { ContextSourcePolicyService } from "./context-engine/ContextSourcePolicyService";
 import { SummaryIndexService } from "./context-engine/SummaryIndexService";
-import { VectorRetrievalService } from "./context-engine/VectorRetrievalService";
 import { extractWebUrls, getWebSearchQuery } from "./WebContextService";
 import type {
   AiLike,
@@ -45,9 +44,8 @@ export class ContextEngine {
   private readonly metadata: ObsidianMetadataService;
   private readonly planner: AiRetrievalPlanner;
   private readonly summaries: SummaryIndexService;
-  private readonly localRetrieval: LocalRetrievalService;
-  private readonly candidates: ContextCandidateService;
-  private readonly vectorRetrieval: VectorRetrievalService;
+  private readonly hybridRetrieval: HybridRetrievalService;
+  private readonly adaptiveRetrieval: AdaptiveRetrievalService;
   private readonly graphContext: GraphContextService;
   private readonly composer = new ContextComposer();
   private readonly rootFolder: string;
@@ -61,135 +59,59 @@ export class ContextEngine {
     this.metadata = new ObsidianMetadataService(app, this.rootFolder, this.policy);
     this.planner = new AiRetrievalPlanner(ai);
     this.summaries = new SummaryIndexService(this.metadata, this.rootFolder);
-    this.localRetrieval = new LocalRetrievalService(this.metadata);
-    this.candidates = new ContextCandidateService(this.metadata, this.rootFolder);
-    this.vectorRetrieval = new VectorRetrievalService();
+    this.hybridRetrieval = new HybridRetrievalService(app, this.metadata, this.rootFolder);
+    this.adaptiveRetrieval = new AdaptiveRetrievalService(this.hybridRetrieval);
     this.graphContext = new GraphContextService(this.metadata, this.rootFolder);
   }
 
   async build(input: ContextEngineBuildInput): Promise<ContextEngineResult> {
     const mode = this.resolveMode(input);
     const maxChars = input.maxChars ?? DEFAULT_CONTEXT_CHARS;
-
-    if (mode === "vector") {
-      const [vector, inventory] = await Promise.all([
-        this.vectorRetrieval.search({
-          userMessage: input.userMessage,
-          maxResults: 8
-        }),
-        this.metadata.getInventory()
-      ]);
-      const scopedInventory = this.scopeInventoryForProject(inventory, input.projectScopeId);
-      if (!vector.available) {
-        return this.buildLocal(input, vector.warnings, "local", maxChars);
-      }
-      const projectSections = await this.projectTaskSections(inventory, input.projectScopeId);
-      const projectDocumentSections = await this.projectDocumentSections(inventory, input.projectScopeId, input.userMessage);
-      const knowledgeSections = await this.knowledgeCoverageSections(scopedInventory, input.userMessage);
-      const candidateSections = await this.candidates.buildSections({ userMessage: input.userMessage, inventory: scopedInventory, limit: 6 });
-      return this.composer.compose({
-        userMessage: input.userMessage,
-        modeUsed: "vector",
-        maxChars,
-        sections: [
-          ...projectSections,
-          ...projectDocumentSections,
-          ...knowledgeSections,
-          ...candidateSections,
-          ...this.evidenceSections(vector.evidence, 58, "向量检索证据")
-        ],
-        warnings: vector.warnings
-      });
-    }
-
-    if (mode === "graph") {
-      return this.buildGraph(input, maxChars);
-    }
-
-    return this.buildLocal(input, [], "local", maxChars);
-  }
-
-  private async buildLocal(
-    input: ContextEngineBuildInput,
-    warnings: string[],
-    modeUsed: ContextEngineMode,
-    maxChars: number
-  ): Promise<ContextEngineResult> {
     const inventory = await this.metadata.getInventory();
     const scopedInventory = this.scopeInventoryForProject(inventory, input.projectScopeId);
-    const plan = await this.planner.plan({
-      userMessage: input.userMessage,
-      mode: "local",
-      inventory: scopedInventory
+    let retrievalMessage = input.userMessage;
+    if (input.useAiPlanner) {
+      const plan = await this.planner.plan({ userMessage: input.userMessage, mode, inventory: scopedInventory });
+      retrievalMessage = [input.userMessage, ...plan.keywords, ...plan.tags].filter(Boolean).join(" ");
+    }
+    const retrieval = await this.adaptiveRetrieval.search({
+      userMessage: retrievalMessage,
+      inventory,
+      allowedPaths: scopedInventory.map((item) => item.path),
+      maxResults: mode === "graph" ? 16 : mode === "vector" ? 12 : 10
     });
-    const [summarySections, evidence, candidateSections, llmWikiSections, currentNoteSections, urlSections, webSearchSections, projectSections, projectDocumentSections, knowledgeSections, coreSections] = await Promise.all([
-      this.summaries.getSections({ mode: "local", date: input.date, inventory: scopedInventory }),
-      this.localRetrieval.search(plan, scopedInventory),
-      this.candidates.buildSections({ userMessage: input.userMessage, inventory: scopedInventory }),
-      this.llmWikiSections(),
+    const shouldIncludeProjectOverview = Boolean(input.projectScopeId) || /项目|任务|进度|待办|project|task/i.test(input.userMessage);
+    const [summarySections, currentNoteSections, urlSections, webSearchSections, projectSections, projectDocumentSections, coreSections, graphSections] = await Promise.all([
+      this.summaries.getSections({ mode, date: input.date, inventory: scopedInventory }),
       this.currentNoteSections(scopedInventory),
       this.urlSections(input.userMessage, input.fetchUrl),
       this.webSearchSections(input.userMessage, input.searchWeb),
-      this.projectTaskSections(inventory, input.projectScopeId),
+      shouldIncludeProjectOverview ? this.projectTaskSections(inventory, input.projectScopeId) : Promise.resolve([]),
       this.projectDocumentSections(inventory, input.projectScopeId, input.userMessage),
-      this.knowledgeCoverageSections(scopedInventory, input.userMessage),
-      this.coreContextSections(scopedInventory, input.date)
+      this.coreContextSections(scopedInventory, input.date),
+      mode === "graph"
+        ? this.graphContext.build({ userMessage: input.userMessage, date: input.date, inventory: scopedInventory })
+        : Promise.resolve([])
     ]);
 
-    return this.composer.compose({
+    const composed = this.composer.compose({
       userMessage: input.userMessage,
-      modeUsed,
+      modeUsed: mode,
       maxChars,
       sections: [
+        ...this.evidenceSections(retrieval.evidence, 100, "检索证据"),
         ...currentNoteSections,
         ...urlSections,
         ...webSearchSections,
         ...projectSections,
         ...projectDocumentSections,
-        ...knowledgeSections,
-        ...candidateSections,
-        ...coreSections,
-        ...summarySections,
-        ...this.evidenceSections(evidence, 45, "本地检索证据"),
-        ...llmWikiSections
-      ],
-      warnings
-    });
-  }
-
-  private async buildGraph(input: ContextEngineBuildInput, maxChars: number): Promise<ContextEngineResult> {
-    const inventory = await this.metadata.getInventory();
-    const scopedInventory = this.scopeInventoryForProject(inventory, input.projectScopeId);
-    const plan = await this.planner.plan({
-      userMessage: input.userMessage,
-      mode: "graph",
-      inventory: scopedInventory
-    });
-    const [projectSections, projectDocumentSections, knowledgeSections, graphSections, candidateSections, summarySections, evidence] = await Promise.all([
-      this.projectTaskSections(inventory, input.projectScopeId),
-      this.projectDocumentSections(inventory, input.projectScopeId, input.userMessage),
-      this.knowledgeCoverageSections(scopedInventory, input.userMessage),
-      this.graphContext.build({ userMessage: input.userMessage, date: input.date, inventory: scopedInventory }),
-      this.candidates.buildSections({ userMessage: input.userMessage, inventory: scopedInventory, limit: 8 }),
-      this.summaries.getSections({ mode: "graph", date: input.date, inventory: scopedInventory }),
-      this.localRetrieval.search(plan, scopedInventory)
-    ]);
-
-    return this.composer.compose({
-      userMessage: input.userMessage,
-      modeUsed: "graph",
-      maxChars,
-      sections: [
-        ...projectSections,
-        ...projectDocumentSections,
-        ...knowledgeSections,
         ...graphSections,
-        ...candidateSections,
-        ...summarySections,
-        ...this.evidenceSections(evidence, 38, "本地原始证据")
+        ...coreSections,
+        ...summarySections
       ],
-      warnings: []
+      warnings: retrieval.warnings
     });
+    return { ...composed, retrievalTrace: retrieval.trace };
   }
 
   private scopeInventoryForProject(
@@ -696,14 +618,6 @@ export class ContextEngine {
       if (section) sections.push(section);
     }
 
-    const knowledge = inventory
-      .filter((item) => item.path.toLowerCase().includes("/knowledge/") && !item.path.toLowerCase().includes("/knowledge/llmwiki/raw/"))
-      .sort((a, b) => b.mtime - a.mtime)[0];
-    if (knowledge) {
-      const section = await this.sectionFromInventoryItem(knowledge, `Knowledge: ${knowledge.title}`, 44);
-      if (section) sections.push(section);
-    }
-
     return sections;
   }
 
@@ -730,7 +644,8 @@ export class ContextEngine {
       content: item.content,
       priority: priority + Math.max(0, 8 - index),
       source: item.source.path,
-      sourceInfo: item.source
+      sourceInfo: item.source,
+      kind: "evidence"
     }));
   }
 
@@ -823,11 +738,16 @@ function parseFrontmatterLocal(markdown: string): Record<string, unknown> {
 
 export * from "./context-engine/types";
 export { AiRetrievalPlanner } from "./context-engine/AiRetrievalPlanner";
+export { AdaptiveRetrievalService } from "./context-engine/AdaptiveRetrievalService";
+export { CitationVerifierService } from "./context-engine/CitationVerifierService";
 export { ContextComposer } from "./context-engine/ContextComposer";
 export { ContextCandidateService } from "./context-engine/ContextCandidateService";
 export { ContextSourcePolicyService } from "./context-engine/ContextSourcePolicyService";
 export { GraphContextService } from "./context-engine/GraphContextService";
+export { HybridRetrievalService } from "./context-engine/HybridRetrievalService";
 export { LocalRetrievalService } from "./context-engine/LocalRetrievalService";
+export { MarkdownChunkingService } from "./context-engine/MarkdownChunkingService";
 export { ObsidianMetadataService } from "./context-engine/ObsidianMetadataService";
+export { RagEvaluationService } from "./context-engine/RagEvaluationService";
 export { SummaryIndexService } from "./context-engine/SummaryIndexService";
 export { VectorRetrievalService } from "./context-engine/VectorRetrievalService";

@@ -4,7 +4,9 @@ import { createModalShell } from "../components/ModalShell";
 import {
   PROJECT_DOCUMENT_IMPORT_ACCEPT,
   ProjectDocumentService,
-  type ProjectDocumentImportResult
+  type ProjectDocumentImportProgress,
+  type ProjectDocumentImportResult,
+  type ProjectDocumentTextImportMode
 } from "../services/ProjectDocumentService";
 import type { LifeOSProject } from "../types";
 
@@ -12,6 +14,9 @@ export class ImportProjectDocumentsModal extends Modal {
   private files: File[] = [];
   private listEl: HTMLElement | null = null;
   private importButton: HTMLButtonElement | null = null;
+  private progressEl: HTMLElement | null = null;
+  private textMode: ProjectDocumentTextImportMode = "ai-formatted";
+  private importBusy = false;
 
   constructor(
     app: App,
@@ -26,7 +31,7 @@ export class ImportProjectDocumentsModal extends Modal {
     this.modalEl.addClass("lifeos-modal-host", "lifeos-project-import-modal-host");
     const { body, footer } = createModalShell(this.contentEl, {
       title: "导入项目文档",
-      subtitle: `把 PDF、Word、Markdown、文本和图片放进「${this.project.name}」的项目资料库。`,
+      subtitle: `先保存原文件，再完整提取正文；选择 AI 整理时会按段落分批处理「${this.project.name}」的项目资料。`,
       icon: "upload-cloud",
       className: "lifeos-task-modal lifeos-project-import-modal"
     });
@@ -49,7 +54,7 @@ export class ImportProjectDocumentsModal extends Modal {
     setIcon(drop.createSpan({ cls: "lifeos-project-import-drop-icon" }), "files");
     const copy = drop.createDiv({ cls: "lifeos-project-import-drop-copy" });
     copy.createEl("strong", { text: "拖拽文件到这里，或选择文件" });
-    copy.createEl("span", { text: "PDF / Word 会保存原文件并生成项目资料页；文本类会同步写入可检索正文。" });
+    copy.createEl("span", { text: "PDF / Word 会先保存原件；可读正文会完整写入项目文档，再按下方选项整理为可检索 Markdown。" });
     createButton(drop, "选择文件", () => input.click(), { ghost: true, icon: "paperclip" });
 
     drop.addEventListener("dragover", (event) => {
@@ -69,14 +74,19 @@ export class ImportProjectDocumentsModal extends Modal {
       }
     });
 
+    this.renderTextModeOptions(body);
+
     this.listEl = body.createDiv({ cls: "lifeos-project-import-list" });
     this.renderList();
+    this.progressEl = body.createDiv({ cls: "lifeos-project-import-progress", text: "准备导入" });
+    this.progressEl.setAttr("aria-live", "polite");
 
     footer.addClass("lifeos-task-modal-footer");
     createButton(footer, "取消", () => this.close(), { ghost: true });
     this.importButton = createButton(footer, "导入文档", () => void this.importSelectedFiles(), {
       primary: true,
-      icon: "upload"
+      icon: "upload",
+      className: "lifeos-project-import-submit"
     });
     this.syncImportButton();
   }
@@ -122,21 +132,109 @@ export class ImportProjectDocumentsModal extends Modal {
       new Notice("请先选择要导入的文档。");
       return;
     }
-    this.importButton?.setAttr("disabled", "true");
+    this.setImportButtonBusy(true);
+    if (this.textMode === "ai-formatted") {
+      new Notice("正在导入：先完整提取正文，再逐段 AI 整理格式…", 4000);
+    }
     try {
-      const imported = await this.service.importDocuments(this.project, this.files);
+      const imported = await this.service.importDocuments(this.project, this.files, {
+        textMode: this.textMode,
+        onProgress: (progress) => this.renderImportProgress(progress)
+      });
       new Notice(`已导入 ${imported.length} 个项目文档。`);
       this.close();
       await this.onImported?.(imported);
     } catch (error) {
-      this.importButton?.removeAttribute("disabled");
+      this.setImportButtonBusy(false);
       new Notice(error instanceof Error ? error.message : "项目文档导入失败。");
     }
   }
 
   private syncImportButton(): void {
     if (!this.importButton) return;
-    this.importButton.disabled = this.files.length === 0;
+    this.importButton.disabled = this.importBusy || this.files.length === 0;
+    this.importButton.title = this.files.length === 0
+      ? "先选择要导入的文档"
+      : this.textMode === "ai-formatted"
+        ? "先完整导入正文，再按段落批次进行 AI Markdown 整理"
+        : "导入项目文档";
+  }
+
+  private setImportButtonBusy(isBusy: boolean): void {
+    this.importBusy = isBusy;
+    this.importButton?.toggleClass("is-busy", isBusy);
+    const label = this.importButton?.querySelector<HTMLElement>(".lifeos-v2-button-label");
+    if (label) label.textContent = isBusy
+      ? this.textMode === "ai-formatted" ? "提取并逐段排版…" : "正在导入…"
+      : "导入文档";
+    this.syncImportButton();
+  }
+
+  private renderImportProgress(progress: ProjectDocumentImportProgress): void {
+    if (!this.progressEl) return;
+    const stage = progress.stage === "saving"
+      ? "保存原文件"
+      : progress.stage === "extracting"
+        ? "提取正文"
+        : progress.stage === "formatting"
+          ? "逐段 AI 整理"
+          : progress.stage === "writing"
+            ? "写入项目文档"
+            : "已完成";
+    const chunk = progress.stage === "formatting" && progress.chunkIndex && progress.chunkCount
+      ? ` · 第 ${progress.chunkIndex}/${progress.chunkCount} 段`
+      : "";
+    this.progressEl.setText(`${progress.fileIndex}/${progress.fileCount} · ${progress.sourceName} · ${stage}${chunk}`);
+    const label = this.importButton?.querySelector<HTMLElement>(".lifeos-v2-button-label");
+    if (label && this.importBusy) label.textContent = `${stage}${chunk}`;
+  }
+
+  private renderTextModeOptions(body: HTMLElement): void {
+    const panel = body.createDiv({ cls: "lifeos-project-import-options" });
+    const copy = panel.createDiv({ cls: "lifeos-project-import-options-copy" });
+    copy.createEl("strong", { text: "正文处理方式" });
+    copy.createEl("span", { text: "先决定是否完整导入可检索正文；AI 只在正文导入后按段落调整格式，不负责读取原文件。" });
+    const options: Array<{ mode: ProjectDocumentTextImportMode; title: string; description: string }> = [
+      {
+        mode: "ai-formatted",
+        title: "先完整导入，再逐段 AI 整理格式",
+        description: "推荐。先把可读正文完整写入，再按段落批次交给 AI 调整标题、段落、列表和表格；疑似漏内容会自动保留原文。"
+      },
+      {
+        mode: "plain-text",
+        title: "只导入原始文本",
+        description: "保存原文件并写入本地解析文本，不调用 AI，速度更快。"
+      },
+      {
+        mode: "attachment-only",
+        title: "只保存原文件",
+        description: "不提取全文、不生成可检索正文，适合暂存大文件或敏感资料。"
+      }
+    ];
+    const group = panel.createDiv({ cls: "lifeos-project-import-option-list" });
+    for (const option of options) {
+      const label = group.createEl("label", {
+        cls: option.mode === this.textMode ? "lifeos-project-import-option is-active" : "lifeos-project-import-option"
+      });
+      const radio = label.createEl("input", {
+        attr: {
+          type: "radio",
+          name: "lifeos-project-import-text-mode",
+          value: option.mode
+        }
+      });
+      radio.checked = option.mode === this.textMode;
+      const text = label.createDiv({ cls: "lifeos-project-import-option-copy" });
+      text.createEl("strong", { text: option.title });
+      text.createEl("span", { text: option.description });
+      radio.addEventListener("change", () => {
+        this.textMode = option.mode;
+        for (const item of Array.from(group.querySelectorAll<HTMLElement>(".lifeos-project-import-option"))) {
+          item.toggleClass("is-active", item === label);
+        }
+        this.syncImportButton();
+      });
+    }
   }
 
   private fileKey(file: File): string {

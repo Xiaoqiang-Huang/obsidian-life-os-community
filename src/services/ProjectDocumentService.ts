@@ -10,13 +10,17 @@ import type { FileSystemService } from "./FileSystemService";
 import {
   classifyImportedDocument,
   extractReadableDocumentText,
+  formatImportedPlainText,
   formatAttachmentSize,
   saveImportedFileToVault,
   type ImportedDocumentKind,
   type ReadableImportFile
 } from "./DocumentImportService";
-import { buildKeywordLinkedMarkdown } from "./KeywordLinkService";
+import { buildKeywordLinkedMarkdown, stripKeywordLinksSection } from "./KeywordLinkService";
 import { PdfOcrService, type PdfOcrProvider } from "./PdfOcrService";
+
+export { docxXmlToMarkdown, formatImportedPlainText, reconstructPdfPageText } from "./DocumentImportService";
+export { formatTesseractBlocksForMarkdown, parsePaddleStructuredOcrResponse } from "./PdfOcrService";
 
 interface VaultFileLike {
   path: string;
@@ -45,9 +49,47 @@ interface ProjectDocumentListOptions {
 
 export interface ProjectDocumentServiceOptions {
   pdfOcr?: PdfOcrProvider;
+  aiFormatter?: ProjectDocumentAiFormatter;
 }
 
 export type ProjectDocumentImportKind = ImportedDocumentKind;
+export type ProjectDocumentTextImportMode = "attachment-only" | "plain-text" | "ai-formatted";
+export type ProjectDocumentImportStage = "saving" | "extracting" | "formatting" | "writing" | "completed";
+
+export interface ProjectDocumentImportProgress {
+  fileIndex: number;
+  fileCount: number;
+  sourceName: string;
+  stage: ProjectDocumentImportStage;
+  chunkIndex?: number;
+  chunkCount?: number;
+}
+
+export interface ProjectDocumentImportOptions {
+  textMode?: ProjectDocumentTextImportMode;
+  onProgress?: (progress: ProjectDocumentImportProgress) => void;
+}
+
+export interface ProjectDocumentAiFormatterInput {
+  project: LifeOSProject;
+  title: string;
+  sourceName: string;
+  importKind: ProjectDocumentImportKind;
+  text: string;
+  chunkIndex?: number;
+  chunkCount?: number;
+  chunkTextLength?: number;
+  fullTextLength?: number;
+}
+
+export interface ProjectDocumentAiFormatterResult {
+  markdown: string;
+  warnings?: string[];
+}
+
+export type ProjectDocumentAiFormatter = (
+  input: ProjectDocumentAiFormatterInput
+) => Promise<ProjectDocumentAiFormatterResult | string>;
 
 export interface ProjectDocumentImportResult {
   document: LifeOSProjectDocument;
@@ -55,6 +97,7 @@ export interface ProjectDocumentImportResult {
   attachmentPath: string;
   obsidianLink: string;
   extractedText: boolean;
+  textMode: ProjectDocumentTextImportMode;
   warnings: string[];
 }
 
@@ -70,6 +113,9 @@ interface ProjectDocumentVault {
 
 const PROJECT_DOCUMENT_KINDS: LifeOSProjectDocumentKind[] = ["note", "meeting", "requirement", "reference", "review"];
 const PROJECT_DOCUMENT_TYPE = "lifeos-project-document";
+const PROJECT_DOCUMENT_AI_FORMAT_CHUNK_CHARS = 3600;
+const PROJECT_DOCUMENT_AI_FORMAT_MIN_RETENTION_RATIO = 0.72;
+const PROJECT_DOCUMENT_AI_FORMAT_MARKER_RETENTION_RATIO = 0.86;
 
 export const PROJECT_DOCUMENT_IMPORT_ACCEPT = [
   ".txt",
@@ -130,18 +176,45 @@ export class ProjectDocumentService {
     return this.describeDocument(project, file, await this.readFile(file));
   }
 
-  async importDocuments(project: LifeOSProject, files: ReadableImportFile[]): Promise<ProjectDocumentImportResult[]> {
+  async importDocuments(
+    project: LifeOSProject,
+    files: ReadableImportFile[],
+    options: ProjectDocumentImportOptions = {}
+  ): Promise<ProjectDocumentImportResult[]> {
     await this.ensureProjectSpace(project);
     const results: ProjectDocumentImportResult[] = [];
+    const textMode = options.textMode ?? "plain-text";
 
-    for (const sourceFile of files) {
+    for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
+      const sourceFile = files[fileIndex];
       const sourceName = sourceFile.name || "imported-file";
       const title = this.cleanTitle(sourceName.replace(/\.[^.]+$/u, "") || sourceName);
       const importKind = this.classifyImportFile(sourceFile);
+      const report = (stage: ProjectDocumentImportStage, chunkIndex?: number, chunkCount?: number) => options.onProgress?.({
+        fileIndex: fileIndex + 1,
+        fileCount: files.length,
+        sourceName,
+        stage,
+        chunkIndex,
+        chunkCount
+      });
+      report("saving");
       const saved = await saveImportedFileToVault(this.app, sourceFile, {
         folderPath: this.attachmentsPath(project)
       });
-      const extraction = await this.extractImportText(sourceFile, importKind);
+      report("extracting");
+      const extraction = textMode === "attachment-only"
+        ? { text: "", warnings: ["Original file saved only. Searchable text conversion was skipped by import option."] }
+        : await this.extractImportText(sourceFile, importKind);
+      const formatted = await this.prepareImportedDocumentText(project, {
+        title,
+        sourceFile,
+        importKind,
+        text: extraction.text,
+        textMode,
+        onFormattingProgress: (chunkIndex, chunkCount) => report("formatting", chunkIndex, chunkCount)
+      });
+      report("writing");
       const wrapperPath = this.uniquePath(this.documentsPath(project), `${this.slugify(title)}.md`);
       const wrapper = this.importedDocumentMarkdown(project, {
         title,
@@ -149,8 +222,9 @@ export class ProjectDocumentService {
         importKind,
         attachmentPath: saved.vaultPath,
         obsidianLink: saved.obsidianLink,
-        text: extraction.text,
-        warnings: extraction.warnings
+        text: formatted.text,
+        textMode,
+        warnings: [...extraction.warnings, ...formatted.warnings]
       });
       const file = await this.createFile(wrapperPath, wrapper);
       const document = await this.describeDocument(project, file, await this.readFile(file));
@@ -160,8 +234,10 @@ export class ProjectDocumentService {
         attachmentPath: saved.vaultPath,
         obsidianLink: saved.obsidianLink,
         extractedText: Boolean(extraction.text.trim()),
-        warnings: extraction.warnings
+        textMode,
+        warnings: [...extraction.warnings, ...formatted.warnings]
       });
+      report("completed");
     }
 
     return results;
@@ -181,9 +257,16 @@ export class ProjectDocumentService {
 
     const docs: LifeOSProjectDocument[] = [];
     for (const file of files) {
-      docs.push(await this.describeDocument(project, file, await this.readFile(file)));
+      const content = await this.readFile(file);
+      if (this.isAiWorkspaceSessionAsset(file.path, content)) continue;
+      docs.push(await this.describeDocument(project, file, content));
     }
     return docs;
+  }
+
+  private isAiWorkspaceSessionAsset(path: string, content: string): boolean {
+    return /\/Documents\/AI Workspace\//iu.test(path)
+      || /^---[\s\S]*?\ntype:\s*ai-workspace-session\s*$/imu.test(content);
   }
 
   async updateDocument(path: string, content: string): Promise<void> {
@@ -265,6 +348,7 @@ export class ProjectDocumentService {
       attachmentPath: string;
       obsidianLink: string;
       text: string;
+      textMode: ProjectDocumentTextImportMode;
       warnings: string[];
     }
   ): string {
@@ -277,6 +361,7 @@ export class ProjectDocumentService {
       `source_file: ${yamlScalar(input.attachmentPath)}`,
       `source_name: ${yamlScalar(input.sourceFile.name)}`,
       `source_kind: ${yamlScalar(input.importKind)}`,
+      `text_import_mode: ${yamlScalar(input.textMode)}`,
       `source_mime: ${yamlScalar(input.sourceFile.type || "unknown")}`,
       `source_size: ${yamlScalar(formatAttachmentSize(input.sourceFile.size))}`,
       `created: ${formatDate()}`,
@@ -312,6 +397,9 @@ export class ProjectDocumentService {
     markdown: string
   ): Promise<LifeOSProjectDocument> {
     const frontmatter = parseFrontmatter(markdown);
+    const readableBody = extractProjectDocumentReadableBody(markdown, Boolean(frontmatter.source_name));
+    const plainBody = markdownToPlainDocumentText(readableBody);
+    const textImportMode = normalizeProjectDocumentTextImportMode(frontmatter.text_import_mode);
     return {
       projectId: String(frontmatter.project_id || project.id),
       projectName: String(frontmatter.project_name || project.name),
@@ -319,7 +407,14 @@ export class ProjectDocumentService {
       path: file.path,
       kind: this.normalizeKind(String(frontmatter.kind || "")),
       mtime: file.stat?.mtime ?? 0,
-      excerpt: this.excerpt(markdown)
+      excerpt: plainBody.slice(0, 220),
+      sourceName: optionalFrontmatterValue(frontmatter.source_name),
+      sourceKind: optionalFrontmatterValue(frontmatter.source_kind),
+      sourceSize: optionalFrontmatterValue(frontmatter.source_size),
+      textImportMode,
+      characterCount: plainBody.length,
+      hasSearchableText: plainBody.length > 0,
+      warningCount: countProjectDocumentImportWarnings(markdown)
     };
   }
 
@@ -427,17 +522,84 @@ export class ProjectDocumentService {
     return heading || file.basename || (file.name || file.path.split("/").pop() || "Project document").replace(/\.md$/i, "");
   }
 
-  private excerpt(markdown: string): string {
-    return markdown
-      .replace(/^---[\s\S]*?\n---\s*/m, "")
-      .replace(/^#\s+.+$/m, "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 220);
-  }
-
   private classifyImportFile(file: ReadableImportFile): ProjectDocumentImportKind {
     return classifyImportedDocument(file.name, file.type || "");
+  }
+
+  private async prepareImportedDocumentText(
+    project: LifeOSProject,
+    input: {
+      title: string;
+      sourceFile: ReadableImportFile;
+      importKind: ProjectDocumentImportKind;
+      text: string;
+      textMode: ProjectDocumentTextImportMode;
+      onFormattingProgress?: (chunkIndex: number, chunkCount: number) => void;
+    }
+  ): Promise<{ text: string; warnings: string[] }> {
+    const raw = input.text.trim();
+    if (!raw) return { text: "", warnings: [] };
+    const localMarkdown = this.formatExtractedTextForMarkdown(raw, input.importKind);
+    if (input.textMode === "plain-text") {
+      return { text: localMarkdown, warnings: [] };
+    }
+    if (input.textMode !== "ai-formatted") {
+      return { text: "", warnings: [] };
+    }
+    if (!this.options.aiFormatter) {
+      return {
+        text: localMarkdown,
+        warnings: ["AI formatting was requested but no formatter is configured. Used local paragraph formatting instead."]
+      };
+    }
+
+    const chunks = splitMarkdownForAiFormatting(localMarkdown, PROJECT_DOCUMENT_AI_FORMAT_CHUNK_CHARS);
+    if (chunks.length === 0) return { text: localMarkdown, warnings: [] };
+
+    const formattedChunks: string[] = [];
+    const warnings: string[] = [];
+    for (let index = 0; index < chunks.length; index += 1) {
+      const chunk = chunks[index];
+      input.onFormattingProgress?.(index + 1, chunks.length);
+      try {
+        const formatted = await this.options.aiFormatter({
+          project,
+          title: input.title,
+          sourceName: input.sourceFile.name,
+          importKind: input.importKind,
+          text: chunk,
+          chunkIndex: index + 1,
+          chunkCount: chunks.length,
+          chunkTextLength: chunk.length,
+          fullTextLength: localMarkdown.length
+        });
+        const markdown = typeof formatted === "string" ? formatted : formatted.markdown;
+        const clean = stripMarkdownFences(markdown).trim();
+        if (!clean) throw new Error("AI formatter returned empty markdown.");
+        if (looksLikeAiFormattingDroppedContent(chunk, clean)) {
+          formattedChunks.push(chunk);
+          warnings.push(`AI formatting batch ${index + 1}/${chunks.length} looked incomplete; kept the locally extracted text for that batch.`);
+          continue;
+        }
+        formattedChunks.push(clean);
+        if (typeof formatted !== "string") warnings.push(...formatted.warnings ?? []);
+      } catch (error) {
+        formattedChunks.push(chunk);
+        warnings.push(error instanceof Error
+          ? `AI formatting batch ${index + 1}/${chunks.length} failed; kept the locally extracted text for that batch. ${error.message}`
+          : `AI formatting batch ${index + 1}/${chunks.length} failed; kept the locally extracted text for that batch.`);
+      }
+    }
+    return { text: joinFormattedImportChunks(formattedChunks), warnings };
+  }
+
+  private formatExtractedTextForMarkdown(text: string, kind: ProjectDocumentImportKind): string {
+    const normalized = text.replace(/\r\n?/g, "\n").replace(/[ \t]+\n/g, "\n").trim();
+    if (!normalized) return "";
+    if (kind === "markdown") return normalized;
+    if (kind === "json") return `\`\`\`json\n${normalized}\n\`\`\``;
+    if (kind === "csv") return `\`\`\`csv\n${normalized}\n\`\`\``;
+    return formatImportedPlainText(normalized);
   }
 
   private async extractImportText(
@@ -465,6 +627,61 @@ export class ProjectDocumentService {
   }
 }
 
+function extractProjectDocumentReadableBody(markdown: string, imported: boolean): string {
+  const withoutGeneratedLinks = stripKeywordLinksSection(String(markdown || ""));
+  const body = withoutGeneratedLinks
+    .replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n)?/u, "")
+    .replace(/^#\s+.+(?:\r?\n|$)/u, "")
+    .trim();
+  if (!imported) return body;
+
+  const searchableHeading = body.match(/^##\s+(?:可检索正文|Searchable body)\s*$/imu);
+  if (!searchableHeading || searchableHeading.index === undefined) return "";
+  return body.slice(searchableHeading.index + searchableHeading[0].length).trim();
+}
+
+function markdownToPlainDocumentText(markdown: string): string {
+  return String(markdown || "")
+    .replace(/<!--[\s\S]*?-->/gu, " ")
+    .replace(/```[A-Za-z0-9_-]*\s*|```/gu, " ")
+    .replace(/!\[\[[^\]]+\]\]/gu, " ")
+    .replace(/\[\[([^\]|#]+)(?:[|#]([^\]]+))?\]\]/gu, (_match, target: string, alias?: string) => alias || target)
+    .replace(/!\[[^\]]*\]\([^)]+\)/gu, " ")
+    .replace(/\[([^\]]+)\]\([^)]+\)/gu, "$1")
+    .replace(/^#{1,6}\s+/gmu, "")
+    .replace(/^\s*(?:[-*+]>?|\d+[.、．)])\s*/gmu, "")
+    .replace(/^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/gmu, " ")
+    .replace(/\|/gu, " ")
+    .replace(/[*_~`]+/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function normalizeProjectDocumentTextImportMode(
+  value: string | undefined
+): LifeOSProjectDocument["textImportMode"] | undefined {
+  return value === "attachment-only" || value === "plain-text" || value === "ai-formatted"
+    ? value
+    : undefined;
+}
+
+function optionalFrontmatterValue(value: string | undefined): string | undefined {
+  const clean = String(value || "").trim();
+  return clean || undefined;
+}
+
+function countProjectDocumentImportWarnings(markdown: string): number {
+  const body = stripKeywordLinksSection(String(markdown || ""))
+    .replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n)?/u, "");
+  const heading = body.match(/^##\s+(?:导入说明|Import notes)\s*$/imu);
+  if (!heading || heading.index === undefined) return 0;
+  const sectionStart = heading.index + heading[0].length;
+  const tail = body.slice(sectionStart);
+  const nextHeading = tail.search(/^##\s+/mu);
+  const section = nextHeading >= 0 ? tail.slice(0, nextHeading) : tail;
+  return (section.match(/^\s*[-*+]\s+\S+/gmu) ?? []).length;
+}
+
 function parseFrontmatter(markdown: string): Record<string, string> {
   const match = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) return {};
@@ -481,4 +698,124 @@ function yamlScalar(value: string): string {
   const clean = value.trim();
   if (/^[A-Za-z0-9_-]+$/.test(clean)) return clean;
   return JSON.stringify(clean);
+}
+
+function stripMarkdownFences(markdown: string): string {
+  const trimmed = markdown.trim();
+  const fenced = trimmed.match(/^```(?:markdown|md)?\s*([\s\S]*?)\s*```$/i);
+  return fenced ? fenced[1].trim() : trimmed;
+}
+
+function splitMarkdownForAiFormatting(markdown: string, maxChars: number): string[] {
+  const normalized = markdown.replace(/\r\n?/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  if (!normalized) return [];
+  const blocks = normalized.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+  const chunks: string[] = [];
+  let current = "";
+
+  const pushCurrent = () => {
+    const clean = current.trim();
+    if (clean) chunks.push(clean);
+    current = "";
+  };
+
+  const appendBlock = (block: string) => {
+    const next = current ? `${current}\n\n${block}` : block;
+    if (next.length <= maxChars) {
+      current = next;
+      return;
+    }
+    pushCurrent();
+    if (block.length <= maxChars) {
+      current = block;
+      return;
+    }
+    for (const part of splitLongImportBlock(block, maxChars)) {
+      if (part.length > maxChars) {
+        chunks.push(part);
+      } else {
+        current = part;
+        pushCurrent();
+      }
+    }
+  };
+
+  for (const block of blocks.length > 0 ? blocks : [normalized]) appendBlock(block);
+  pushCurrent();
+  return chunks;
+}
+
+function splitLongImportBlock(block: string, maxChars: number): string[] {
+  const sentenceText = block
+    .replace(/([。！？；;.!?])\s+/g, "$1\n")
+    .replace(/(\d+[.、]\s*)/g, "\n$1")
+    .replace(/([A-H][.、]\s*)/g, "\n$1");
+  const pieces = sentenceText.split(/\n+/).map((part) => part.trim()).filter(Boolean);
+  const parts: string[] = [];
+  let current = "";
+
+  const pushCurrent = () => {
+    const clean = current.trim();
+    if (clean) parts.push(clean);
+    current = "";
+  };
+
+  for (const piece of pieces.length > 0 ? pieces : [block]) {
+    if (piece.length > maxChars) {
+      pushCurrent();
+      for (let offset = 0; offset < piece.length; offset += maxChars) {
+        parts.push(piece.slice(offset, offset + maxChars).trim());
+      }
+      continue;
+    }
+    const next = current ? `${current}\n${piece}` : piece;
+    if (next.length <= maxChars) {
+      current = next;
+    } else {
+      pushCurrent();
+      current = piece;
+    }
+  }
+  pushCurrent();
+  return parts;
+}
+
+function looksLikeAiFormattingDroppedContent(source: string, formatted: string): boolean {
+  const sourceCompact = compactImportTextForRetention(source);
+  const formattedCompact = compactImportTextForRetention(formatted);
+  if (sourceCompact.length < 180) return false;
+  if (formattedCompact.length < sourceCompact.length * PROJECT_DOCUMENT_AI_FORMAT_MIN_RETENTION_RATIO) return true;
+  const markers = importantImportRetentionMarkers(sourceCompact);
+  if (markers.length === 0) return false;
+  const kept = markers.filter((marker) => formattedCompact.includes(marker)).length;
+  return kept < Math.ceil(markers.length * PROJECT_DOCUMENT_AI_FORMAT_MARKER_RETENTION_RATIO);
+}
+
+function importantImportRetentionMarkers(text: string): string[] {
+  const markers = new Set<string>();
+  const normalized = text.replace(/\s+/g, "");
+  const windowSize = 18;
+  const steps = [0.08, 0.24, 0.42, 0.62, 0.82, 0.94];
+  for (const step of steps) {
+    const index = Math.max(0, Math.min(normalized.length - windowSize, Math.floor(normalized.length * step)));
+    const marker = normalized.slice(index, index + windowSize);
+    if (marker.length >= 10) markers.add(marker);
+  }
+  return Array.from(markers);
+}
+
+function compactImportTextForRetention(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, (block) => block.replace(/```[a-z]*|```/gi, ""))
+    .replace(/[#>*_`~\-\[\]().:：,，、；;。！？!?\s]/g, "")
+    .trim();
+}
+
+function joinFormattedImportChunks(chunks: string[]): string {
+  return chunks
+    .map((chunk) => stripMarkdownFences(chunk).trim())
+    .filter(Boolean)
+    .join("\n\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }

@@ -58,6 +58,14 @@ export interface ExtractReadableDocumentTextOptions {
   pdfOcrOptions?: PdfOcrOptions;
 }
 
+export interface PdfTextItemLike {
+  str?: string;
+  transform?: ArrayLike<number>;
+  width?: number;
+  height?: number;
+  hasEOL?: boolean;
+}
+
 const DEFAULT_MAX_TEXT_CHARS = 24000;
 const IMAGE_MIME_MARKER = "image/*";
 const PDF_MIME_MARKER = "application/pdf";
@@ -164,16 +172,48 @@ export async function extractReadableDocumentText(
   const maxTextChars = options.maxTextChars === null ? null : options.maxTextChars ?? DEFAULT_MAX_TEXT_CHARS;
 
   if (kind === "pdf") {
+    const structuredWarnings: string[] = [];
+    if (
+      options.enablePdfOcr
+      && options.pdfOcr
+      && options.pdfOcr.prefersStructuredParsing?.()
+    ) {
+      try {
+        const structured = await options.pdfOcr.extractPdfText(file, {
+          ...options.pdfOcrOptions,
+          fallbackToLocal: false
+        });
+        if (structured.text.trim()) {
+          return {
+            text: capText(structured.text, maxTextChars),
+            warnings: structured.warnings
+          };
+        }
+        structuredWarnings.push(...structured.warnings);
+      } catch (error) {
+        structuredWarnings.push(
+          `Structured PDF parsing failed; preserved selectable PDF text instead. ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+    }
     const text = await extractPdfText(file);
-    if (text.trim()) return { text: capText(text, maxTextChars), warnings: [] };
+    if (text.trim()) return { text: capText(text, maxTextChars), warnings: structuredWarnings };
     if (options.enablePdfOcr && options.pdfOcr) {
       const ocr = await options.pdfOcr.extractPdfText(file, options.pdfOcrOptions);
       return {
         text: capText(ocr.text, maxTextChars),
-        warnings: ocr.warnings
+        warnings: [...structuredWarnings, ...ocr.warnings]
       };
     }
-    return { text: "", warnings: ["No selectable PDF text was detected. Scanned PDFs require OCR before they can be searched."] };
+    return {
+      text: "",
+      warnings: [
+        ...structuredWarnings,
+        "No selectable PDF text was detected. Scanned PDFs require OCR before they can be searched."
+      ]
+    };
   }
 
   if (kind === "word") {
@@ -360,16 +400,10 @@ async function extractPdfText(file: ReadableImportFile): Promise<string> {
     for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
       const page = await document.getPage(pageNumber);
       const content = await page.getTextContent();
-      const text = content.items
-        .map((item: unknown) => {
-          const candidate = item as { str?: string };
-          return typeof candidate.str === "string" ? candidate.str : "";
-        })
-        .filter(Boolean)
-        .join(" ")
-        .replace(/\s+/g, " ")
-        .trim();
-      if (text) pageTexts.push(text);
+      const text = reconstructPdfPageText(content.items as PdfTextItemLike[]);
+      if (text) {
+        pageTexts.push(`<!-- lifeos-source-page:${pageNumber} -->\n${text}`);
+      }
       page.cleanup();
     }
     return pageTexts.join("\n\n").trim();
@@ -378,29 +412,278 @@ async function extractPdfText(file: ReadableImportFile): Promise<string> {
   }
 }
 
+interface PositionedPdfToken {
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  hasEOL: boolean;
+}
+
+interface PositionedPdfLine {
+  y: number;
+  height: number;
+  x: number;
+  tokens: PositionedPdfToken[];
+  text: string;
+}
+
+export function reconstructPdfPageText(items: PdfTextItemLike[]): string {
+  const tokens = items
+    .map((item, index): PositionedPdfToken | null => {
+      const text = String(item.str ?? "").replace(/\s+/g, " ").trim();
+      if (!text) return null;
+      const transform = item.transform ? Array.from(item.transform) : [];
+      const height = Math.max(1, Math.abs(Number(transform[3])) || Number(item.height) || 10);
+      const x = Number(transform[4]);
+      const y = Number(transform[5]);
+      const estimatedWidth = Math.max(height * 0.45, Array.from(text).length * height * 0.52);
+      return {
+        text,
+        x: Number.isFinite(x) ? x : 0,
+        y: Number.isFinite(y) ? y : -index * height,
+        width: Math.max(0, Number(item.width) || estimatedWidth),
+        height,
+        hasEOL: item.hasEOL === true
+      };
+    })
+    .filter((item): item is PositionedPdfToken => Boolean(item))
+    .sort((a, b) => b.y - a.y || a.x - b.x);
+  if (tokens.length === 0) return "";
+
+  const lines: PositionedPdfLine[] = [];
+  for (const token of tokens) {
+    let bestLine: PositionedPdfLine | undefined;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (let index = Math.max(0, lines.length - 8); index < lines.length; index += 1) {
+      const candidate = lines[index];
+      const tolerance = Math.max(2, Math.min(8, Math.max(candidate.height, token.height) * 0.46));
+      const distance = Math.abs(candidate.y - token.y);
+      if (distance <= tolerance && distance < bestDistance) {
+        bestLine = candidate;
+        bestDistance = distance;
+      }
+    }
+    if (!bestLine) {
+      lines.push({
+        y: token.y,
+        height: token.height,
+        x: token.x,
+        tokens: [token],
+        text: ""
+      });
+      continue;
+    }
+    bestLine.tokens.push(token);
+    bestLine.y = (bestLine.y * (bestLine.tokens.length - 1) + token.y) / bestLine.tokens.length;
+    bestLine.height = Math.max(bestLine.height, token.height);
+    bestLine.x = Math.min(bestLine.x, token.x);
+  }
+
+  for (const line of lines) {
+    line.tokens.sort((a, b) => a.x - b.x);
+    line.text = joinPdfLineTokens(line.tokens);
+  }
+  lines.sort((a, b) => b.y - a.y || a.x - b.x);
+
+  const medianHeight = median(lines.map((line) => line.height)) || 10;
+  const output: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line.text) continue;
+    output.push(line.text);
+    const next = lines[index + 1];
+    if (next && shouldSeparatePdfLines(line, next, medianHeight)) output.push("");
+  }
+  return output.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+export function formatImportedPlainText(text: string): string {
+  const lines = String(text || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .split("\n");
+  const blocks: string[] = [];
+  let paragraph = "";
+  let structuralLines: string[] = [];
+
+  const flushParagraph = () => {
+    const clean = paragraph.trim();
+    if (clean) blocks.push(clean);
+    paragraph = "";
+  };
+  const flushStructural = () => {
+    if (structuralLines.length > 0) blocks.push(structuralLines.join("\n"));
+    structuralLines = [];
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/[ \t]+/g, " ").trim();
+    if (!line) {
+      flushParagraph();
+      flushStructural();
+      continue;
+    }
+    if (isStructuralImportLine(line)) {
+      flushParagraph();
+      structuralLines.push(line);
+      continue;
+    }
+    flushStructural();
+    if (!paragraph) {
+      paragraph = line;
+      continue;
+    }
+    if (shouldJoinImportedLines(paragraph, line)) {
+      paragraph = `${paragraph}${wrappedLineSeparator(paragraph, line)}${line}`;
+      continue;
+    }
+    flushParagraph();
+    paragraph = line;
+  }
+  flushParagraph();
+  flushStructural();
+
+  return blocks
+    .join("\n\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function joinPdfLineTokens(tokens: PositionedPdfToken[]): string {
+  let output = "";
+  let previous: PositionedPdfToken | null = null;
+  for (const token of tokens) {
+    if (!previous) {
+      output = token.text;
+      previous = token;
+      continue;
+    }
+    const gap = token.x - (previous.x + previous.width);
+    const separator = pdfTokenSeparator(previous.text, token.text, gap, Math.min(previous.height, token.height));
+    output += `${separator}${token.text}`;
+    previous = token;
+  }
+  return output.replace(/[ \t]+/g, " ").trim();
+}
+
+function pdfTokenSeparator(previous: string, next: string, gap: number, height: number): string {
+  if (!previous || !next) return "";
+  if (/[\s([{<"'“‘]$/u.test(previous) || /^[\s,.;:!?%)\]}>，。；：！？、”’]/u.test(next)) return "";
+  const previousAscii = /[A-Za-z0-9]$/u.test(previous);
+  const nextAscii = /^[A-Za-z0-9]/u.test(next);
+  if (previousAscii && nextAscii) return " ";
+  if (gap > Math.max(2, height * 0.38)) return " ";
+  return "";
+}
+
+function shouldSeparatePdfLines(current: PositionedPdfLine, next: PositionedPdfLine, medianHeight: number): boolean {
+  const verticalGap = Math.abs(current.y - next.y);
+  if (verticalGap > Math.max(medianHeight * 1.75, current.height * 1.55)) return true;
+  if (isStructuralImportLine(current.text) || isStructuralImportLine(next.text)) return true;
+  if (Math.abs(current.x - next.x) > medianHeight * 1.6) return true;
+  return false;
+}
+
+function isStructuralImportLine(line: string): boolean {
+  return /^#{1,6}\s+/u.test(line)
+    || /^<!--\s*lifeos-source-page:\d+\s*-->$/u.test(line)
+    || /^```/u.test(line)
+    || /^\|.*\|$/u.test(line)
+    || /^\s*[-*+]\s+/u.test(line)
+    || /^\s*\d{1,4}[.、．)]\s*/u.test(line)
+    || /^\s*[A-HＡ-Ｈ][.、．)]\s*/u.test(line)
+    || /^(?:第[一二三四五六七八九十百千万\d]+[章节部分题]|附录)\b/u.test(line);
+}
+
+function shouldJoinImportedLines(previous: string, next: string): boolean {
+  if (!previous || !next) return false;
+  if (/[。！？!?；;：:]$/u.test(previous)) return false;
+  if (/^[A-Z][A-Z\s\d_-]{3,}$/u.test(next) && next.length < 72) return false;
+  if (/^(?:图|表|Figure|Table)\s*[\d一二三四五六七八九十]+[.：:\s]/iu.test(next)) return false;
+  return true;
+}
+
+function wrappedLineSeparator(previous: string, next: string): string {
+  if (/[\u3400-\u9fff]$/u.test(previous) && /^[\u3400-\u9fff]/u.test(next)) return "";
+  if (/[-/([{]$/u.test(previous) || /^[,.;:!?%)\]}>，。；：！？、]/u.test(next)) return "";
+  return " ";
+}
+
+function median(values: number[]): number {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (sorted.length === 0) return 0;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+}
+
 async function extractDocxText(file: ReadableImportFile): Promise<string> {
   const bytes = await readFileBytes(file);
   const archive = unzipSync(bytes);
   const documentXml = archive["word/document.xml"];
   if (!documentXml) return "";
-  return docxXmlToText(strFromU8(documentXml));
+  return docxXmlToMarkdown(strFromU8(documentXml));
 }
 
-function docxXmlToText(xml: string): string {
-  const paragraphMatches = xml.match(/<w:p\b[\s\S]*?<\/w:p>/g) ?? [xml];
-  return paragraphMatches
-    .map((paragraph) => {
-      const textParts = Array.from(paragraph.matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g))
-        .map((match) => decodeXmlText(match[1]));
-      if (textParts.length > 0) return textParts.join("");
-      const withBreaks = paragraph
-        .replace(/<w:tab\b[^>]*\/>/g, "\t")
-        .replace(/<w:br\b[^>]*\/>/g, "\n");
-      return stripXmlTags(withBreaks);
-    })
-    .map((line) => line.replace(/[ \t]+\n/g, "\n").replace(/\s+/g, " ").trim())
-    .filter(Boolean)
-    .join("\n")
+export function docxXmlToMarkdown(xml: string): string {
+  const body = xml.match(/<w:body\b[^>]*>([\s\S]*?)<\/w:body>/)?.[1] ?? xml;
+  const blocks = Array.from(body.matchAll(/<(w:p|w:tbl)\b[\s\S]*?<\/\1>/g), (match) => match[0]);
+  const markdownBlocks = (blocks.length > 0 ? blocks : [body])
+    .map((block) => block.startsWith("<w:tbl") ? docxTableToMarkdown(block) : docxParagraphToMarkdown(block))
+    .map((block) => block.trim())
+    .filter(Boolean);
+  return markdownBlocks.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function docxParagraphToMarkdown(paragraph: string): string {
+  const text = docxInlineText(paragraph);
+  if (!text) return "";
+  const style = paragraph.match(/<w:pStyle\b[^>]*w:val=(?:"([^"]+)"|'([^']+)')[^>]*\/?>/i);
+  const styleName = (style?.[1] ?? style?.[2] ?? "").trim();
+  const headingMatch = styleName.match(/^(?:Heading|标题)\s*([1-6])$/i);
+  if (headingMatch) return `${"#".repeat(Number(headingMatch[1]))} ${text}`;
+  if (/^(?:Title|标题)$/i.test(styleName)) return `# ${text}`;
+  if (/<w:numPr\b[\s\S]*?<\/w:numPr>/i.test(paragraph) || /<w:numPr\b[^>]*\/>/i.test(paragraph)) {
+    return `- ${text}`;
+  }
+  return text;
+}
+
+function docxTableToMarkdown(table: string): string {
+  const rows = Array.from(table.matchAll(/<w:tr\b[\s\S]*?<\/w:tr>/g), (rowMatch) => {
+    const cells = Array.from(rowMatch[0].matchAll(/<w:tc\b[\s\S]*?<\/w:tc>/g), (cellMatch) => {
+      const paragraphs = Array.from(cellMatch[0].matchAll(/<w:p\b[\s\S]*?<\/w:p>/g), (paragraphMatch) =>
+        docxInlineText(paragraphMatch[0])
+      ).filter(Boolean);
+      return paragraphs.join("<br>").replace(/\|/g, "\\|").trim() || " ";
+    });
+    return cells;
+  }).filter((cells) => cells.length > 0);
+  if (rows.length === 0) return "";
+  const columnCount = Math.max(...rows.map((row) => row.length));
+  const normalizedRows = rows.map((row) => Array.from({ length: columnCount }, (_, index) => row[index] ?? " "));
+  const formatRow = (row: string[]) => `| ${row.join(" | ")} |`;
+  return [
+    formatRow(normalizedRows[0]),
+    formatRow(Array.from({ length: columnCount }, () => "---")),
+    ...normalizedRows.slice(1).map(formatRow)
+  ].join("\n");
+}
+
+function docxInlineText(xml: string): string {
+  const parts: string[] = [];
+  const inlinePattern = /<w:t\b[^>]*>([\s\S]*?)<\/w:t>|<w:tab\b[^>]*\/?>|<w:br\b[^>]*\/?>/g;
+  for (const match of xml.matchAll(inlinePattern)) {
+    if (match[1] !== undefined) parts.push(decodeXmlText(match[1]));
+    else if (match[0].startsWith("<w:tab")) parts.push("\t");
+    else parts.push("\n");
+  }
+  if (parts.length === 0) return stripXmlTags(xml).replace(/\s+/g, " ").trim();
+  return parts.join("")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
     .trim();
 }
 

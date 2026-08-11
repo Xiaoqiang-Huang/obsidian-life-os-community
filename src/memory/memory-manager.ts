@@ -1,4 +1,4 @@
-import { App, Modal, Notice, TFile } from "obsidian";
+import { App, Component, Modal, Notice, TFile } from "obsidian";
 import type { IPlugin } from "../plugin-api";
 import { LIFEOS_MEMORY_CATEGORIES, FileSystemService } from "../services/FileSystemService";
 import { MemoryService } from "../services/MemoryService";
@@ -18,12 +18,14 @@ export class MemoryManagerModal extends Modal {
   private entries: MemoryEntry[] = [];
   private selectedCategory = "其他";
   private selectAll = true;
+  private readonly markdownComponent = new Component();
 
   constructor(app: App, private plugin: IPlugin) {
     super(app);
   }
 
   async onOpen(): Promise<void> {
+    this.markdownComponent.load();
     await this.render();
   }
 
@@ -109,7 +111,7 @@ export class MemoryManagerModal extends Modal {
       text: entry.content.slice(0, 60) + (entry.content.length > 60 ? "..." : "")
     });
     header.createEl("span", { text: entry.category || this.selectedCategory, cls: "pls-muted" });
-    renderMarkdownDisplay(this.app, this, card.createDiv({ cls: "pls-muted" }), entry.content);
+    renderMarkdownDisplay(this.app, this.markdownComponent, card.createDiv({ cls: "pls-muted" }), entry.content);
     const meta = card.createDiv({ cls: "pls-muted" });
     meta.createSpan({ text: `来源：${entry.source || "quick-capture"}` });
     meta.createSpan({ text: ` · ${entry.created || "未记录时间"}` });
@@ -163,5 +165,10 @@ export class MemoryManagerModal extends Modal {
 
   private service(): MemoryService {
     return new MemoryService(this.app, new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage));
+  }
+
+  onClose(): void {
+    this.markdownComponent.unload();
+    this.contentEl.empty();
   }
 }

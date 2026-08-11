@@ -36,7 +36,16 @@ export class DailyNoteService {
 
   async appendQuickRecord(content: string, date = today()): Promise<TFile> {
     const file = await this.ensureTodayNote(date);
-    await this.app.vault.append(file, `\n## 快速记录\n- ${formatTime()} ${content}\n`);
+    const line = `- ${formatTime()} ${content.trim()}`;
+    const vault = this.app.vault as typeof this.app.vault & {
+      process?: (file: TFile, fn: (current: string) => string) => Promise<string>;
+    };
+    if (typeof vault.process === "function") {
+      await vault.process(file, (current) => appendQuickRecordToMarkdown(current, line));
+    } else {
+      const current = await this.app.vault.read(file);
+      await this.app.vault.modify(file, appendQuickRecordToMarkdown(current, line));
+    }
     return file;
   }
 
@@ -75,4 +84,20 @@ export class DailyNoteService {
     const folder = normalizePath(config?.folder ?? "");
     return folder || null;
   }
+}
+
+export function appendQuickRecordToMarkdown(markdown: string, recordLine: string): string {
+  const normalizedLine = recordLine.trim().replace(/^(?!-\s)/u, "- ");
+  const heading = /^##\s+快速记录\s*$/gmu;
+  const match = heading.exec(markdown);
+  if (!match) return `${markdown.trimEnd()}\n\n## 快速记录\n${normalizedLine}\n`;
+
+  const contentStart = match.index + match[0].length;
+  const nextHeadingOffset = markdown.slice(contentStart).search(/^##\s+/mu);
+  const contentEnd = nextHeadingOffset < 0 ? markdown.length : contentStart + nextHeadingOffset;
+  const before = markdown.slice(0, contentStart);
+  const section = markdown.slice(contentStart, contentEnd).replace(/^\s*\n/u, "").replace(/\s+$/u, "");
+  const after = markdown.slice(contentEnd).replace(/^\s*\n/u, "");
+  const nextSection = [section, normalizedLine].filter(Boolean).join("\n");
+  return `${before}\n${nextSection}\n${after ? `\n${after}` : ""}`;
 }

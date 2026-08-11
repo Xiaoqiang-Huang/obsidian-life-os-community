@@ -1,14 +1,12 @@
 {
   "name": "obsidian-life-os",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "A local-first personal life system for Obsidian: diary, tasks, knowledge, memory, and AI-assisted reviews.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "check": "tsc -noEmit -skipLibCheck",
-    "sync:experience": "node scripts/sync-experience-vault.mjs",
-    "test:ai-edit-runtime": "node scripts/run-ai-edit-runtime-smoke.mjs",
     "test": "npm run check && npm run build"
   },
   "keywords": [
@@ -25,7 +23,7 @@
     "@tesseract.js-data/eng": "^1.0.0",
     "@ybouane/liquidglass": "^1.0.3",
     "fflate": "^0.8.2",
-    "pdfjs-dist": "^6.0.227",
+    "pdfjs-dist": "^6.2.108",
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {

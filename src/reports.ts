@@ -10,7 +10,7 @@ import { applyWritebackItems, openWritebackPreview, type WritebackItem } from ".
 
 // ── 报告生成器 ──
 
-export async function generateReport(
+export async function generateLegacyReport(
   app: App,
   plugin: IPlugin,
   period: "daily" | "weekly" | "monthly"

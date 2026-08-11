@@ -3,7 +3,7 @@ import { localizeLifeOsPathParts, normalizeDirectoryLanguage, type ChatContextMo
 import { today } from "../utils/dates";
 import { ContextEngine, chatModeToEngineMode } from "./ContextEngine";
 import { ContextSourcePolicyService } from "./context-engine/ContextSourcePolicyService";
-import type { AiLike, ContextEngineResult, ContextSource } from "./context-engine/types";
+import type { AiLike, ContextEngineResult, ContextRetrievalTrace, ContextSource } from "./context-engine/types";
 import { LlmWikiContextService } from "./LlmWikiContextService";
 
 export type ChatContextKey = "daily" | "tasks" | "memory" | "review" | "knowledge" | "current-note";
@@ -29,6 +29,9 @@ export interface ChatContextBundle {
   sections: ChatContextSection[];
   statusCards: ChatContextStatusCard[];
   contextSources: string[];
+  /** Structured, locator-rich sources for the source drawer and citation checks. */
+  sources: ContextSource[];
+  retrievalTrace?: ContextRetrievalTrace;
 }
 
 export interface BuildChatContextOptions {
@@ -39,6 +42,9 @@ export interface BuildChatContextOptions {
   searchWeb?: (query: string) => Promise<string>;
   contextMode?: ChatContextMode;
   projectScopeId?: string;
+  includeQuestionInPrompt?: boolean;
+  includeStatusCards?: boolean;
+  useAiPlanner?: boolean;
 }
 
 type FileLike = {
@@ -61,14 +67,15 @@ export class ChatContextService {
   async buildContextBundle(options: BuildChatContextOptions = {}): Promise<ChatContextBundle> {
     const date = options.date ?? today();
     try {
-      const result = await new ContextEngine(this.app, this.settings, this.ai).build({
+      const result = await new ContextEngine(this.app, this.settings, options.useAiPlanner ? this.ai : undefined).build({
         userMessage: options.userMessage ?? "",
         chatMode: options.contextMode,
         date,
         maxChars: Math.max(options.maxChars ?? DEFAULT_CONTEXT_CHARS, MIN_CONTEXT_ENGINE_BUILD_CHARS),
         projectScopeId: options.projectScopeId,
         fetchUrl: options.fetchUrl,
-        searchWeb: options.searchWeb
+        searchWeb: options.searchWeb,
+        useAiPlanner: options.useAiPlanner === true
       });
       const sections = result.sections;
       const requestedMode = chatModeToEngineMode(options.contextMode);
@@ -76,7 +83,8 @@ export class ChatContextService {
         userMessage: options.userMessage ?? "",
         selectedModeLabel: contextModeLabel(options.contextMode ?? "smart"),
         requestedMode,
-        maxChars: options.maxChars ?? DEFAULT_CONTEXT_CHARS
+        maxChars: options.maxChars ?? DEFAULT_CONTEXT_CHARS,
+        includeQuestionInPrompt: options.includeQuestionInPrompt !== false
       });
       const contextSources = uniqueStrings([
         `ContextMode:${contextModeLabel(options.contextMode ?? "smart")}`,
@@ -91,8 +99,10 @@ export class ChatContextService {
       return {
         promptContext,
         sections,
-        statusCards: await this.collectStatusCards(date),
-        contextSources
+        statusCards: options.includeStatusCards === false ? [] : await this.collectStatusCards(date),
+        contextSources,
+        sources: result.sources,
+        retrievalTrace: result.retrievalTrace
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -105,15 +115,20 @@ export class ChatContextService {
         source: "ContextEngine"
       });
       return {
-        promptContext: applyContextBudget(sections, options.userMessage ?? "", options.maxChars ?? DEFAULT_CONTEXT_CHARS),
+        promptContext: applyContextBudget(
+          sections,
+          options.includeQuestionInPrompt === false ? "" : options.userMessage ?? "",
+          options.maxChars ?? DEFAULT_CONTEXT_CHARS
+        ),
         sections,
-        statusCards: await this.collectStatusCards(date),
+        statusCards: options.includeStatusCards === false ? [] : await this.collectStatusCards(date),
         contextSources: uniqueStrings([
           `上下文模式：${contextModeLabel(options.contextMode ?? "smart")}`,
           "warning: ContextEngine recovered with all-vault markdown fallback",
           "fallback: all-vault markdown context",
           `diagnostic: ${message}`
-        ])
+        ]),
+        sources: []
       };
     }
   }
@@ -288,7 +303,7 @@ export class ChatContextService {
     const statusCards = await this.collectStatusCards(date);
     const promptContext = applyContextBudget(sections, options.userMessage ?? "", options.maxChars ?? DEFAULT_CONTEXT_CHARS);
     const contextSources = [`上下文模式：${contextModeLabel(contextMode)}`, ...sections.map((section) => section.title)];
-    return { promptContext, sections, statusCards, contextSources };
+    return { promptContext, sections, statusCards, contextSources, sources: [] };
   }
 
   async collectStatusCards(date = today()): Promise<ChatContextStatusCard[]> {
@@ -726,13 +741,17 @@ function uniqueStrings(values: string[]): string[] {
 
 function withContextEngineMetadata(
   result: ContextEngineResult,
-  input: { userMessage: string; selectedModeLabel: string; requestedMode: string; maxChars: number }
+  input: { userMessage: string; selectedModeLabel: string; requestedMode: string; maxChars: number; includeQuestionInPrompt: boolean }
 ): string {
   const maxChars = Math.max(0, input.maxChars);
   if (maxChars === 0) return "";
 
   const promptParts = splitContextPrompt(result.promptContext);
-  if (input.userMessage.trim()) promptParts.question = `# 用户当前问题\n${input.userMessage.trim()}`;
+  if (input.includeQuestionInPrompt && input.userMessage.trim()) {
+    promptParts.question = `# 用户当前问题\n${input.userMessage.trim()}`;
+  } else {
+    promptParts.question = "";
+  }
   let warnings = result.warnings;
   let metadata = formatContextEngineMetadata(result, input, warnings);
   const separator = "\n\n";
@@ -754,14 +773,14 @@ function withContextEngineMetadata(
 }
 
 function splitContextPrompt(promptContext: string): { question: string; body: string } {
-  const match = promptContext.match(/^# 用户当前问题\n([\s\S]*?)\n\n# Life OS 上下文\n?/);
+  const match = promptContext.match(/^# 用户当前问题\n([\s\S]*?)\n\n# Life OS (?:上下文|相关证据)\n?/);
   if (!match) return { question: "", body: promptContext };
 
   const question = match[1].trim();
   const body = promptContext.slice(match[0].length).trim();
   return {
     question: question ? `# 用户当前问题\n${question}` : "",
-    body: body ? `# Life OS 上下文\n${body}` : "# Life OS 上下文"
+    body: body ? `# Life OS 相关证据\n${body}` : "# Life OS 相关证据"
   };
 }
 
@@ -793,12 +812,20 @@ function formatContextEngineMetadata(
 function formatContextSources(sources: ContextSource[]): string[] {
   if (!sources.length) return ["  - 暂无可引用来源；回答时需要说明资料不足，不能编造来源。"];
 
-  const displayed = sources.slice(0, 20).map((source) => {
+  return sources.map((source) => {
+    const citation = source.citationId ? `[${source.citationId}] ` : "";
     const title = source.title && source.title !== source.path ? ` (${source.title})` : "";
-    return `  - [${source.type}] ${source.path}${title}`;
+    const locator = [
+      source.page ? `第 ${source.page} 页` : "",
+      source.heading ?? "",
+      source.lineStart
+        ? source.lineEnd && source.lineEnd !== source.lineStart
+          ? `第 ${source.lineStart}-${source.lineEnd} 行`
+          : `第 ${source.lineStart} 行`
+        : ""
+    ].filter(Boolean).join(" · ");
+    return `  - ${citation}[${source.type}] ${source.path}${title}${locator ? ` — ${locator}` : ""}`;
   });
-  if (sources.length > 20) displayed.push(`  - 另有 ${sources.length - 20} 个来源已省略`);
-  return displayed;
 }
 
 function contextModeLabel(mode: ChatContextMode): string {

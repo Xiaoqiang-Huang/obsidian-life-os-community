@@ -11,7 +11,8 @@ import type PersonalLifeSystemPlugin from "../main";
 import { NewTaskModal } from "../modals/NewTaskModal";
 import { QuickCaptureModal } from "../modals/QuickCaptureModal";
 import { FileSystemService } from "../services/FileSystemService";
-import { ReviewService } from "../services/ReviewService";
+import { PeriodReviewService } from "../services/PeriodReviewService";
+import { AutoReviewService } from "../services/AutoReviewService";
 import { TaskService } from "../services/TaskService";
 import { getExamProfileLabel } from "../settings";
 import { currentDateLabel, today } from "../utils/dates";
@@ -49,11 +50,14 @@ export class LifeOSDashboardView extends ItemView {
     const todayFile = this.app.vault.getAbstractFileByPath(this.plugin.getTodayNotePath(date));
     const checkinFile = this.app.vault.getAbstractFileByPath(fs.path("Exam", "Checkins", `${date}.md`));
     const summaryFile = this.app.vault.getAbstractFileByPath(fs.path("Memory", "Summaries", "Daily", `${date}.md`));
+    const periodReviews = new PeriodReviewService(this.app, fs, this.plugin.settings).listReviews("daily");
+    const pendingReviewDrafts = (await new AutoReviewService(this.app, fs, this.plugin.settings, this.plugin.ai).listDrafts())
+      .filter((item) => item.window.start === date && item.window.end === date);
     const weeklySummaryCount = this.countThisWeekDailySummaries(fs);
     const hasTodayNote = todayFile instanceof TFile;
     const hasCheckin = checkinFile instanceof TFile;
-    const hasReview = summaryFile instanceof TFile;
-    const recommendation = this.getTodayRecommendation(openTasks.length, hasTodayNote, hasCheckin, hasReview);
+    const hasReview = summaryFile instanceof TFile || periodReviews.some((item) => item.window.start === date && item.window.end === date);
+    const recommendation = this.getTodayRecommendation(openTasks.length, hasTodayNote, hasCheckin, hasReview, pendingReviewDrafts.length);
 
     createHeroHeader(main, {
       kicker: "今日行动",
@@ -88,14 +92,14 @@ export class LifeOSDashboardView extends ItemView {
     const statusGrid = center.createDiv({ cls: "lifeos-status-grid" });
     this.renderDailyCard(statusGrid, hasTodayNote);
     this.renderCheckinCard(statusGrid, hasCheckin);
-    this.renderReviewCard(statusGrid, hasReview);
+    this.renderReviewCard(statusGrid, hasReview, pendingReviewDrafts.length);
 
     this.renderAssistant(right);
     this.renderQuickActions(right, hasTodayNote);
     this.renderWorkflowGuide(right);
   }
 
-  private getTodayRecommendation(taskCount: number, hasTodayNote: boolean, hasCheckin: boolean, hasReview: boolean): { title: string; description: string } {
+  private getTodayRecommendation(taskCount: number, hasTodayNote: boolean, hasCheckin: boolean, hasReview: boolean, pendingReviewCount = 0): { title: string; description: string } {
     if (!hasTodayNote && taskCount === 0) {
       return { title: "先给今天开一个轻入口", description: "建议先创建今日日记，或者用快速记录写下第一条想法。Life OS 会把记录、任务和记忆慢慢整理起来。" };
     }
@@ -103,6 +107,7 @@ export class LifeOSDashboardView extends ItemView {
       return { title: `今天有 ${taskCount} 个待处理任务`, description: "先完成最小的一件事，再回到今日日记补一句复盘。" };
     }
     if (!hasCheckin) return { title: `今天建议先完成一次${getExamProfileLabel(this.plugin.settings)}打卡`, description: "记录一次学习动作，就能让长期趋势更完整。" };
+    if (pendingReviewCount > 0) return { title: "今日复盘草稿正在等你确认", description: "AI 已整理事实和引用；审核、补充后再保存为正式复盘。" };
     if (!hasReview) return { title: "今天已经有记录，可以做一次简短复盘", description: "复盘不用很长，三句话也足够沉淀今天的状态。" };
     return { title: "今天的核心记录已经完整", description: "保持这个节奏，明天打开时会更容易接上当前状态。" };
   }
@@ -198,20 +203,21 @@ export class LifeOSDashboardView extends ItemView {
     createButton(card, exists ? "查看打卡" : "今日打卡", () => void this.plugin.showCheckinModal(), { icon: "check-circle", primary: !exists });
   }
 
-  private renderReviewCard(parent: HTMLElement, exists: boolean): void {
+  private renderReviewCard(parent: HTMLElement, exists: boolean, pendingCount = 0): void {
     const card = createCard(parent, "lifeos-status-card tone-orange lifeos-card-secondary");
     this.cardTitle(card, "今日复盘", "sparkles");
-    card.createEl("p", { text: exists ? "今日复盘已经生成，可以进入复盘页继续整理。" : "用几句话总结今天，后续会沉淀成长趋势。" });
-    createButton(card, exists ? "打开复盘页" : "生成今日复盘", async () => {
-      if (exists) {
+    card.createEl("p", { text: exists
+      ? "今日复盘已经生成，可以进入复盘页继续整理。"
+      : pendingCount > 0
+        ? `${pendingCount} 份待确认草稿尚未成为正式复盘。`
+        : "用几句话总结今天，后续会沉淀成长趋势。" });
+    createButton(card, exists ? "打开复盘页" : pendingCount > 0 ? "审核复盘草稿" : "生成今日复盘", async () => {
+      if (exists || pendingCount > 0) {
         await this.plugin.activateReview();
         return;
       }
-      const fs = new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage);
-      await new ReviewService(this.app, fs, this.plugin.settings).generateDailyReview();
-      new Notice("今日复盘已生成。");
-      await this.render();
-    }, { primary: !exists, icon: exists ? "bar-chart-3" : "wand-2" });
+      await this.plugin.generateReport("daily");
+    }, { primary: !exists, icon: exists || pendingCount > 0 ? "bar-chart-3" : "wand-2" });
   }
 
   private renderAssistant(parent: HTMLElement): void {

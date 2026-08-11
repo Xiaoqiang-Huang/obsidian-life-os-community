@@ -1,4 +1,4 @@
-import type { App } from "obsidian";
+import { requestUrl, type App } from "obsidian";
 import { getDocument, type PDFPageProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import "pdfjs-dist/legacy/build/pdf.worker.mjs";
 import type { ReadableImportFile } from "./DocumentImportService";
@@ -17,13 +17,48 @@ export interface PdfOcrResult {
 
 export interface PdfOcrProvider {
   extractPdfText(file: ReadableImportFile, options?: PdfOcrOptions): Promise<PdfOcrResult>;
+  prefersStructuredParsing?(): boolean;
 }
 
 export interface PdfOcrOptions {
   languages?: string[];
   maxPages?: number;
   scale?: number;
+  fallbackToLocal?: boolean;
   onProgress?: (progress: PdfOcrProgress) => void;
+}
+
+export type PdfOcrEngine = "auto" | "tesseract" | "paddle";
+
+export interface PdfOcrRuntimeOptions {
+  engine?: PdfOcrEngine;
+  paddleEndpoint?: string;
+}
+
+export interface TesseractLineLike {
+  text?: string;
+  confidence?: number;
+  bbox?: { x0?: number; y0?: number; x1?: number; y1?: number };
+}
+
+export interface TesseractParagraphLike {
+  text?: string;
+  confidence?: number;
+  bbox?: { x0?: number; y0?: number; x1?: number; y1?: number };
+  lines?: TesseractLineLike[];
+}
+
+export interface TesseractBlockLike {
+  text?: string;
+  confidence?: number;
+  blocktype?: string;
+  bbox?: { x0?: number; y0?: number; x1?: number; y1?: number };
+  paragraphs?: TesseractParagraphLike[];
+}
+
+export interface PaddleStructuredOcrResult {
+  markdown: string;
+  pageCount: number;
 }
 
 const DEFAULT_OCR_LANGUAGES = ["chi_sim", "eng"];
@@ -33,9 +68,51 @@ const OCR_PLUGIN_ASSET_ROOT = ".obsidian/plugins/personal-life-system/assets/ocr
 type OcrLoggerMessage = { status: string; progress?: number };
 
 export class PdfOcrService implements PdfOcrProvider {
-  constructor(private app: App) {}
+  constructor(private app: App, private runtime: PdfOcrRuntimeOptions = {}) {}
+
+  prefersStructuredParsing(): boolean {
+    const engine = this.runtime.engine ?? "auto";
+    return Boolean(normalizePaddleEndpoint(this.runtime.paddleEndpoint))
+      && (engine === "auto" || engine === "paddle");
+  }
 
   async extractPdfText(file: ReadableImportFile, options: PdfOcrOptions = {}): Promise<PdfOcrResult> {
+    const fallbackWarnings: string[] = [];
+    const endpoint = normalizePaddleEndpoint(this.runtime.paddleEndpoint);
+    const engine = this.runtime.engine ?? "auto";
+    const shouldTryPaddle = engine === "paddle" || (engine === "auto" && Boolean(endpoint));
+    if (shouldTryPaddle && endpoint) {
+      try {
+        return await this.extractWithPaddle(file, endpoint, options);
+      } catch (error) {
+        if (options.fallbackToLocal === false) {
+          throw new Error(
+            `PaddleOCR structured parsing was unavailable. ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        }
+        fallbackWarnings.push(
+          `PaddleOCR structured parsing was unavailable; used local OCR instead. ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+    } else if (engine === "paddle" && !endpoint) {
+      if (options.fallbackToLocal === false) {
+        throw new Error("PaddleOCR is selected but no PP-StructureV3 service URL is configured.");
+      }
+      fallbackWarnings.push("PaddleOCR is selected but no PP-StructureV3 service URL is configured; used local OCR instead.");
+    }
+
+    const local = await this.extractWithTesseract(file, options);
+    return {
+      text: local.text,
+      warnings: [...fallbackWarnings, ...local.warnings]
+    };
+  }
+
+  private async extractWithTesseract(file: ReadableImportFile, options: PdfOcrOptions = {}): Promise<PdfOcrResult> {
     if (!hasCanvasRuntime()) {
       return {
         text: "",
@@ -66,9 +143,18 @@ export class PdfOcrService implements PdfOcrProvider {
         const page = await document.getPage(pageNumber);
         const image = await renderPdfPageToImage(page, scale);
         options.onProgress?.({ page: pageNumber, totalPages, status: "recognizing" });
-        const result = await worker.recognize(image);
-        const text = result.data.text.replace(/\r\n/g, "\n").trim();
-        if (text) pageTexts.push(`## OCR Page ${pageNumber}\n\n${text}`);
+        const result = await worker.recognize(image, {}, {
+          text: true,
+          blocks: true,
+          layoutBlocks: true,
+          hocr: false,
+          tsv: false
+        });
+        const text = formatTesseractBlocksForMarkdown(
+          result.data.blocks as TesseractBlockLike[] | null,
+          result.data.text
+        );
+        if (text) pageTexts.push(`<!-- lifeos-source-page:${pageNumber} -->\n${text}`);
         page.cleanup();
       }
 
@@ -86,6 +172,46 @@ export class PdfOcrService implements PdfOcrProvider {
     return {
       text: pageTexts.join("\n\n").trim(),
       warnings: pageTexts.length > 0 ? warnings : ["No selectable PDF text was detected, and OCR did not find readable text."]
+    };
+  }
+
+  private async extractWithPaddle(
+    file: ReadableImportFile,
+    endpoint: string,
+    options: PdfOcrOptions
+  ): Promise<PdfOcrResult> {
+    options.onProgress?.({ page: 0, totalPages: 0, status: "paddle_uploading" });
+    const bytes = await readFileBytes(file);
+    const response = await requestUrl({
+      url: endpoint,
+      method: "POST",
+      contentType: "application/json",
+      body: JSON.stringify({
+        file: bytesToBase64(bytes),
+        fileType: 0,
+        useDocOrientationClassify: true,
+        useDocUnwarping: true,
+        useTextlineOrientation: true,
+        useTableRecognition: true,
+        useFormulaRecognition: true,
+        useChartRecognition: false,
+        useRegionDetection: true,
+        formatBlockContent: true,
+        returnMarkdownImages: false,
+        visualize: false
+      })
+    });
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`PP-StructureV3 returned HTTP ${response.status}.`);
+    }
+    options.onProgress?.({ page: 0, totalPages: 0, status: "paddle_parsing" });
+    const parsed = parsePaddleStructuredOcrResponse(response.json);
+    if (!parsed.markdown.trim()) {
+      throw new Error("PP-StructureV3 returned no readable Markdown.");
+    }
+    return {
+      text: parsed.markdown,
+      warnings: [`PaddleOCR PP-StructureV3 completed structured parsing for ${parsed.pageCount} page${parsed.pageCount === 1 ? "" : "s"}.`]
     };
   }
 
@@ -148,6 +274,114 @@ export class PdfOcrService implements PdfOcrProvider {
   }
 }
 
+export function formatTesseractBlocksForMarkdown(
+  blocks: TesseractBlockLike[] | null | undefined,
+  fallbackText: string
+): string {
+  const orderedBlocks = [...(blocks ?? [])].sort(compareTesseractLayoutItems);
+  const paragraphs: string[] = [];
+  for (const block of orderedBlocks) {
+    const orderedParagraphs = [...(block.paragraphs ?? [])].sort(compareTesseractLayoutItems);
+    if (orderedParagraphs.length === 0) {
+      const blockText = normalizeOcrParagraph(block.text ?? "");
+      if (blockText) paragraphs.push(blockText);
+      continue;
+    }
+    for (const paragraph of orderedParagraphs) {
+      const orderedLines = [...(paragraph.lines ?? [])].sort(compareTesseractLayoutItems);
+      const text = orderedLines.length > 0
+        ? orderedLines
+          .map((line) => String(line.text ?? "").replace(/\s+/g, " ").trim())
+          .filter(Boolean)
+          .join("\n")
+        : normalizeOcrParagraph(paragraph.text ?? "");
+      if (text) paragraphs.push(text);
+    }
+  }
+  const structured = paragraphs.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
+  return structured || normalizeOcrParagraph(fallbackText);
+}
+
+export function parsePaddleStructuredOcrResponse(payload: unknown): PaddleStructuredOcrResult {
+  const root = unwrapPaddleResponse(payload);
+  if (!root || typeof root !== "object") throw new Error("PP-StructureV3 returned an invalid response.");
+  const response = root as {
+    errorCode?: unknown;
+    errorMsg?: unknown;
+    result?: {
+      layoutParsingResults?: Array<{
+        markdown?: { text?: unknown; isStart?: unknown; isEnd?: unknown };
+      }>;
+    };
+  };
+  if (Number(response.errorCode ?? 0) !== 0) {
+    throw new Error(String(response.errorMsg || `PP-StructureV3 error ${response.errorCode}`));
+  }
+  const pages = Array.isArray(response.result?.layoutParsingResults)
+    ? response.result.layoutParsingResults
+    : [];
+  const output: string[] = [];
+  let previousEnded = true;
+  for (let index = 0; index < pages.length; index += 1) {
+    const page = pages[index];
+    const text = typeof page.markdown?.text === "string" ? page.markdown.text.trim() : "";
+    if (!text) continue;
+    const startsSegment = page.markdown?.isStart !== false;
+    const separator = output.length === 0 ? "" : previousEnded || startsSegment ? "\n\n" : "\n";
+    output.push(`${separator}<!-- lifeos-source-page:${index + 1} -->\n${text}`);
+    previousEnded = page.markdown?.isEnd !== false;
+  }
+  return {
+    markdown: output.join("").replace(/\n{3,}/g, "\n\n").trim(),
+    pageCount: pages.length
+  };
+}
+
+function unwrapPaddleResponse(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object") return payload;
+  const candidate = payload as { outputs?: Array<{ data?: unknown[] }> };
+  const tritonData = candidate.outputs?.[0]?.data?.[0];
+  if (typeof tritonData === "string") {
+    try {
+      return unwrapPaddleResponse(JSON.parse(tritonData));
+    } catch {
+      throw new Error("PP-StructureV3 returned malformed JSON.");
+    }
+  }
+  return payload;
+}
+
+function compareTesseractLayoutItems(
+  left: { bbox?: { x0?: number; y0?: number } },
+  right: { bbox?: { x0?: number; y0?: number } }
+): number {
+  const y = Number(left.bbox?.y0 ?? 0) - Number(right.bbox?.y0 ?? 0);
+  return Math.abs(y) > 3 ? y : Number(left.bbox?.x0 ?? 0) - Number(right.bbox?.x0 ?? 0);
+}
+
+function normalizeOcrParagraph(text: string): string {
+  return String(text || "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function normalizePaddleEndpoint(value: string | undefined): string {
+  const clean = String(value || "").trim().replace(/\/+$/u, "");
+  if (!clean) return "";
+  try {
+    const url = new URL(clean);
+    if (!/^https?:$/u.test(url.protocol)) return "";
+    if (!url.pathname || url.pathname === "/") url.pathname = "/layout-parsing";
+    return url.toString().replace(/\/+$/u, "");
+  } catch {
+    return "";
+  }
+}
+
 async function renderPdfPageToImage(page: PDFPageProxy, scale: number): Promise<string> {
   const viewport = page.getViewport({ scale });
   const canvas = document.createElement("canvas");
@@ -170,4 +404,13 @@ function hasCanvasRuntime(): boolean {
 async function readFileBytes(file: ReadableImportFile): Promise<Uint8Array> {
   if (!file.arrayBuffer) throw new Error("This file object cannot provide bytes for OCR.");
   return new Uint8Array(await file.arrayBuffer());
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
 }

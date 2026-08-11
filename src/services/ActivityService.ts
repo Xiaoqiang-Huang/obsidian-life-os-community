@@ -20,6 +20,8 @@ interface DailyNoteSignal {
   hasLongBody: boolean;
 }
 
+const REVIEW_ACTIVITY_READ_CONCURRENCY = 12;
+
 export function rangeDates(rangeMode: HeatmapRange, end = new Date()): string[] {
   const count = rangeMode === "1y" ? 371 : rangeMode === "90d" ? 90 : 30;
   const dates: string[] = [];
@@ -74,9 +76,7 @@ export class ActivityService {
     const completedTasksByDate = this.settings.heatmapIncludeTasks
       ? countCompletedTasksByDate(doneContent)
       : new Map<string, number>();
-    const result = new Map<string, DailyActivity>();
-
-    for (const date of dates) {
+    const activities = await mapWithConcurrency(dates, REVIEW_ACTIVITY_READ_CONCURRENCY, async (date) => {
       const dailyPath = this.dailyNotePath(date);
       const checkinPath = this.fs.path("Exam", "Checkins", `${date}.md`);
       const summaryPath = this.fs.path("Memory", "Summaries", "Daily", `${date}.md`);
@@ -115,10 +115,10 @@ export class ActivityService {
         summaryExists
       };
       activity.level = activityLevel(activity);
-      result.set(date, activity);
-    }
+      return [date, activity] as const;
+    });
 
-    return result;
+    return new Map(activities);
   }
 
   private async readDailySignal(file: TFile): Promise<DailyNoteSignal> {
@@ -159,4 +159,22 @@ function getDailyNotesFolder(app: App): string {
     };
   }).internalPlugins?.plugins?.["daily-notes"]?.instance?.options;
   return (config?.folder ?? "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").replace(/\/{2,}/g, "/").trim();
+}
+
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  worker: (value: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(Math.max(1, concurrency), values.length) }, async () => {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await worker(values[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }

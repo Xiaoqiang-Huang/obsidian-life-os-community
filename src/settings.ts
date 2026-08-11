@@ -74,6 +74,7 @@ export type ChatMode = "chat" | "diary" | "review" | "exam";
 export type ChatContextMode = "smart" | "semantic" | "global";
 export type ChatSendBehavior = "enterToSend" | "modEnterToSend";
 export type AiReasoningEffort = "default" | "low" | "medium" | "high" | "max";
+export type PdfOcrEngine = "auto" | "tesseract" | "paddle";
 export type ThemePreset = "cool" | "dark-tech" | "wabi" | "pastel";
 export const THEME_STYLES = [
   "minimal-warm",
@@ -161,6 +162,7 @@ export const UI_PAGE_KEYS = [
   "checkin",
   "knowledge",
   "chat",
+  "aiWorkspace",
   "proLicense",
   "proCompare",
   "userGuide",
@@ -299,10 +301,12 @@ ${CIVIL_SERVICE_INTERVIEW_THINKING_MODEL_PROMPT}`,
 };
 
 const LIFEOS_DIRECTORY_NAMES: Record<string, { en: string; zh: string }> = {
+  AI: { en: "AI", zh: "AI" },
   Chat: { en: "Chat", zh: "聊天" },
   Daily: { en: "Daily", zh: "日记" },
   Exam: { en: "Exam", zh: "备考" },
   Inbox: { en: "Inbox", zh: "收件箱" },
+  Outbox: { en: "Outbox", zh: "发件箱" },
   Knowledge: { en: "Knowledge", zh: "知识库" },
   Memory: { en: "Memory", zh: "记忆" },
   Projects: { en: "Projects", zh: "项目" },
@@ -449,6 +453,8 @@ export interface PersonalLifeSystemSettings {
   aiReasoningEffort: AiReasoningEffort;
   enableVisionFileAnalysis: boolean;
   visionAiModel: string;
+  pdfOcrEngine: PdfOcrEngine;
+  paddleOcrEndpoint: string;
   maxChatAttachmentBytes: number;
   maxChatAttachmentCount: number;
   enableAutoAnalysis: boolean;
@@ -481,6 +487,7 @@ export interface PersonalLifeSystemSettings {
   defaultChatMode: ChatMode;
   defaultChatContextMode: ChatContextMode;
   defaultAiSkillIds: string[];
+  inlineAiSkillIds: string[];
   importedAiSkills: ImportedAiSkillRecord[];
   customAiSkillCategories: AiSkillCustomCategory[];
   /** @deprecated use defaultAiSkillIds */
@@ -489,6 +496,9 @@ export interface PersonalLifeSystemSettings {
   chatSendBehavior: ChatSendBehavior;
   chatDefaultAiReply: boolean;
   autoApplyChatToDaily: boolean;
+  autoReviewEnabled: boolean;
+  autoReviewTime: string;
+  autoReviewCatchUp: boolean;
   checkModelBeforeRequest: boolean;
   debugMode: boolean;
   reportTopics: string[];
@@ -496,6 +506,9 @@ export interface PersonalLifeSystemSettings {
   sidebarCollapsed: boolean;
   sidebarDirectoryCollapsed: boolean;
   backgroundImagePath: string;
+  browserCaptureEnabled: boolean;
+  browserCapturePort: number;
+  browserCaptureToken: string;
   licenseApiBaseUrl: string;
   licenseInstallationId: string;
   licenseEmail: string;
@@ -511,6 +524,25 @@ export interface PersonalLifeSystemSettings {
 
 export function normalizeThemeStyle(value: string | undefined | null): ThemeStyle {
   return THEME_STYLES.includes(value as ThemeStyle) ? (value as ThemeStyle) : "minimal-warm";
+}
+
+export function normalizeBrowserCapturePort(value: unknown): number {
+  const port = Math.floor(Number(value));
+  return Number.isFinite(port) && port >= 1024 && port <= 65535 ? port : 27183;
+}
+
+export function normalizePdfOcrEngine(value: unknown): PdfOcrEngine {
+  return value === "tesseract" || value === "paddle" ? value : "auto";
+}
+
+export function normalizePaddleOcrEndpoint(value: unknown): string {
+  return String(value || "").trim();
+}
+
+export function createBrowserCaptureToken(): string {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 export function normalizeUiFrameworkVersion(value: unknown): UiFrameworkVersion {
@@ -932,6 +964,8 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   aiReasoningEffort: "default",
   enableVisionFileAnalysis: false,
   visionAiModel: "",
+  pdfOcrEngine: "auto",
+  paddleOcrEndpoint: "",
   maxChatAttachmentBytes: 6 * 1024 * 1024,
   maxChatAttachmentCount: 5,
   enableAutoAnalysis: true,
@@ -967,6 +1001,7 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   defaultChatMode: "chat",
   defaultChatContextMode: "smart",
   defaultAiSkillIds: ["lifeos-general"],
+  inlineAiSkillIds: ["lifeos-general"],
   importedAiSkills: [],
   customAiSkillCategories: [],
   defaultAiSkillId: "lifeos-general",
@@ -974,12 +1009,18 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   chatSendBehavior: "enterToSend",
   chatDefaultAiReply: true,
   autoApplyChatToDaily: false,
+  autoReviewEnabled: false,
+  autoReviewTime: "22:30",
+  autoReviewCatchUp: true,
   checkModelBeforeRequest: false,
   debugMode: false,
   viewLayout: "main",
   sidebarCollapsed: false,
   sidebarDirectoryCollapsed: false,
   backgroundImagePath: "",
+  browserCaptureEnabled: true,
+  browserCapturePort: 27183,
+  browserCaptureToken: "",
   licenseApiBaseUrl: "https://license.lifeoskit.com",
   licenseInstallationId: "",
   licenseEmail: "",

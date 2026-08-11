@@ -1,6 +1,7 @@
 import { MarkdownView, Notice, Plugin, TFile, type Editor, type WorkspaceLeaf } from "obsidian";
 import {
   AI_EDIT_PANEL_VIEW_TYPE,
+  AI_WORKSPACE_VIEW_TYPE,
   CALENDAR_VIEW_TYPE,
   CHECKIN_VIEW_TYPE,
   CHAT_VIEW_TYPE,
@@ -18,6 +19,7 @@ import { AiClient, buildSystemPrompt } from "./ai";
 import {
   DEFAULT_SETTINGS,
   MEMORY_CATEGORIES,
+  createBrowserCaptureToken,
   getThemeStyleClasses,
   type PersonalLifeSystemSettings,
   getCurrentAiProviderConfig,
@@ -26,6 +28,9 @@ import {
   getCivilServiceInterviewThinkingModelPrompt,
   normalizeExamProfileType,
   normalizeDirectoryLanguage,
+  normalizeBrowserCapturePort,
+  normalizePaddleOcrEndpoint,
+  normalizePdfOcrEngine,
   normalizeTaskFormDraft,
   normalizeThemeStyle,
   normalizeUiFrameworkSettings,
@@ -52,16 +57,16 @@ import {
 } from "./utils";
 import { LifeOSDashboardView } from "./views/DashboardView";
 import { LifeOSChatView } from "./views/ChatView";
+import { AiEditPanelView } from "./views/AiEditPanelView";
 import { TaskManagerView } from "./views/TaskManagerView";
 import { ReviewView } from "./views/ReviewView";
 import { DailyView } from "./views/DailyView";
 import { KnowledgeView } from "./views/KnowledgeView";
 import { CheckinView } from "./views/CheckinView";
 import { UserGuideView } from "./views/UserGuideView";
+import { AiWorkspaceView } from "./views/AiWorkspaceView";
 import { ProCompareView } from "./views/ProCompareView";
 import { ProLicenseView } from "./views/ProLicenseView";
-import { AiEditPanelView } from "./views/AiEditPanelView";
-import { AiEditPopoverController, cloneEditorPosition, type AiEditAnchor } from "./ui/AiEditPopover";
 import { CalendarView } from "./calendar-view";
 import { MemoryView } from "./memory-view";
 import { showXingceStats } from "./exam/xingce-stats";
@@ -71,8 +76,10 @@ import { showTrainingPlan } from "./exam/training-plan";
 import { showUploadMaterial } from "./exam/materials";
 import { showInterviewTrends } from "./exam/interview";
 import { destroyLifeOSLiquidGlassRuntime, refreshLifeOSLiquidGlassRuntime } from "./ui/liquid-glass-runtime";
-import { generateReport, showEmotionTracking, showDiarySearch } from "./reports";
+import { AiEditPopoverController, cloneEditorPosition, type AiEditAnchor, type AiEditTarget } from "./ui/AiEditPopover";
+import { showEmotionTracking, showDiarySearch } from "./reports";
 import { QuickCaptureModal } from "./modals/QuickCaptureModal";
+import { PeriodReviewModal } from "./modals/PeriodReviewModal";
 import { FirstRunModal as LifeOSFirstRunModal } from "./modals/FirstRunModal";
 import {
   InterviewPracticeModal,
@@ -80,6 +87,13 @@ import {
   XingceQuestionModal
 } from "./modals";
 import { FileSystemService } from "./services/FileSystemService";
+import { ProjectService } from "./services/ProjectService";
+import { AiWorkspaceService } from "./services/AiWorkspaceService";
+import { AutoReviewService, normalizeAutoReviewTime, type AutoReviewTrigger } from "./services/AutoReviewService";
+import {
+  AiWorkspaceBrowserCaptureServer,
+  type BrowserCaptureServerStatus
+} from "./services/ai-workspace/BrowserCaptureServer";
 import { DailyNoteService } from "./services/DailyNoteService";
 import { formatMemoryCandidate } from "./services/lifeos-logic";
 import {
@@ -102,22 +116,78 @@ export interface ActiveChatRuntimeState {
   updatedAt: number;
 }
 
+interface AiEditRuntimeDiagnostics {
+  captureMouseUp: number;
+  bubbleMouseUp: number;
+  selectionChange: number;
+  opened: number;
+  mounted: number;
+  snapshotCaptured: number;
+  lastEvent: string;
+  lastTarget: string;
+  lastReason: string;
+  lastSelectionLength: number;
+  lastFilePath: string;
+  lastAt: number;
+  lastMeaningfulEvent: string;
+  lastMeaningfulTarget: string;
+  lastMeaningfulReason: string;
+  lastMeaningfulSelectionLength: number;
+  lastMeaningfulFilePath: string;
+  lastMeaningfulAt: number;
+}
+
+interface AiEditDomSelectionSnapshot {
+  text: string;
+  file: TFile;
+  target: HTMLElement;
+  source: string;
+  key: string;
+  createdAt: number;
+  anchor: AiEditAnchor;
+}
+
 export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin {
   settings: PersonalLifeSystemSettings;
   ai: AiClient;
   activeChatState: ActiveChatRuntimeState = { messages: [], draftInput: "", updatedAt: 0 };
-  aiEditPopover: AiEditPopoverController | null = null;
-  private aiEditSelectionTimer: number | null = null;
-  private aiEditPointer: { x: number; y: number } | null = null;
-  private lastAiEditSelectionKey = "";
-  private lastAiEditSelectionAt = 0;
   private dailyMaintenancePromise: Promise<void> | null = null;
   private dailyMaintenanceRunDate = "";
   private midnightTimer: number | null = null;
   private modalTextareaObserver: MutationObserver | null = null;
   private liquidGlassObserver: MutationObserver | null = null;
   private liquidGlassRefreshTimer: number | null = null;
+  private aiEditPopover: AiEditPopoverController | null = null;
+  private aiEditPointerDown: { x: number; y: number } | null = null;
+  private aiEditSelectionTimer: number | null = null;
+  private aiEditSelectionChangeTimer: number | null = null;
+  private pendingAiEditDomSelectionSnapshot: AiEditDomSelectionSnapshot | null = null;
+  private readonly aiEditDiagnostics: AiEditRuntimeDiagnostics = {
+    captureMouseUp: 0,
+    bubbleMouseUp: 0,
+    selectionChange: 0,
+    opened: 0,
+    mounted: 0,
+    snapshotCaptured: 0,
+    lastEvent: "not-started",
+    lastTarget: "",
+    lastReason: "插件已加载，尚未捕获选区事件",
+    lastSelectionLength: 0,
+    lastFilePath: "",
+    lastAt: 0,
+    lastMeaningfulEvent: "not-started",
+    lastMeaningfulTarget: "",
+    lastMeaningfulReason: "尚未捕获到有效选区事件",
+    lastMeaningfulSelectionLength: 0,
+    lastMeaningfulFilePath: "",
+    lastMeaningfulAt: 0
+  };
+  private lastAiEditSelectionKey = "";
+  private lastAiEditSelectionAt = 0;
   private pendingChatPrompt = "";
+  private aiWorkspaceSyncRunning = false;
+  private autoReviewService: AutoReviewService | null = null;
+  private readonly browserCaptureServer = new AiWorkspaceBrowserCaptureServer();
   private readonly lifeOsViewTypes = [
     CHAT_VIEW_TYPE,
     DASHBOARD_VIEW_TYPE,
@@ -130,7 +200,8 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     USER_GUIDE_VIEW_TYPE,
     PRO_COMPARE_VIEW_TYPE,
     PRO_LICENSE_VIEW_TYPE,
-    CALENDAR_VIEW_TYPE
+    CALENDAR_VIEW_TYPE,
+    AI_WORKSPACE_VIEW_TYPE
   ];
 
   async onload(): Promise<void> {
@@ -140,6 +211,20 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.installMobileViewportVariables();
     this.registerModalTextareaEnhancer();
     this.ai = new AiClient(() => this.settings);
+    this.autoReviewService = new AutoReviewService(
+      this.app,
+      this.fileSystem(),
+      this.settings,
+      this.ai,
+      {
+        hasEntitlement: () => hasProAccess(
+          this.settings.licenseSnapshot,
+          new Date(),
+          this.settings.licenseEntitlementToken
+        ),
+        onDraftCreated: (draft) => new Notice(`已生成待确认的今日复盘草稿：${draft.window.start}`, 7000)
+      }
+    );
     if (this.settings.debugMode) {
       await this.writeDebugLoadMarker();
     }
@@ -148,14 +233,17 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     } catch (error) {
       console.error("[Life OS] Failed to initialize base structure during plugin load", error);
     }
+    await this.refreshBrowserCaptureBridge();
 
     this.addSettingTab(new PersonalLifeSystemSettingTab(this.app, this));
+    this.aiEditPopover = new AiEditPopoverController(this.app, this);
 
     this.registerView(
       DASHBOARD_VIEW_TYPE,
       (leaf) => new LifeOSDashboardView(leaf, this)
     );
     this.registerView(CHAT_VIEW_TYPE, (leaf) => new LifeOSChatView(leaf, this));
+    this.registerView(AI_EDIT_PANEL_VIEW_TYPE, (leaf) => new AiEditPanelView(leaf, this));
     this.registerView(TASKS_VIEW_TYPE, (leaf) => new TaskManagerView(leaf, this));
     this.registerView(DAILY_VIEW_TYPE, (leaf) => new DailyView(leaf, this));
     this.registerView(KNOWLEDGE_VIEW_TYPE, (leaf) => new KnowledgeView(leaf, this));
@@ -163,15 +251,14 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.registerView(REVIEW_VIEW_TYPE, (leaf) => new ReviewView(leaf, this));
     this.registerView(CHECKIN_VIEW_TYPE, (leaf) => new CheckinView(leaf, this));
     this.registerView(USER_GUIDE_VIEW_TYPE, (leaf) => new UserGuideView(leaf, this));
+    this.registerView(AI_WORKSPACE_VIEW_TYPE, (leaf) => new AiWorkspaceView(leaf, this));
     this.registerView(PRO_COMPARE_VIEW_TYPE, (leaf) => new ProCompareView(leaf, this));
     this.registerView(PRO_LICENSE_VIEW_TYPE, (leaf) => new ProLicenseView(leaf, this));
-    this.registerView(AI_EDIT_PANEL_VIEW_TYPE, (leaf) => new AiEditPanelView(leaf, this));
     this.registerView(
       CALENDAR_VIEW_TYPE,
       (leaf) => new CalendarView(leaf, this)
     );
     this.registerLifeOsFileStyling();
-    this.aiEditPopover = new AiEditPopoverController(this.app, this);
     this.registerAiEditPopover();
 
     this.addRibbonIcon("layout-dashboard", "Life OS Dashboard", () => {
@@ -214,6 +301,18 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       id: "open-user-guide",
       name: "打开使用手册",
       callback: () => void this.activateUserGuide()
+    });
+
+    this.addCommand({
+      id: "open-ai-workspace",
+      name: "打开项目上下文",
+      callback: () => void this.activateAiWorkspace()
+    });
+
+    this.addCommand({
+      id: "sync-ai-workspace-sessions",
+      name: "检查已跟踪会话更新",
+      callback: () => void this.refreshTrackedAiWorkspaceSessions(true)
     });
 
     this.addCommand({
@@ -462,6 +561,14 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     // Check yesterday on first launch, then keep periodic summaries updated.
     void this.runStartupDailyMaintenance();
     this.scheduleMidnightCheck();
+    void this.refreshTrackedAiWorkspaceSessions(false);
+    void this.runAutoReview("startup");
+    this.registerInterval(window.setInterval(() => {
+      void this.refreshTrackedAiWorkspaceSessions(false);
+    }, 60_000));
+    this.registerInterval(window.setInterval(() => {
+      void this.runAutoReview("timer");
+    }, 60_000));
   }
 
   onunload(): void {
@@ -471,14 +578,20 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     }
     this.modalTextareaObserver?.disconnect();
     this.modalTextareaObserver = null;
-    if (this.aiEditSelectionTimer !== null) {
+    if (this.aiEditSelectionTimer) {
       window.clearTimeout(this.aiEditSelectionTimer);
       this.aiEditSelectionTimer = null;
     }
+    if (this.aiEditSelectionChangeTimer) {
+      window.clearTimeout(this.aiEditSelectionChangeTimer);
+      this.aiEditSelectionChangeTimer = null;
+    }
+    this.pendingAiEditDomSelectionSnapshot = null;
     this.aiEditPopover?.close();
     this.aiEditPopover = null;
-    this.app.workspace.detachLeavesOfType(AI_EDIT_PANEL_VIEW_TYPE);
     this.stopLiquidGlassRuntime();
+    this.autoReviewService = null;
+    void this.browserCaptureServer.stop();
   }
 
   // ═══════════════════════════════════════════════════
@@ -494,6 +607,9 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       new Notice("Life OS 设置文件读取失败，已使用默认设置启动。");
     }
     const needsInitialLicenseSave = !storedData.licenseInstallationId;
+    const needsBrowserCaptureTokenSave = typeof storedData.browserCaptureToken !== "string"
+      || storedData.browserCaptureToken.trim().length < 24;
+    const storedImportedAiSkills = (storedData as Record<string, unknown>).importedAiSkills;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, storedData);
     this.settings.themeStyle = normalizeThemeStyle(this.settings.themeStyle);
     this.settings.uiFramework = normalizeUiFrameworkSettings(
@@ -504,7 +620,19 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.settings.customExamProfileName = this.settings.customExamProfileName ?? "";
     this.settings.lastTaskDraft = normalizeTaskFormDraft((storedData as Record<string, unknown>).lastTaskDraft);
     this.settings.customAiSkillCategories = normalizeCustomAiSkillCategories((storedData as Record<string, unknown>).customAiSkillCategories);
-    this.settings.importedAiSkills = normalizeImportedAiSkillRecords((storedData as Record<string, unknown>).importedAiSkills);
+    this.settings.importedAiSkills = normalizeImportedAiSkillRecords(storedImportedAiSkills);
+    this.settings.browserCaptureEnabled = storedData.browserCaptureEnabled === true;
+    this.settings.browserCapturePort = normalizeBrowserCapturePort(storedData.browserCapturePort);
+    this.settings.pdfOcrEngine = normalizePdfOcrEngine(storedData.pdfOcrEngine);
+    this.settings.paddleOcrEndpoint = normalizePaddleOcrEndpoint(storedData.paddleOcrEndpoint);
+    this.settings.autoReviewEnabled = storedData.autoReviewEnabled === true;
+    this.settings.autoReviewTime = normalizeAutoReviewTime(storedData.autoReviewTime);
+    this.settings.autoReviewCatchUp = storedData.autoReviewCatchUp !== false;
+    this.settings.browserCaptureToken = needsBrowserCaptureTokenSave
+      ? createBrowserCaptureToken()
+      : String(storedData.browserCaptureToken).trim();
+    const needsImportedAiSkillMigration = Array.isArray(storedImportedAiSkills)
+      && this.settings.importedAiSkills.length !== storedImportedAiSkills.length;
     this.settings.licenseInstallationId = normalizeInstallationId(this.settings.licenseInstallationId);
     this.settings.licenseApiBaseUrl = this.settings.licenseApiBaseUrl?.trim() || DEFAULT_SETTINGS.licenseApiBaseUrl;
     this.settings.licenseEmail = this.settings.licenseEmail ?? "";
@@ -529,13 +657,126 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       setStoredAiApiKey(this.settings, this.settings.aiProvider, this.settings.aiApiKey);
     }
     setStoredAiProviderConfig(this.settings, this.settings.aiProvider, getCurrentAiProviderConfig(this.settings));
-    if (needsInitialLicenseSave) {
+    if (needsInitialLicenseSave || needsImportedAiSkillMigration || needsBrowserCaptureTokenSave) {
       await this.saveSettings();
     }
   }
 
   async saveSettings(): Promise<void> {
+    this.settings.autoReviewTime = normalizeAutoReviewTime(this.settings.autoReviewTime);
     await this.saveData(this.settings);
+  }
+
+  private async runAutoReview(trigger: AutoReviewTrigger): Promise<void> {
+    try {
+      const result = await this.autoReviewService?.runDue(trigger);
+      if (result?.status === "stale" && trigger === "startup") {
+        new Notice("自动复盘草稿的来源已变化，请到复盘页手动刷新。", 7000);
+      }
+    } catch (error) {
+      console.error("[Life OS] Auto review draft failed", error);
+    }
+  }
+
+  getBrowserCaptureStatus(): BrowserCaptureServerStatus {
+    return this.browserCaptureServer.getStatus();
+  }
+
+  getBrowserCaptureConnection(): { endpoint: string; token: string } {
+    const port = normalizeBrowserCapturePort(this.settings.browserCapturePort);
+    return {
+      endpoint: `http://127.0.0.1:${port}`,
+      token: this.settings.browserCaptureToken
+    };
+  }
+
+  async regenerateBrowserCaptureToken(): Promise<void> {
+    this.settings.browserCaptureToken = createBrowserCaptureToken();
+    await this.saveSettings();
+    await this.refreshBrowserCaptureBridge();
+  }
+
+  async refreshBrowserCaptureBridge(): Promise<BrowserCaptureServerStatus> {
+    await this.browserCaptureServer.stop();
+    if (!this.settings.browserCaptureEnabled) return this.browserCaptureServer.getStatus();
+    const port = normalizeBrowserCapturePort(this.settings.browserCapturePort);
+    this.settings.browserCapturePort = port;
+    return this.browserCaptureServer.start({
+      port,
+      token: this.settings.browserCaptureToken,
+      listProjects: async () => {
+        const projects = await this.createProjectService().loadProjects();
+        return projects.map((project) => ({ id: project.id, name: project.name }));
+      },
+      createProject: async (input) => {
+        const project = await this.createProjectService().createProject({
+          name: input.name,
+          goal: input.goal,
+          type: "general",
+          status: "active"
+        });
+        return { id: project.id, name: project.name };
+      },
+      capture: async (request, options) => {
+        const projects = await this.createProjectService().loadProjects();
+        if (!projects.some((project) => project.id === request.projectId)) {
+          throw new Error("目标项目不存在，请在浏览器扩展中刷新项目列表。");
+        }
+        return this.createAiWorkspaceService().captureBrowserConversation(
+          request.projectId,
+          request.conversation,
+          options
+        );
+      }
+    });
+  }
+
+  private createProjectService(): ProjectService {
+    return new ProjectService(
+      this.app,
+      new FileSystemService(this.app, this.getRoot(), this.settings.directoryLanguage)
+    );
+  }
+
+  private createAiWorkspaceService(): AiWorkspaceService {
+    return new AiWorkspaceService(
+      this.app,
+      new FileSystemService(this.app, this.getRoot(), this.settings.directoryLanguage),
+      this.settings,
+      this.ai
+    );
+  }
+
+  async refreshTrackedAiWorkspaceSessions(showNotice = false): Promise<void> {
+    if (this.aiWorkspaceSyncRunning) {
+      if (showNotice) new Notice("正在检查已跟踪会话，请稍候。", 3000);
+      return;
+    }
+    this.aiWorkspaceSyncRunning = true;
+    try {
+      const report = await this.createAiWorkspaceService().syncTrackedSessions();
+      if (report.updated > 0 || report.needsReview > 0 || report.errors > 0) {
+        for (const leaf of this.app.workspace.getLeavesOfType(AI_WORKSPACE_VIEW_TYPE)) {
+          const view = leaf.view as AiWorkspaceView;
+          await view.refreshFromAutoSync();
+        }
+      }
+      if (showNotice) {
+        const detail = report.updated > 0
+          ? `已更新 ${report.updated} 个会话，新增 ${report.appendedMessages} 条对话。`
+          : report.needsReview > 0
+            ? `${report.needsReview} 个会话检测到历史变化，需要手动检查。`
+            : `已检查 ${report.checked} 个会话，当前都是最新。`;
+        new Notice(detail, 5000);
+      }
+    } catch (error) {
+      console.error("[Life OS] Failed to sync tracked AI Workspace sessions.", error);
+      if (showNotice) {
+        new Notice(error instanceof Error ? error.message : "自动检查会话失败。", 6000);
+      }
+    } finally {
+      this.aiWorkspaceSyncRunning = false;
+    }
   }
 
   private async verifyStoredLicenseEntitlement(): Promise<void> {
@@ -630,8 +871,8 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     document.querySelectorAll<HTMLElement>(".lifeos-chat-top-copy h1").forEach((element) => {
       element.setText(assistantName);
     });
-    document.querySelectorAll<HTMLElement>(".lifeos-chat-welcome h2").forEach((element) => {
-      element.setText(`你好，我是 ${assistantName}`);
+    document.querySelectorAll<HTMLElement>(".lifeos-chat-welcome-assistant-name").forEach((element) => {
+      element.setText(assistantName);
     });
     document.querySelectorAll<HTMLElement>(".lifeos-chat-bubble-ai .lifeos-chat-bubble-label").forEach((element) => {
       element.setText(assistantName);
@@ -1879,7 +2120,17 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
 
   async generateReport(period: string): Promise<void> {
     if (!requireProFeature(this, "aiReviewGenerate")) return;
-    await generateReport(this.app, this, period as "daily" | "weekly" | "monthly");
+    const kind = period === "daily" || period === "weekly" || period === "monthly" ? period : "custom";
+    if (kind === "daily") {
+      const date = formatDate();
+      const pending = (await this.autoReviewService?.listDrafts())
+        ?.find((item) => item.window.start === date && item.window.end === date);
+      if (pending) {
+        new PeriodReviewModal(this.app, this, kind, { draftPath: pending.path }).open();
+        return;
+      }
+    }
+    new PeriodReviewModal(this.app, this, kind).open();
   }
 
   async showEmotionTracking(): Promise<void> {
@@ -1893,10 +2144,22 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
 
   private registerAiEditPopover(): void {
     this.addCommand({
+      id: "lifeos-open-ai-edit-sidebar",
+      name: "打开 AI 修改侧边栏",
+      callback: () => void this.openAiEditSidebarResident()
+    });
+
+    this.addCommand({
+      id: "lifeos-ai-edit-diagnostics",
+      name: "AI 修改诊断",
+      callback: () => void this.showAiEditDiagnostics()
+    });
+
+    this.addCommand({
       id: "lifeos-ai-edit-selection",
       name: "AI 修改选中文本",
       editorCallback: (editor, view) => {
-        this.openAiEditForEditorSelection(editor, view.file, this.defaultAiEditAnchor());
+        void this.openAiEditForEditorSelection(editor, view.file, this.defaultAiEditAnchor());
       }
     });
 
@@ -1907,17 +2170,19 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     });
 
     this.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, view) => {
-      if (!(view.file instanceof TFile) || !editor.getSelection().trim()) return;
+      if (!(view.file instanceof TFile)) return;
+      if (!editor.getSelection().trim()) return;
       menu.addItem((item) => {
         item
           .setTitle("AI 修改选中文本")
           .setIcon("sparkles")
-          .onClick(() => this.openAiEditForEditorSelection(editor, view.file, this.defaultAiEditAnchor()));
+          .onClick(() => void this.openAiEditForEditorSelection(editor, view.file, this.defaultAiEditAnchor()));
       });
     }));
 
     this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
-      if (!(file instanceof TFile) || !this.isAiEditableFile(file)) return;
+      if (!(file instanceof TFile)) return;
+      if (!this.isAiEditableFile(file)) return;
       menu.addItem((item) => {
         item
           .setTitle(file.extension === "canvas" ? "AI 调整白板" : "AI 修改文档")
@@ -1926,146 +2191,402 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       });
     }));
 
-    this.registerDomEvent(document, "mousedown", (event: MouseEvent) => {
-      if (event.button === 0) this.aiEditPointer = { x: event.clientX, y: event.clientY };
-    });
-
-    this.registerDomEvent(document, "mouseup", (event: MouseEvent) => {
-      if (event.button !== 0) return;
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      if (!target || this.shouldIgnoreAiEditTarget(target)) return;
-      const activeFile = this.app.workspace.getActiveFile();
-      if (activeFile instanceof TFile && this.isCanvasFile(activeFile) && target.closest(".canvas-wrapper, .canvas, .canvas-viewport, .canvas-node")) {
-        void this.openAiEditForFile(activeFile, {
-          x: event.clientX,
-          y: event.clientY,
-          avoidRect: this.elementAvoidRect(target.closest<HTMLElement>(".canvas-node") ?? target, 12),
-          placement: "canvas"
-        }, this.canvasNodeHint(target));
-        return;
-      }
-      this.scheduleAiEditFromActiveSelection({ x: event.clientX, y: event.clientY, avoidRect: this.currentSelectionRect() });
-    });
-
-    this.registerDomEvent(document, "selectionchange", () => {
-      const activeElement = document.activeElement;
-      if (activeElement instanceof HTMLElement && this.shouldIgnoreAiEditTarget(activeElement)) return;
-      this.scheduleAiEditFromActiveSelection();
-    });
-  }
-
-  private scheduleAiEditFromActiveSelection(anchor?: AiEditAnchor): void {
-    if (this.aiEditSelectionTimer !== null) window.clearTimeout(this.aiEditSelectionTimer);
-    this.aiEditSelectionTimer = window.setTimeout(() => {
-      this.aiEditSelectionTimer = null;
-      void this.openAiEditFromActiveSelection(anchor);
-    }, 180);
-  }
-
-  private async openAiEditFromActiveSelection(anchor?: AiEditAnchor): Promise<void> {
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (!view?.file) return;
-    const editorSelection = view.editor.getSelection();
-    const domSelection = window.getSelection();
-    const readingSelection = domSelection && !domSelection.isCollapsed
-      ? domSelection.toString().trim()
-      : "";
-    const rect = this.currentSelectionRect();
-    const resolvedAnchor = anchor ?? {
-      x: rect ? rect.right : this.aiEditPointer?.x ?? Math.round(window.innerWidth / 2),
-      y: rect ? rect.bottom : this.aiEditPointer?.y ?? Math.round(window.innerHeight * 0.4),
-      avoidRect: rect,
-      placement: "text-selection"
+    const capturePointerDown = (event: MouseEvent) => {
+      if (event.button === 0) this.aiEditPointerDown = { x: event.clientX, y: event.clientY };
     };
+    const captureMouseUp = (event: MouseEvent) => {
+      window.setTimeout(() => void this.handleAiEditMouseUp(event, "capture"), 0);
+    };
+    document.addEventListener("mousedown", capturePointerDown, true);
+    document.addEventListener("mouseup", captureMouseUp, true);
+    window.addEventListener("mouseup", captureMouseUp, true);
+    this.register(() => {
+      document.removeEventListener("mousedown", capturePointerDown, true);
+      document.removeEventListener("mouseup", captureMouseUp, true);
+      window.removeEventListener("mouseup", captureMouseUp, true);
+    });
+    this.registerDomEvent(document, "mouseup", (event) => this.handleAiEditMouseUp(event, "bubble"));
+    this.registerDomEvent(document, "selectionchange", () => this.handleAiEditSelectionChange());
+    this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
+      this.aiEditPopover?.clearSelectionHighlight();
+    }));
+  }
 
-    if (editorSelection.trim().length >= 2) {
-      const from = cloneEditorPosition(view.editor.getCursor("from"));
-      const to = cloneEditorPosition(view.editor.getCursor("to"));
-      const key = `${view.file.path}:${from.line}:${from.ch}:${to.line}:${to.ch}:${editorSelection}`;
-      if (this.isDuplicateAiEditSelection(key)) return;
-      this.openAiEditForEditorSelection(view.editor, view.file, resolvedAnchor);
+  private async handleAiEditMouseUp(event: MouseEvent, phase: "capture" | "bubble" = "bubble"): Promise<void> {
+    if (event.button !== 0) return;
+    if (phase === "capture") this.aiEditDiagnostics.captureMouseUp += 1;
+    if (phase === "bubble") this.aiEditDiagnostics.bubbleMouseUp += 1;
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    const selectionText = window.getSelection()?.toString() ?? "";
+    this.recordAiEditDiagnostic(`mouseup-${phase}`, target, selectionText, "received");
+    if (!target) {
+      this.recordAiEditDiagnostic(`mouseup-${phase}`, null, selectionText, "no HTMLElement target");
+      return;
+    }
+    if (this.shouldIgnoreAiEditPopoverTarget(target)) {
+      this.recordAiEditDiagnostic(`mouseup-${phase}`, target, selectionText, "ignored UI target");
       return;
     }
 
-    if (readingSelection.length < 2) return;
-    const key = `reading:${view.file.path}:${readingSelection}`;
-    if (this.isDuplicateAiEditSelection(key)) return;
-    const documentText = await this.app.vault.read(view.file);
-    const first = documentText.indexOf(readingSelection);
-    const unique = first >= 0 && documentText.indexOf(readingSelection, first + readingSelection.length) === -1;
-    this.aiEditPopover?.open({
-      kind: "reading-selection",
-      file: view.file,
-      text: readingSelection,
-      startOffset: unique ? first : null,
-      endOffset: unique ? first + readingSelection.length : null
-    }, resolvedAnchor);
+    const markdownView = this.findMarkdownViewForAiEditTarget(target);
+    if (markdownView?.file instanceof TFile && this.isMarkdownSelectionSurface(target)) {
+      const editor = markdownView.editor;
+      const selected = editor.getSelection();
+      if (selected.trim().length >= 2) {
+        this.recordAiEditDiagnostic(`mouseup-${phase}`, target, selected, "opening editable markdown selection", markdownView.file.path);
+        this.scheduleAiEditForEditorSelection(editor, markdownView.file, {
+          x: event.clientX,
+          y: event.clientY,
+          avoidRect: this.selectionAvoidRect(target),
+          selectionRects: this.selectionRects(target)
+        });
+        return;
+      }
+      const readonlySelected = this.readonlySelectionTextForAiEditTarget(markdownView, target);
+      if (readonlySelected.trim().length >= 2) {
+        const readonlyKey = `${markdownView.file.path}:${readonlySelected.trim()}`;
+        if (this.shouldSuppressAiEditSelectionOpen(readonlyKey, 900)) {
+          this.recordAiEditDiagnostic(`mouseup-${phase}`, target, readonlySelected, "duplicate readonly selection suppressed", markdownView.file.path);
+          return;
+        }
+        this.recordAiEditDiagnostic(`mouseup-${phase}`, target, readonlySelected, "opening readonly markdown selection", markdownView.file.path);
+        await this.openAiEditTarget({
+          kind: "readonly-selection",
+          file: markdownView.file,
+          text: readonlySelected
+        }, {
+          x: event.clientX,
+          y: event.clientY,
+          avoidRect: this.selectionAvoidRect(target),
+          selectionRects: this.selectionRects(target)
+        });
+        return;
+      }
+    }
+
+    const domSnapshot = this.captureAiEditDomSelectionSnapshot(`mouseup-${phase}`, target);
+    if (domSnapshot) {
+      this.pendingAiEditDomSelectionSnapshot = domSnapshot;
+      this.aiEditDiagnostics.snapshotCaptured += 1;
+      await this.openCurrentDomSelectionInAiEditSidebar(domSnapshot);
+      return;
+    }
+
+    if (selectionText.trim().length >= 2 && this.isMarkdownSelectionSurface(target)) {
+      const activeFile = this.app.workspace.getActiveFile();
+      const fallbackFile = markdownView?.file instanceof TFile
+        ? markdownView.file
+        : activeFile instanceof TFile && activeFile.extension === "md"
+          ? activeFile
+          : null;
+      if (fallbackFile) {
+        const fallbackKey = `${fallbackFile.path}:${selectionText.trim()}`;
+        if (this.shouldSuppressAiEditSelectionOpen(fallbackKey, 900)) {
+          this.recordAiEditDiagnostic(`mouseup-${phase}`, target, selectionText, "duplicate fallback selection suppressed", fallbackFile.path);
+          return;
+        }
+        this.recordAiEditDiagnostic(`mouseup-${phase}`, target, selectionText, "opening fallback DOM markdown selection", fallbackFile.path);
+        await this.openAiEditTarget({
+          kind: "readonly-selection",
+          file: fallbackFile,
+          text: selectionText
+        }, {
+          x: event.clientX,
+          y: event.clientY,
+          avoidRect: this.selectionAvoidRect(target),
+          selectionRects: this.selectionRects(target)
+        });
+        return;
+      }
+    }
+
+    const activeFile = this.app.workspace.getActiveFile();
+    if (
+      activeFile instanceof TFile &&
+      this.isCanvasFile(activeFile) &&
+      this.shouldOpenAiEditForCanvasClick(event, target)
+    ) {
+      this.recordAiEditDiagnostic(`mouseup-${phase}`, target, selectionText, "opening canvas", activeFile.path);
+      void this.openAiEditForFile(activeFile, this.canvasAiEditAnchor(event, target), this.canvasNodeHint(target));
+      return;
+    }
+    this.recordAiEditDiagnostic(`mouseup-${phase}`, target, selectionText, "no supported selection/canvas target", markdownView?.file?.path ?? "");
   }
 
-  private isDuplicateAiEditSelection(key: string): boolean {
+  private handleAiEditSelectionChange(): void {
+    this.aiEditDiagnostics.selectionChange += 1;
+    const snapshot = this.captureAiEditDomSelectionSnapshot("selectionchange");
+    if (snapshot) {
+      this.pendingAiEditDomSelectionSnapshot = snapshot;
+      this.aiEditDiagnostics.snapshotCaptured += 1;
+      this.recordAiEditDiagnostic("selectionchange", snapshot.target, snapshot.text, "captured selection snapshot", snapshot.file.path);
+    } else {
+      const selectionText = window.getSelection()?.toString() ?? "";
+      this.recordAiEditDiagnostic("selectionchange", this.currentSelectionElement(), selectionText, "received empty/collapsed selection");
+    }
+    if (this.aiEditSelectionChangeTimer) window.clearTimeout(this.aiEditSelectionChangeTimer);
+    this.aiEditSelectionChangeTimer = window.setTimeout(() => {
+      this.aiEditSelectionChangeTimer = null;
+      void this.openCurrentDomSelectionInAiEditSidebar(snapshot ?? this.pendingAiEditDomSelectionSnapshot);
+    }, 120);
+  }
+
+  private async openCurrentDomSelectionInAiEditSidebar(snapshot?: AiEditDomSelectionSnapshot | null): Promise<void> {
+    const resolvedSnapshot = snapshot ?? this.captureAiEditDomSelectionSnapshot("selectionchange-open");
+    if (!resolvedSnapshot) {
+      const selection = window.getSelection();
+      const text = selection?.toString() ?? "";
+      this.recordAiEditDiagnostic("selectionchange-open", this.currentSelectionElement(), text, "empty or collapsed selection");
+      return;
+    }
+    if (Date.now() - resolvedSnapshot.createdAt > 4_000) {
+      this.recordAiEditDiagnostic("selectionchange-open", resolvedSnapshot.target, resolvedSnapshot.text, "stale selection snapshot ignored", resolvedSnapshot.file.path);
+      return;
+    }
+    if (this.shouldSuppressAiEditSelectionOpen(resolvedSnapshot.key, 900)) {
+      this.recordAiEditDiagnostic("selectionchange-open", resolvedSnapshot.target, resolvedSnapshot.text, "duplicate selection suppressed", resolvedSnapshot.file.path);
+      return;
+    }
+    this.pendingAiEditDomSelectionSnapshot = null;
+    this.recordAiEditDiagnostic("selectionchange-open", resolvedSnapshot.target, resolvedSnapshot.text, `opening DOM selection snapshot from ${resolvedSnapshot.source}`, resolvedSnapshot.file.path);
+    await this.openAiEditTarget({
+      kind: "readonly-selection",
+      file: resolvedSnapshot.file,
+      text: resolvedSnapshot.text
+    }, resolvedSnapshot.anchor);
+  }
+
+  private captureAiEditDomSelectionSnapshot(source: string, fallbackTarget?: HTMLElement | null): AiEditDomSelectionSnapshot | null {
+    const selection = window.getSelection();
+    const text = selection?.toString() ?? "";
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0 || text.trim().length < 2) return null;
+    const range = selection.getRangeAt(0);
+    const target = this.currentSelectionElement(range) ?? fallbackTarget ?? null;
+    if (!target || this.shouldIgnoreAiEditPopoverTarget(target) || !this.isMarkdownSelectionSurface(target)) return null;
+
+    const markdownView = this.findMarkdownViewForAiEditTarget(target);
+    const activeFile = this.app.workspace.getActiveFile();
+    const file = markdownView?.file instanceof TFile
+      ? markdownView.file
+      : activeFile instanceof TFile && activeFile.extension === "md"
+        ? activeFile
+        : null;
+    if (!(file instanceof TFile)) return null;
+
+    const selectionRects = this.selectionRectsFromRange(range).slice(0, 80);
+    const rect = range.getBoundingClientRect();
+    const anchor: AiEditAnchor = {
+      x: Math.round((rect.left + rect.right) / 2) || this.defaultAiEditAnchor().x,
+      y: Math.round(rect.bottom) || this.defaultAiEditAnchor().y,
+      avoidRect: this.selectionAvoidRectFromRects(selectionRects),
+      selectionRects
+    };
+    return {
+      text,
+      file,
+      target,
+      source,
+      key: `${file.path}:${text.trim()}`,
+      createdAt: Date.now(),
+      anchor
+    };
+  }
+
+  private selectionRectsFromRange(range: Range): NonNullable<AiEditAnchor["selectionRects"]> {
+    return Array.from(range.getClientRects())
+      .filter((rect) => rect.width > 0 && rect.height > 0)
+      .map((rect) => ({
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height
+      }));
+  }
+
+  private selectionAvoidRectFromRects(rects: NonNullable<AiEditAnchor["selectionRects"]>): AiEditAnchor["avoidRect"] {
+    if (rects.length === 0) return undefined;
+    const left = Math.min(...rects.map((rect) => rect.left));
+    const top = Math.min(...rects.map((rect) => rect.top));
+    const right = Math.max(...rects.map((rect) => rect.right));
+    const bottom = Math.max(...rects.map((rect) => rect.bottom));
+    const width = right - left;
+    const height = bottom - top;
+    if (width <= 0 || height <= 0) return undefined;
+    return { left, top, right, bottom, width, height };
+  }
+
+  private shouldSuppressAiEditSelectionOpen(key: string, windowMs: number): boolean {
     const now = Date.now();
-    if (key === this.lastAiEditSelectionKey && now - this.lastAiEditSelectionAt < 1400) return true;
+    if (key === this.lastAiEditSelectionKey && now - this.lastAiEditSelectionAt < windowMs) return true;
     this.lastAiEditSelectionKey = key;
     this.lastAiEditSelectionAt = now;
     return false;
   }
 
-  private openAiEditForEditorSelection(editor: Editor, file: TFile | null, anchor: AiEditAnchor): void {
-    if (!(file instanceof TFile)) return;
-    const selected = editor.getSelection();
-    if (!selected.trim()) return;
-    this.aiEditPopover?.open({
-      kind: "selection",
-      file,
-      editor,
-      from: cloneEditorPosition(editor.getCursor("from")),
-      to: cloneEditorPosition(editor.getCursor("to")),
-      text: selected
-    }, anchor);
-  }
-
-  private async openAiEditForActiveCanvas(anchor: AiEditAnchor): Promise<void> {
-    const file = this.app.workspace.getActiveFile();
-    if (!(file instanceof TFile) || !this.isCanvasFile(file)) {
-      new Notice("请先打开一个 Obsidian Canvas 白板。");
-      return;
-    }
-    await this.openAiEditForFile(file, anchor);
-  }
-
-  private async openAiEditForFile(file: TFile, anchor: AiEditAnchor, nodeHint?: string): Promise<void> {
-    if (!this.isAiEditableFile(file)) {
-      new Notice("目前支持 Markdown 文档和 Obsidian Canvas 白板。");
-      return;
-    }
-    const content = await this.app.vault.read(file);
-    this.aiEditPopover?.open(
-      this.isCanvasFile(file)
-        ? { kind: "canvas", file, text: content, nodeHint }
-        : { kind: "markdown-file", file, text: content },
-      anchor
-    );
-  }
-
-  async dockAiEditToSidebar(): Promise<void> {
-    let leaf = this.app.workspace.getLeavesOfType(AI_EDIT_PANEL_VIEW_TYPE)[0];
-    if (!leaf) {
-      leaf = this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf("tab");
-      await leaf.setViewState({ type: AI_EDIT_PANEL_VIEW_TYPE, active: true });
-    }
-    this.app.workspace.revealLeaf(leaf);
-    if (leaf.view instanceof AiEditPanelView) leaf.view.refresh();
-  }
-
-  async undockAiEditFromSidebar(): Promise<void> {
-    this.app.workspace.detachLeavesOfType(AI_EDIT_PANEL_VIEW_TYPE);
-  }
-
-  private currentSelectionRect(): AiEditAnchor["avoidRect"] {
+  private currentSelectionElement(range?: Range | null): HTMLElement | null {
     const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return undefined;
-    const rects = Array.from(selection.getRangeAt(0).getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
-    if (!rects.length) return undefined;
+    const resolvedRange = range ?? (selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null);
+    const common = resolvedRange?.commonAncestorContainer;
+    return common instanceof HTMLElement ? common : common?.parentElement ?? null;
+  }
+
+  private recordAiEditDiagnostic(
+    event: string,
+    target: HTMLElement | null,
+    text: string,
+    reason: string,
+    filePath = ""
+  ): void {
+    const targetDescription = this.describeAiEditTargetElement(target);
+    const selectionLength = text.trim().length;
+    const now = Date.now();
+    this.aiEditDiagnostics.lastEvent = event;
+    this.aiEditDiagnostics.lastTarget = targetDescription;
+    this.aiEditDiagnostics.lastReason = reason;
+    this.aiEditDiagnostics.lastSelectionLength = selectionLength;
+    this.aiEditDiagnostics.lastFilePath = filePath;
+    this.aiEditDiagnostics.lastAt = now;
+
+    const isUiNoise = reason === "ignored UI target" || event.startsWith("panel-");
+    const isMeaningful = !isUiNoise && (
+      selectionLength > 0 ||
+      reason.startsWith("opening")
+    );
+    if (isMeaningful) {
+      this.aiEditDiagnostics.lastMeaningfulEvent = event;
+      this.aiEditDiagnostics.lastMeaningfulTarget = targetDescription;
+      this.aiEditDiagnostics.lastMeaningfulReason = reason;
+      this.aiEditDiagnostics.lastMeaningfulSelectionLength = selectionLength;
+      this.aiEditDiagnostics.lastMeaningfulFilePath = filePath;
+      this.aiEditDiagnostics.lastMeaningfulAt = now;
+    }
+  }
+
+  private describeAiEditTargetElement(target: HTMLElement | null): string {
+    if (!target) return "none";
+    const classes = Array.from(target.classList).slice(0, 5).join(".");
+    const leafContent = target.closest<HTMLElement>(".workspace-leaf-content");
+    const leafType = leafContent?.getAttribute("data-type") ?? "";
+    const tag = target.tagName.toLowerCase();
+    return `${tag}${classes ? `.${classes}` : ""}${leafType ? ` in ${leafType}` : ""}`;
+  }
+
+  private showAiEditDiagnostics(): void {
+    const selection = window.getSelection();
+    const text = selection?.toString() ?? "";
+    const target = this.currentSelectionElement();
+    const leaves = this.app.workspace.getLeavesOfType(AI_EDIT_PANEL_VIEW_TYPE);
+    const connectedLeaves = leaves.filter((leaf) => {
+      const contentEl = (leaf.view as { contentEl?: HTMLElement }).contentEl;
+      return Boolean(contentEl?.isConnected);
+    }).length;
+    const activeViewType = this.app.workspace.activeLeaf?.view.getViewType() ?? "none";
+    const activeFile = this.app.workspace.getActiveFile();
+    const data = {
+      loaded: true,
+      version: this.manifest.version,
+      activeViewType,
+      activeFile: activeFile instanceof TFile ? activeFile.path : "none",
+      selectionLength: text.trim().length,
+      selectionTarget: this.describeAiEditTargetElement(target),
+      markdownSurface: target ? this.isMarkdownSelectionSurface(target) : false,
+      panelLeaves: leaves.length,
+      connectedLeaves,
+      mountedInPanel: this.aiEditPopover?.isMountedInPanel() ?? false,
+      diagnostics: { ...this.aiEditDiagnostics }
+    };
+    const message = [
+      `AI 修改诊断：已加载 v${this.manifest.version}`,
+      `当前选区 ${data.selectionLength} 字 / markdown=${data.markdownSurface ? "是" : "否"}`,
+      `侧边栏 leaf ${leaves.length} 个 / 已连接 ${connectedLeaves} 个 / 活跃会话 ${data.mountedInPanel ? "是" : "否"}`,
+      `最后有效事件：${this.aiEditDiagnostics.lastMeaningfulEvent}，${this.aiEditDiagnostics.lastMeaningfulSelectionLength} 字，原因：${this.aiEditDiagnostics.lastMeaningfulReason}`,
+      `最后原始事件：${this.aiEditDiagnostics.lastEvent}，原因：${this.aiEditDiagnostics.lastReason}`
+    ].join("\n");
+    new Notice(message, 12000);
+    console.info("[Life OS] AI edit diagnostics", data);
+    void this.openAiEditSidebarResident();
+  }
+
+  private findMarkdownViewForAiEditTarget(target: HTMLElement): MarkdownView | null {
+    const targetLeaf = target.closest<HTMLElement>(".workspace-leaf");
+    let matched: MarkdownView | null = null;
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      if (matched) return;
+      const view = leaf.view;
+      const containerEl = (view as { containerEl?: HTMLElement }).containerEl;
+      if (view instanceof MarkdownView && containerEl?.contains(target)) {
+        matched = view;
+      } else if (view instanceof MarkdownView && targetLeaf && containerEl?.closest(".workspace-leaf") === targetLeaf) {
+        matched = view;
+      }
+    });
+    return matched ?? this.app.workspace.getActiveViewOfType(MarkdownView);
+  }
+
+  private readonlySelectionTextForAiEditTarget(markdownView: MarkdownView, target: HTMLElement): string {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return "";
+    const containerEl = (markdownView as { containerEl?: HTMLElement }).containerEl;
+    if (!containerEl?.contains(target)) return "";
+    const common = selection.getRangeAt(0).commonAncestorContainer;
+    const commonEl = common instanceof HTMLElement ? common : common.parentElement;
+    if (commonEl && !containerEl.contains(commonEl)) return "";
+    return selection.toString();
+  }
+
+  private selectionAvoidRect(target: HTMLElement): AiEditAnchor["avoidRect"] {
+    return this.selectionAvoidRectFromRects(this.selectionRects(target));
+  }
+
+  private selectionRects(target: HTMLElement): NonNullable<AiEditAnchor["selectionRects"]> {
+    if (!this.isMarkdownSelectionSurface(target)) return [];
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return [];
+    return Array.from(selection.getRangeAt(0).getClientRects())
+      .filter((rect) => rect.width > 0 && rect.height > 0)
+      .map((rect) => ({
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height
+      }));
+  }
+
+  private canvasAiEditAnchor(event: MouseEvent, target: HTMLElement): AiEditAnchor {
+    const canvasRects = this.canvasAvoidRects(target);
+    return {
+      x: event.clientX,
+      y: event.clientY,
+      avoidRect: canvasRects.primary,
+      softAvoidRects: canvasRects.soft,
+      placement: "canvas"
+    };
+  }
+
+  private canvasAvoidRects(target: HTMLElement): { primary?: AiEditAnchor["avoidRect"]; soft: NonNullable<AiEditAnchor["softAvoidRects"]> } {
+    const canvasRoot = target.closest<HTMLElement>(".canvas-wrapper, .canvas, .canvas-viewport, .workspace-leaf-content") ?? document.body;
+    const targetNode = target.closest<HTMLElement>(".canvas-node");
+    const selectedNodes = Array.from(canvasRoot.querySelectorAll<HTMLElement>(
+      ".canvas-node.is-selected, .canvas-node.mod-selected, .canvas-node.is-focused, .canvas-node.is-highlighted"
+    )).filter((node) => node.offsetParent !== null);
+    const primaryElements = selectedNodes.length > 0 ? selectedNodes : targetNode ? [targetNode] : [];
+    const primary = this.unionElementRects(primaryElements, 28);
+    const soft = Array.from(canvasRoot.querySelectorAll<HTMLElement>(".canvas-node"))
+      .filter((node) => node.offsetParent !== null)
+      .map((node) => this.elementAvoidRect(node, 14))
+      .filter((rect): rect is NonNullable<AiEditAnchor["avoidRect"]> => Boolean(rect));
+    return { primary, soft };
+  }
+
+  private unionElementRects(elements: HTMLElement[], padding: number): AiEditAnchor["avoidRect"] {
+    const rects = elements
+      .map((element) => this.elementAvoidRect(element, padding))
+      .filter((rect): rect is NonNullable<AiEditAnchor["avoidRect"]> => Boolean(rect));
+    if (rects.length === 0) return undefined;
     const left = Math.min(...rects.map((rect) => rect.left));
     const top = Math.min(...rects.map((rect) => rect.top));
     const right = Math.max(...rects.map((rect) => rect.right));
@@ -2083,26 +2604,215 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     return { left, top, right, bottom, width: right - left, height: bottom - top };
   }
 
-  private shouldIgnoreAiEditTarget(target: HTMLElement): boolean {
+  async dockAiEditToSidebar(): Promise<void> {
+    const leaf = await this.ensureAiEditSidebarResident();
+    this.app.workspace.rightSplit?.expand?.();
+    await this.app.workspace.revealLeaf?.(leaf);
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
+    this.aiEditPopover?.mountToPanel((leaf.view as { contentEl?: HTMLElement }).contentEl ?? document.body, { pin: true });
+    this.aiEditPopover?.clearSelectionHighlight();
+  }
+
+  private async ensureAiEditSidebarResident(): Promise<WorkspaceLeaf> {
+    if (!this.aiEditPopover) {
+      this.aiEditPopover = new AiEditPopoverController(this.app, this);
+    }
+    const existing = this.app.workspace.getLeavesOfType(AI_EDIT_PANEL_VIEW_TYPE)[0];
+    const leaf = existing ?? this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getRightLeaf(true) ?? this.app.workspace.getLeaf(true);
+    if (leaf.view.getViewType() !== AI_EDIT_PANEL_VIEW_TYPE) {
+      await leaf.setViewState({ type: AI_EDIT_PANEL_VIEW_TYPE, active: true });
+    }
+    this.app.workspace.rightSplit?.expand?.();
+    return leaf;
+  }
+
+  private async openAiEditTargetInResidentPanel(
+    target: AiEditTarget,
+    anchor: AiEditAnchor
+  ): Promise<void> {
+    try {
+      const leaf = await this.ensureAiEditSidebarResident();
+      const containerEl = (leaf.view as { contentEl?: HTMLElement }).contentEl;
+      if (!containerEl?.isConnected) throw new Error("AI edit sidebar container is not connected");
+      this.aiEditPopover?.mountToPanel(containerEl, { pin: true });
+      this.aiEditPopover?.openOrQueue(target, anchor);
+      this.aiEditDiagnostics.opened += 1;
+      this.app.workspace.rightSplit?.expand?.();
+      await this.app.workspace.revealLeaf?.(leaf);
+      this.app.workspace.setActiveLeaf(leaf, { focus: false });
+    } catch (error) {
+      console.warn("[Life OS] AI edit sidebar unavailable; falling back to floating popover", error);
+      if (!this.aiEditPopover) this.aiEditPopover = new AiEditPopoverController(this.app, this);
+      this.aiEditPopover.unmountFromPanel({ closeActive: false });
+      this.aiEditPopover.openOrQueue(target, anchor);
+    }
+  }
+
+  private async openAiEditTarget(target: AiEditTarget, anchor: AiEditAnchor): Promise<void> {
+    if (!this.aiEditPopover) this.aiEditPopover = new AiEditPopoverController(this.app, this);
+    if (this.aiEditPopover.shouldFollowSelectionInPanel()) {
+      await this.openAiEditTargetInResidentPanel(target, anchor);
+      return;
+    }
+    this.aiEditPopover.openOrQueue(target, anchor);
+    this.aiEditDiagnostics.opened += 1;
+  }
+
+  async openAiEditSidebarResident(): Promise<void> {
+    const leaf = await this.ensureAiEditSidebarResident();
+    await leaf.setViewState({ type: AI_EDIT_PANEL_VIEW_TYPE, active: true });
+    this.app.workspace.rightSplit?.expand?.();
+    await this.app.workspace.revealLeaf?.(leaf);
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
+    this.aiEditPopover?.mountToPanel((leaf.view as { contentEl?: HTMLElement }).contentEl ?? document.body, { pin: true });
+  }
+
+  undockAiEditFromSidebar(): void {
+    const leaves = this.app.workspace.getLeavesOfType(AI_EDIT_PANEL_VIEW_TYPE);
+    for (const leaf of leaves) {
+      leaf.detach();
+    }
+    this.aiEditPopover?.unmountFromPanel({ closeActive: true });
+  }
+
+  mountAiEditPanel(containerEl: HTMLElement): void {
+    if (!this.aiEditPopover) {
+      this.aiEditPopover = new AiEditPopoverController(this.app, this);
+    }
+    try {
+      this.aiEditPopover?.mountToPanel(containerEl);
+      this.aiEditDiagnostics.mounted += 1;
+      this.recordAiEditDiagnostic("panel-mount", containerEl, "", "panel mounted");
+    } catch (error) {
+      console.error("[Life OS] Failed to mount AI edit panel", error);
+      containerEl.empty();
+      containerEl.addClass("lifeos-ai-edit-panel-view");
+      const fallback = containerEl.createDiv({ cls: "lifeos-ai-edit-panel-empty is-error" });
+      fallback.createEl("strong", { text: "AI 修改侧边栏加载失败" });
+      fallback.createEl("span", { text: error instanceof Error ? error.message : "未知错误，请重新加载 Obsidian 后再试。" });
+      this.recordAiEditDiagnostic("panel-mount", containerEl, "", "panel mount failed");
+    }
+  }
+
+  unmountAiEditPanel(): void {
+    this.aiEditPopover?.unmountFromPanel({ closeActive: true });
+  }
+
+  private scheduleAiEditForEditorSelection(editor: Editor, file: TFile, anchor: AiEditAnchor): void {
+    const selected = editor.getSelection();
+    const from = cloneEditorPosition(editor.getCursor("from"));
+    const to = cloneEditorPosition(editor.getCursor("to"));
+    const key = `${file.path}:${from.line}:${from.ch}:${to.line}:${to.ch}:${selected}`;
+    const now = Date.now();
+    if (key === this.lastAiEditSelectionKey && now - this.lastAiEditSelectionAt < 1200) return;
+    this.lastAiEditSelectionKey = key;
+    this.lastAiEditSelectionAt = now;
+    if (this.aiEditSelectionTimer) window.clearTimeout(this.aiEditSelectionTimer);
+    this.aiEditSelectionTimer = window.setTimeout(() => {
+      void this.openAiEditForEditorSelection(editor, file, anchor);
+      this.aiEditSelectionTimer = null;
+    }, 110);
+  }
+
+  private async openAiEditForEditorSelection(editor: Editor, file: TFile | null, anchor: AiEditAnchor): Promise<void> {
+    if (!(file instanceof TFile)) {
+      new Notice("当前没有可修改的 Markdown 文件。");
+      return;
+    }
+    const selected = editor.getSelection();
+    if (!selected.trim()) {
+      new Notice("先选中一段文字，再让 AI 修改。");
+      return;
+    }
+    await this.openAiEditTarget({
+      kind: "selection",
+      file,
+      editor,
+      from: cloneEditorPosition(editor.getCursor("from")),
+      to: cloneEditorPosition(editor.getCursor("to")),
+      text: selected
+    }, anchor);
+  }
+
+  private async openAiEditForActiveCanvas(anchor: AiEditAnchor): Promise<void> {
+    const file = this.app.workspace.getActiveFile();
+    if (!(file instanceof TFile) || !this.isCanvasFile(file)) {
+      new Notice("请先打开一个白板 Canvas。");
+      return;
+    }
+    await this.openAiEditForFile(file, anchor);
+  }
+
+  private async openAiEditForFile(file: TFile, anchor: AiEditAnchor, nodeHint?: string): Promise<void> {
+    if (!this.isAiEditableFile(file)) {
+      new Notice("目前支持修改 Markdown 文档和 Obsidian Canvas 白板。");
+      return;
+    }
+    const content = await this.app.vault.read(file);
+    await this.openAiEditTarget(this.isCanvasFile(file)
+      ? { kind: "canvas", file, text: content, nodeHint }
+      : { kind: "markdown-file", file, text: content }, anchor);
+  }
+
+  private shouldIgnoreAiEditPopoverTarget(target: HTMLElement): boolean {
     return Boolean(target.closest([
       ".lifeos-ai-edit-popover",
-      ".lifeos-ai-edit-panel-view",
       ".modal-container",
       ".menu",
       ".suggestion-container",
       ".view-header",
       ".workspace-tab-header",
       ".status-bar",
+      "button",
       "input",
       "textarea",
       "select",
-      "button",
       "a"
     ].join(",")));
   }
 
+  private isMarkdownSelectionSurface(target: HTMLElement): boolean {
+    const ignoredLeaf = target.closest<HTMLElement>([
+      ".workspace-leaf-content[data-type='file-explorer']",
+      ".workspace-leaf-content[data-type='search']",
+      ".workspace-leaf-content[data-type='backlink']",
+      ".workspace-leaf-content[data-type='outgoing-link']",
+      ".workspace-leaf-content[data-type='tag']",
+      ".workspace-leaf-content[data-type='all-properties']",
+      ".workspace-leaf-content[data-type='outline']"
+    ].join(","));
+    if (ignoredLeaf) return false;
+    return Boolean(target.closest([
+      ".markdown-source-view",
+      ".markdown-reading-view",
+      ".markdown-preview-view",
+      ".markdown-rendered",
+      ".markdown-preview-section",
+      ".cm-editor",
+      ".cm-content",
+      ".cm-line",
+      ".workspace-leaf-content[data-type='markdown']",
+      ".pls-life-file-leaf .view-content",
+      ".lifeos-file-leaf .view-content"
+    ].join(",")));
+  }
+
+  private shouldOpenAiEditForCanvasClick(event: MouseEvent, target: HTMLElement): boolean {
+    if (this.aiEditPointerDown) {
+      const dx = Math.abs(event.clientX - this.aiEditPointerDown.x);
+      const dy = Math.abs(event.clientY - this.aiEditPointerDown.y);
+      if (dx > 8 || dy > 8) return false;
+    }
+    if (target.closest(".canvas-control-item, .canvas-menu, .canvas-node-content.is-editing, .canvas-card-menu")) {
+      return false;
+    }
+    if (target.closest(".canvas-node")) return true;
+    return event.detail >= 2 && Boolean(target.closest(".canvas-wrapper, .canvas, .canvas-viewport"));
+  }
+
   private canvasNodeHint(target: HTMLElement): string | undefined {
-    const text = target.closest(".canvas-node")?.textContent?.replace(/\s+/g, " ").trim();
+    const node = target.closest(".canvas-node");
+    const text = node?.textContent?.replace(/\s+/g, " ").trim();
     return text ? text.slice(0, 260) : undefined;
   }
 
@@ -2117,7 +2827,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   private defaultAiEditAnchor(): AiEditAnchor {
     return {
       x: Math.round(window.innerWidth / 2),
-      y: Math.round(Math.max(120, Math.min(window.innerHeight - 180, window.innerHeight * 0.42)))
+      y: Math.round(Math.min(window.innerHeight - 180, Math.max(120, window.innerHeight * 0.42)))
     };
   }
 
@@ -2247,6 +2957,12 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   async activateUserGuide(): Promise<void> {
     const leaf = this.getLifeOsLeaf();
     await leaf.setViewState({ type: USER_GUIDE_VIEW_TYPE, active: true });
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
+  }
+
+  async activateAiWorkspace(): Promise<void> {
+    const leaf = this.getLifeOsLeaf();
+    await leaf.setViewState({ type: AI_WORKSPACE_VIEW_TYPE, active: true });
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 

@@ -172,7 +172,7 @@ export class LlmWikiSourceService {
       sourcePath: file.path,
       capturedAt,
       privacyLevel,
-      aiProcessingAllowed: true,
+      aiProcessingAllowed: privacyLevel !== "sensitive",
       batchId
     });
   }

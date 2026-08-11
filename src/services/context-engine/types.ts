@@ -10,6 +10,8 @@ export interface ContextEngineBuildInput {
   projectScopeId?: string;
   fetchUrl?: (url: string) => Promise<string>;
   searchWeb?: (query: string) => Promise<string>;
+  /** AI is optional for query planning; local hybrid retrieval never depends on it. */
+  useAiPlanner?: boolean;
 }
 
 export interface ContextInventoryItem {
@@ -36,6 +38,17 @@ export interface ContextSource {
   title: string;
   type: "current-note" | "daily" | "task" | "project" | "memory" | "summary" | "knowledge" | "llm-wiki" | "graph" | "url";
   excerpt?: string;
+  /** Stable, answer-facing citation id assigned by ContextComposer. */
+  citationId?: string;
+  /** Stable index chunk id. Multiple chunks may come from the same file. */
+  chunkId?: string;
+  heading?: string;
+  lineStart?: number;
+  lineEnd?: number;
+  page?: number;
+  updatedAt?: number;
+  score?: number;
+  trust?: number;
 }
 
 export interface ContextSection {
@@ -44,12 +57,33 @@ export interface ContextSection {
   priority: number;
   source?: string;
   sourceInfo?: ContextSource;
+  kind?: "evidence" | "context" | "diagnostic";
 }
 
 export interface ContextEvidence {
   content: string;
   score: number;
   source: ContextSource;
+}
+
+export type ContextRetrievalRoute = "none" | "focused" | "broad" | "deep";
+
+export interface ContextRetrievalTrace {
+  route: ContextRetrievalRoute;
+  strategy: string;
+  queries: string[];
+  attempts: number;
+  sparseCandidates: number;
+  vectorCandidates: number;
+  fusedCandidates: number;
+  selectedCount: number;
+  candidateCount: number;
+  coverage: number;
+  durationMs: number;
+  indexDocuments: number;
+  indexChunks: number;
+  updatedDocuments: number;
+  reusedDocuments: number;
 }
 
 export interface ContextEngineResult {
@@ -59,6 +93,7 @@ export interface ContextEngineResult {
   confidence: number;
   warnings: string[];
   modeUsed: ContextEngineMode;
+  retrievalTrace?: ContextRetrievalTrace;
 }
 
 export interface AiCompleteRequest {

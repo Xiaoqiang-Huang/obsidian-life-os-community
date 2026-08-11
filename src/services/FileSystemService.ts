@@ -4,6 +4,7 @@ import { localizeLifeOsPathParts, normalizeDirectoryLanguage } from "../settings
 import { formatDate } from "../utils/dates";
 import { ensureFile, ensureFolder, joinPath, normalizePath } from "../utils/vault";
 import { LlmWikiPathService } from "./LlmWikiPathService";
+import { AiToolProtocolService } from "./AiToolProtocolService";
 
 export const LIFEOS_MEMORY_CATEGORIES = ["学业", "项目", "备考", "人际", "健康", "偏好", "其他"];
 
@@ -41,7 +42,9 @@ const LIFEOS_FOLDER_STRUCTURE = [
   ["Knowledge", "Attachments"],
   ["Reviews", "Daily"],
   ["Reviews", "Weekly"],
-  ["Reviews", "Monthly"]
+  ["Reviews", "Monthly"],
+  ["Reviews", "Drafts"],
+  ["Reviews", "Periods"]
 ];
 
 const LIFEOS_LLM_WIKI_FOLDER_STRUCTURE = [
@@ -68,6 +71,8 @@ const LIFEOS_LLM_WIKI_FOLDER_STRUCTURE = [
 ];
 
 export class FileSystemService {
+  lastAiProtocolError: Error | null = null;
+
   constructor(
     private app: App,
     private rootFolder: string,
@@ -226,6 +231,19 @@ export class FileSystemService {
     }
 
     await new LlmWikiPathService(this.app, this.root, this.directoryLanguage).ensureBaseStructure();
+
+    this.lastAiProtocolError = null;
+    try {
+      await new AiToolProtocolService(
+        this.app,
+        this.root,
+        this.directoryLanguage
+      ).ensureProtocol();
+    } catch (error) {
+      this.lastAiProtocolError = error instanceof Error
+        ? error
+        : new Error(String(error));
+    }
   }
 
 }

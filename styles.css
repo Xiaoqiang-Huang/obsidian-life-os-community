@@ -2053,6 +2053,56 @@ body.is-mobile .lifeos-theme-swatch-desc,
   }
 }
 
+.lifeos-daily-project-context-card {
+  min-width: 0;
+}
+
+.lifeos-daily-project-context-count {
+  margin-left: auto;
+  padding: 3px 7px;
+  border-radius: 5px;
+  color: var(--lifeos-primary);
+  background: var(--lifeos-primary-soft);
+  font-size: 11px;
+}
+
+.lifeos-daily-project-context-list {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.lifeos-daily-project-context-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  padding: 9px;
+  border: 1px solid var(--lifeos-border);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.lifeos-daily-project-context-row > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.lifeos-daily-project-context-row strong {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-daily-project-context-row span,
+.lifeos-daily-project-context-empty {
+  color: var(--lifeos-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .pls-interview-thinking-model {
   margin: 12px 0;
 }
@@ -16267,6 +16317,33 @@ body.theme-dark .lifeos-project-import-item,
 .theme-dark .lifeos-project-import-empty,
 body.theme-dark .lifeos-project-import-empty {
   background: rgba(15, 23, 42, 0.7);
+}
+
+/* Life OS project import submit contrast guard: disabled/busy buttons must stay readable */
+.modal.lifeos-project-import-modal-host .lifeos-project-import-submit,
+.modal.lifeos-project-import-modal-host .lifeos-project-import-submit.is-primary,
+.modal.lifeos-project-import-modal-host .lifeos-project-import-submit.lifeos-button-primary {
+  color: #ffffff !important;
+  border-color: transparent !important;
+  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%) !important;
+  opacity: 1 !important;
+}
+
+.modal.lifeos-project-import-modal-host .lifeos-project-import-submit:disabled,
+.modal.lifeos-project-import-modal-host .lifeos-project-import-submit.is-busy {
+  color: #f8fafc !important;
+  border-color: rgba(148, 163, 184, 0.44) !important;
+  background: linear-gradient(135deg, #475569 0%, #1f2937 100%) !important;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.20) !important;
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+.modal.lifeos-project-import-modal-host .lifeos-project-import-submit :is(.lifeos-v2-button-label, .lifeos-v2-button-icon, .lifeos-button-icon, span, svg),
+.modal.lifeos-project-import-modal-host .lifeos-project-import-submit:disabled :is(.lifeos-v2-button-label, .lifeos-v2-button-icon, .lifeos-button-icon, span, svg),
+.modal.lifeos-project-import-modal-host .lifeos-project-import-submit.is-busy :is(.lifeos-v2-button-label, .lifeos-v2-button-icon, .lifeos-button-icon, span, svg) {
+  color: inherit !important;
+  opacity: 1 !important;
 }
 
 .lifeos-daily-quick-row {
@@ -48728,7 +48805,7 @@ body.lifeos-theme-night-owl .modal:has(.lifeos-github-skill-modal) .lifeos-modal
   gap: 10px !important;
   padding: 0 !important;
   border: 0 !important;
-  border-radius: 0 !important;
+  border-radius: 6px !important;
   background: transparent !important;
   box-shadow: none !important;
 }
@@ -49139,483 +49216,6244 @@ body.lifeos-theme-night-owl .modal:has(.lifeos-github-skill-modal) .lifeos-modal
 }
 /* Life OS community mobile modal final lock end */
 
-/* Life OS AI edit popover */
+/* Life OS project whiteboard templates final guard start */
+.lifeos-project-doc-head-actions {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+.lifeos-project-doc-head-actions .lifeos-button {
+  flex: 0 1 auto !important;
+}
+
+.modal.lifeos-project-whiteboard-modal-host .modal-content,
+.modal:has(.lifeos-project-whiteboard-modal) .modal-content {
+  width: min(880px, calc(100vw - 32px)) !important;
+  max-width: min(880px, calc(100vw - 32px)) !important;
+}
+
+.modal.lifeos-modal-host .lifeos-modal-shell.lifeos-project-whiteboard-modal,
+.modal:has(.lifeos-project-whiteboard-modal) .lifeos-project-whiteboard-modal {
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr) auto !important;
+  max-height: min(760px, calc(100vh - 48px)) !important;
+  overflow: hidden !important;
+}
+
+.lifeos-project-whiteboard-modal .lifeos-modal-body {
+  display: grid !important;
+  gap: 14px !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+}
+
+.lifeos-project-whiteboard-style-grid {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 12px !important;
+  min-width: 0 !important;
+}
+
+button.lifeos-project-whiteboard-style-card {
+  display: grid !important;
+  grid-template-columns: 32px minmax(0, 1fr) !important;
+  column-gap: 10px !important;
+  row-gap: 0 !important;
+  align-items: flex-start !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  min-height: 88px !important;
+  padding: 13px 14px !important;
+  border: 0 !important;
+  border-radius: 16px !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--background-primary) 94%, transparent 6%), color-mix(in srgb, var(--background-secondary) 84%, transparent 16%)) !important;
+  color: var(--text-normal) !important;
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.08),
+    0 8px 22px rgba(15, 23, 42, 0.05) !important;
+  overflow: hidden !important;
+  text-align: left !important;
+  white-space: normal !important;
+  transition: box-shadow 140ms ease, background 140ms ease, transform 140ms ease !important;
+}
+
+button.lifeos-project-whiteboard-style-card:hover {
+  box-shadow:
+    0 0 0 1px rgba(59, 130, 246, 0.28),
+    0 12px 28px rgba(37, 99, 235, 0.10) !important;
+  transform: translateY(-1px) !important;
+}
+
+button.lifeos-project-whiteboard-style-card.is-active {
+  background:
+    linear-gradient(180deg, rgba(239, 246, 255, 0.92), color-mix(in srgb, var(--background-primary) 88%, #dbeafe 12%)) !important;
+  box-shadow:
+    0 0 0 1px rgba(59, 130, 246, 0.56),
+    0 14px 30px rgba(37, 99, 235, 0.12) !important;
+}
+
+.lifeos-project-whiteboard-style-icon {
+  display: inline-grid !important;
+  place-items: center !important;
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 10px !important;
+  background: rgba(59, 130, 246, 0.12) !important;
+  color: #2563eb !important;
+  flex: 0 0 32px !important;
+}
+
+.lifeos-project-whiteboard-style-copy {
+  display: grid !important;
+  gap: 3px !important;
+  align-self: center !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+
+.lifeos-project-whiteboard-style-copy strong,
+.lifeos-project-whiteboard-style-copy span {
+  display: block !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+  white-space: normal !important;
+}
+
+.lifeos-project-whiteboard-style-copy strong {
+  color: var(--text-normal) !important;
+  font-size: 13px !important;
+  line-height: 1.28 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-project-whiteboard-style-copy span {
+  color: var(--text-muted) !important;
+  font-size: 12px !important;
+  line-height: 1.36 !important;
+  text-wrap: pretty !important;
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 2 !important;
+}
+
+.lifeos-project-whiteboard-options {
+  display: grid !important;
+  gap: 8px !important;
+  padding: 12px !important;
+  border: 1px solid rgba(100, 116, 139, 0.16) !important;
+  border-radius: 14px !important;
+  background: color-mix(in srgb, var(--background-secondary) 72%, transparent 28%) !important;
+}
+
+.lifeos-project-whiteboard-options h3 {
+  margin: 0 0 2px !important;
+  color: var(--text-normal) !important;
+  font-size: 13px !important;
+  line-height: 1.35 !important;
+}
+
+.lifeos-project-whiteboard-option {
+  display: grid !important;
+  grid-template-columns: 18px minmax(0, 1fr) !important;
+  gap: 10px !important;
+  align-items: flex-start !important;
+  padding: 8px 0 !important;
+  color: var(--text-normal) !important;
+}
+
+.lifeos-project-whiteboard-option + .lifeos-project-whiteboard-option {
+  border-top: 1px solid rgba(100, 116, 139, 0.12) !important;
+}
+
+.lifeos-project-whiteboard-option input {
+  margin-top: 2px !important;
+}
+
+.lifeos-project-whiteboard-option div {
+  display: grid !important;
+  gap: 3px !important;
+  min-width: 0 !important;
+}
+
+.lifeos-project-whiteboard-option strong {
+  color: var(--text-normal) !important;
+  font-size: 13px !important;
+  line-height: 1.35 !important;
+}
+
+.lifeos-project-whiteboard-option span {
+  color: var(--text-muted) !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+}
+
+.lifeos-project-whiteboard-note {
+  display: flex !important;
+  gap: 8px !important;
+  align-items: center !important;
+  padding: 10px 12px !important;
+  border: 1px solid rgba(59, 130, 246, 0.18) !important;
+  border-radius: 14px !important;
+  background: rgba(59, 130, 246, 0.08) !important;
+  color: var(--text-muted) !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+}
+
+.theme-dark .modal.lifeos-modal-host .lifeos-project-whiteboard-modal,
+body.theme-dark .modal.lifeos-modal-host .lifeos-project-whiteboard-modal,
+body.lifeos-theme-codex-dark .modal.lifeos-modal-host .lifeos-project-whiteboard-modal,
+body.lifeos-theme-night-owl .modal.lifeos-modal-host .lifeos-project-whiteboard-modal {
+  background:
+    linear-gradient(180deg, #0f172a 0%, #0b1220 100%) !important;
+}
+
+.theme-dark .modal.lifeos-modal-host :is(button.lifeos-project-whiteboard-style-card, .lifeos-project-whiteboard-options),
+body.theme-dark .modal.lifeos-modal-host :is(button.lifeos-project-whiteboard-style-card, .lifeos-project-whiteboard-options),
+body.lifeos-theme-codex-dark .modal.lifeos-modal-host :is(button.lifeos-project-whiteboard-style-card, .lifeos-project-whiteboard-options),
+body.lifeos-theme-night-owl .modal.lifeos-modal-host :is(button.lifeos-project-whiteboard-style-card, .lifeos-project-whiteboard-options) {
+  background: linear-gradient(180deg, #111827 0%, #0f172a 100%) !important;
+  color: #e5e7eb !important;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.09) !important;
+}
+
+.theme-dark .modal.lifeos-modal-host button.lifeos-project-whiteboard-style-card.is-active,
+body.theme-dark .modal.lifeos-modal-host button.lifeos-project-whiteboard-style-card.is-active,
+body.lifeos-theme-codex-dark .modal.lifeos-modal-host button.lifeos-project-whiteboard-style-card.is-active,
+body.lifeos-theme-night-owl .modal.lifeos-modal-host button.lifeos-project-whiteboard-style-card.is-active {
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.96) 0%, rgba(15, 23, 42, 0.96) 100%) !important;
+  box-shadow:
+    0 0 0 1px rgba(96, 165, 250, 0.56),
+    0 12px 34px rgba(37, 99, 235, 0.20) !important;
+}
+
+.theme-dark .modal.lifeos-modal-host :is(.lifeos-project-whiteboard-style-copy strong, .lifeos-project-whiteboard-options h3, .lifeos-project-whiteboard-option strong),
+body.theme-dark .modal.lifeos-modal-host :is(.lifeos-project-whiteboard-style-copy strong, .lifeos-project-whiteboard-options h3, .lifeos-project-whiteboard-option strong),
+body.lifeos-theme-codex-dark .modal.lifeos-modal-host :is(.lifeos-project-whiteboard-style-copy strong, .lifeos-project-whiteboard-options h3, .lifeos-project-whiteboard-option strong),
+body.lifeos-theme-night-owl .modal.lifeos-modal-host :is(.lifeos-project-whiteboard-style-copy strong, .lifeos-project-whiteboard-options h3, .lifeos-project-whiteboard-option strong) {
+  color: #f8fafc !important;
+}
+
+.theme-dark .modal.lifeos-modal-host :is(.lifeos-project-whiteboard-style-copy span, .lifeos-project-whiteboard-option span, .lifeos-project-whiteboard-note),
+body.theme-dark .modal.lifeos-modal-host :is(.lifeos-project-whiteboard-style-copy span, .lifeos-project-whiteboard-option span, .lifeos-project-whiteboard-note),
+body.lifeos-theme-codex-dark .modal.lifeos-modal-host :is(.lifeos-project-whiteboard-style-copy span, .lifeos-project-whiteboard-option span, .lifeos-project-whiteboard-note),
+body.lifeos-theme-night-owl .modal.lifeos-modal-host :is(.lifeos-project-whiteboard-style-copy span, .lifeos-project-whiteboard-option span, .lifeos-project-whiteboard-note) {
+  color: #cbd5e1 !important;
+}
+
+@media (max-width: 720px), (pointer: coarse) and (max-width: 860px) {
+  body.is-mobile .modal.lifeos-project-whiteboard-modal-host,
+  body.is-mobile .modal:has(.lifeos-project-whiteboard-modal) {
+    box-sizing: border-box !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: var(--lifeos-visual-viewport-height, 100svh) !important;
+    margin: 0 !important;
+    padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px)) !important;
+    overflow: hidden !important;
+  }
+
+  body.is-mobile .modal:has(.lifeos-project-whiteboard-modal) .modal-content,
+  body.is-mobile .modal.lifeos-project-whiteboard-modal-host .modal-content {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+
+  body.is-mobile .lifeos-project-whiteboard-modal {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+  }
+
+  body.is-mobile .lifeos-project-whiteboard-style-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  body.is-mobile button.lifeos-project-whiteboard-style-card {
+    min-height: 82px !important;
+  }
+}
+
+@media (max-width: 860px) {
+  .lifeos-project-whiteboard-style-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 560px) {
+  .lifeos-project-whiteboard-style-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+/* Life OS project whiteboard templates final guard end */
+
+/* Life OS chat history compact drawer final guard start */
+.lifeos-chat-view-host .lifeos-chat-history-drawer .lifeos-history-list {
+  align-content: start !important;
+  align-items: start !important;
+  grid-auto-rows: max-content !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-history-drawer .lifeos-history-entry {
+  align-items: start !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-history-drawer .lifeos-history-item {
+  min-height: 58px !important;
+  height: auto !important;
+  align-self: start !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-history-drawer .lifeos-history-delete {
+  width: 54px !important;
+  min-width: 54px !important;
+  min-height: 36px !important;
+  height: 36px !important;
+  padding: 0 8px !important;
+  align-self: start !important;
+  justify-self: end !important;
+}
+/* Life OS chat history compact drawer final guard end */
+
+/* Life OS inline AI edit popover final guard start */
 .lifeos-ai-edit-popover {
-  position: fixed;
-  z-index: 10020;
-  left: 0;
-  top: 0;
-  width: min(520px, calc(100vw - 28px));
-  max-height: calc(100vh - 28px);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, #60a5fa 22%);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--background-primary) 96%, #eff6ff 4%);
-  color: var(--text-normal);
-  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22), 0 4px 16px rgba(15, 23, 42, 0.12);
-  opacity: 0;
-  transform: translateY(4px) scale(0.99);
-  transition: opacity 120ms ease, transform 120ms ease;
+  position: fixed !important;
+  z-index: 10030 !important;
+  box-sizing: border-box !important;
+  width: clamp(312px, 31vw, 430px) !important;
+  max-width: calc(100vw - 32px) !important;
+  max-height: min(560px, calc(var(--lifeos-visual-viewport-height, 100svh) - 32px)) !important;
+  min-height: 0 !important;
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr) auto !important;
+  gap: 10px !important;
+  padding: 12px !important;
+  border-radius: 18px !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 252, 0.94) 100%) !important;
+  color: var(--text-normal) !important;
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.10),
+    0 20px 48px rgba(15, 23, 42, 0.18) !important;
+  backdrop-filter: blur(18px) saturate(1.12) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(1.12) !important;
+  opacity: 0 !important;
+  transform: translateY(4px) scale(0.985) !important;
+  overflow: hidden !important;
+  overscroll-behavior: contain !important;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    box-shadow 160ms ease !important;
 }
 
-.lifeos-ai-edit-popover.is-positioned,
-.lifeos-ai-edit-popover.is-panel {
-  opacity: 1;
-  transform: none;
+.lifeos-ai-edit-popover.is-positioned {
+  opacity: 1 !important;
+  transform: translateY(0) scale(1) !important;
 }
 
-.lifeos-ai-edit-popover.is-panel {
-  position: static;
-  width: 100%;
-  max-width: none;
-  max-height: none;
-  min-height: 100%;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-}
-
-.lifeos-ai-edit-panel-view {
-  height: 100%;
-  padding: 0 !important;
-  overflow: auto;
-}
-
-.lifeos-ai-edit-panel-empty {
-  padding: 28px 18px;
-  color: var(--text-muted);
-  text-align: center;
-  line-height: 1.6;
+.lifeos-ai-edit-popover.is-sidebar {
+  width: clamp(360px, 30vw, 560px) !important;
+  max-width: calc(100vw - 32px) !important;
+  max-height: calc(var(--lifeos-visual-viewport-height, 100svh) - 36px) !important;
 }
 
 .lifeos-ai-edit-popover-header {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  gap: 10px;
-  align-items: center;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--background-modifier-border);
-  background: color-mix(in srgb, var(--background-secondary) 82%, transparent 18%);
+  display: grid !important;
+  grid-template-columns: 34px minmax(0, 1fr) 32px 32px !important;
+  gap: 10px !important;
+  align-items: center !important;
+  min-width: 0 !important;
 }
 
 .lifeos-ai-edit-popover-icon {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  color: #2563eb;
-  background: color-mix(in srgb, #dbeafe 78%, var(--background-primary) 22%);
-}
-
-.lifeos-ai-edit-popover-icon svg {
-  width: 18px;
-  height: 18px;
+  width: 34px !important;
+  height: 34px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 12px !important;
+  color: #2563eb !important;
+  background: rgba(59, 130, 246, 0.12) !important;
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.16) !important;
 }
 
 .lifeos-ai-edit-popover-heading {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
+  display: grid !important;
+  gap: 2px !important;
+  min-width: 0 !important;
 }
 
 .lifeos-ai-edit-popover-heading strong {
-  font-size: 14px;
-  line-height: 1.25;
+  color: var(--text-normal) !important;
+  font-size: 14px !important;
+  line-height: 1.28 !important;
 }
 
-.lifeos-ai-edit-popover-heading span {
-  overflow: hidden;
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.lifeos-ai-edit-popover-heading span,
+.lifeos-ai-edit-context {
+  color: var(--text-muted) !important;
+  font-size: 12px !important;
+  line-height: 1.4 !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
 }
 
 .lifeos-ai-edit-popover-close {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  border-radius: 9px;
-  color: var(--text-muted);
-  background: transparent;
-  cursor: pointer;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border: 0 !important;
+  border-radius: 11px !important;
+  color: var(--text-muted) !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
-.lifeos-ai-edit-popover-close:hover {
-  color: var(--text-normal);
-  background: var(--background-modifier-hover);
+.lifeos-ai-edit-popover-close:hover,
+.lifeos-ai-edit-popover-close:focus-visible {
+  color: var(--text-normal) !important;
+  background: color-mix(in srgb, var(--background-modifier-hover) 80%, transparent 20%) !important;
 }
 
-.lifeos-ai-edit-tab-bar {
-  display: flex;
-  gap: 4px;
-  padding: 6px 14px 0;
-  border-bottom: 1px solid var(--background-modifier-border);
-  background: color-mix(in srgb, var(--background-secondary) 72%, transparent 28%);
-}
-
-.lifeos-ai-edit-tab {
-  min-height: 34px;
-  padding: 6px 16px;
-  border: 0;
-  border-radius: 9px 9px 0 0;
-  color: var(--text-muted);
-  background: transparent;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.lifeos-ai-edit-tab.is-active {
-  color: var(--text-normal);
-  background: var(--background-primary);
-  font-weight: 650;
-  box-shadow: inset 0 2px 0 #3b82f6;
+.lifeos-ai-edit-popover-dock {
+  color: #2563eb !important;
 }
 
 .lifeos-ai-edit-popover-body {
-  min-height: 0;
-  display: grid;
-  gap: 10px;
-  padding: 12px 14px;
-  overflow: auto;
+  display: grid !important;
+  gap: 9px !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  overflow: auto !important;
+  overscroll-behavior: contain !important;
+  scrollbar-gutter: stable !important;
+  padding: 2px 4px 2px 4px !important;
 }
 
 .lifeos-ai-edit-context {
-  padding: 9px 11px;
-  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, #93c5fd 22%);
-  border-radius: 10px;
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--background-secondary) 84%, #eff6ff 16%);
-  font-size: 12px;
-  line-height: 1.5;
+  padding: 8px 10px !important;
+  border-radius: 12px !important;
+  background: color-mix(in srgb, var(--background-secondary) 72%, transparent 28%) !important;
+  box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.12) !important;
 }
 
 .lifeos-ai-edit-skill-panel {
+  min-width: 0 !important;
+  border-radius: 14px !important;
+  background: color-mix(in srgb, var(--background-secondary) 68%, transparent 32%) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(100, 116, 139, 0.12),
+    0 1px 0 rgba(255, 255, 255, 0.36) !important;
+  overflow: hidden !important;
+}
+
+.lifeos-ai-edit-skill-panel > summary {
+  list-style: none !important;
+}
+
+.lifeos-ai-edit-skill-panel > summary::-webkit-details-marker {
+  display: none !important;
+}
+
+.lifeos-ai-edit-skill-summary {
+  min-height: 40px !important;
+  padding: 7px 9px !important;
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr) !important;
+  gap: 8px !important;
+  align-items: center !important;
+  cursor: pointer !important;
+  outline: none !important;
+}
+
+.lifeos-ai-edit-skill-summary:focus-visible {
+  box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.35) !important;
+}
+
+.lifeos-ai-edit-skill-label {
+  color: var(--text-muted) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  line-height: 1.2 !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-ai-edit-skill-current {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 5px !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+.lifeos-ai-edit-skill-current-chip,
+.lifeos-ai-edit-skill-more {
+  min-width: 0 !important;
+  max-width: 132px !important;
+  padding: 4px 8px !important;
+  border-radius: 999px !important;
+  color: #1d4ed8 !important;
+  background: rgba(59, 130, 246, 0.12) !important;
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.16) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  line-height: 1.2 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-ai-edit-skill-more {
+  color: var(--text-muted) !important;
+  background: color-mix(in srgb, var(--background-primary) 76%, transparent 24%) !important;
+  box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.12) !important;
+}
+
+.lifeos-ai-edit-skill-groups {
+  display: grid !important;
+  gap: 9px !important;
+  max-height: min(220px, 32svh) !important;
+  overflow: auto !important;
+  overscroll-behavior: contain !important;
+  padding: 0 9px 10px 9px !important;
+}
+
+.lifeos-ai-edit-skill-hint {
+  color: var(--text-muted) !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+  padding-top: 2px !important;
+}
+
+.lifeos-ai-edit-skill-category {
+  display: grid !important;
+  gap: 6px !important;
+  min-width: 0 !important;
+}
+
+.lifeos-ai-edit-skill-category-head {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+  min-width: 0 !important;
+}
+
+.lifeos-ai-edit-skill-category-title {
+  color: var(--text-normal) !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  line-height: 1.2 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-ai-edit-skill-category-count {
+  color: var(--text-faint) !important;
+  font-size: 11px !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+.lifeos-ai-edit-skill-list {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 6px !important;
+  min-width: 0 !important;
+}
+
+.lifeos-ai-edit-skill-chip {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  min-height: 40px !important;
+  padding: 8px 10px !important;
+  border: 0 !important;
+  border-radius: 12px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: var(--text-normal) !important;
+  background: color-mix(in srgb, var(--background-primary) 82%, transparent 18%) !important;
+  box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.13) !important;
+  font-size: 12px !important;
+  line-height: 1.2 !important;
+  text-align: center !important;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease,
+    color 120ms ease !important;
+}
+
+.lifeos-ai-edit-skill-chip span {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-ai-edit-skill-chip:hover,
+.lifeos-ai-edit-skill-chip:focus-visible {
+  box-shadow:
+    inset 0 0 0 1px rgba(59, 130, 246, 0.28),
+    0 8px 18px rgba(15, 23, 42, 0.08) !important;
+}
+
+.lifeos-ai-edit-skill-chip:active {
+  transform: scale(0.96) !important;
+}
+
+.lifeos-ai-edit-skill-chip.is-active {
+  color: #fff !important;
+  background: #2563eb !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+    0 8px 18px rgba(37, 99, 235, 0.20) !important;
+}
+
+.lifeos-ai-edit-answer-toolbar {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  gap: 10px !important;
+  align-items: center !important;
+  min-width: 0 !important;
+  padding: 9px !important;
+  border-radius: 14px !important;
+  background: color-mix(in srgb, var(--background-secondary) 68%, transparent 32%) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(100, 116, 139, 0.12),
+    0 1px 0 rgba(255, 255, 255, 0.34) !important;
+}
+
+.lifeos-ai-edit-answer-copy {
+  display: grid !important;
+  gap: 2px !important;
+  min-width: 0 !important;
+}
+
+.lifeos-ai-edit-answer-copy strong {
+  color: var(--text-normal) !important;
+  font-size: 12px !important;
+  line-height: 1.2 !important;
+  text-wrap: balance !important;
+}
+
+.lifeos-ai-edit-answer-copy span {
+  color: var(--text-muted) !important;
+  font-size: 11px !important;
+  line-height: 1.35 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-ai-edit-answer-modes {
+  display: inline-grid !important;
+  grid-template-columns: repeat(3, minmax(44px, auto)) !important;
+  gap: 4px !important;
+  min-width: 0 !important;
+  padding: 3px !important;
+  border-radius: 13px !important;
+  background: color-mix(in srgb, var(--background-primary) 82%, transparent 18%) !important;
+  box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.12) !important;
+}
+
+.lifeos-ai-edit-answer-mode {
+  min-width: 44px !important;
+  min-height: 40px !important;
+  padding: 7px 9px !important;
+  border: 0 !important;
+  border-radius: 10px !important;
+  color: var(--text-muted) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  line-height: 1.2 !important;
+  white-space: nowrap !important;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    transform 120ms ease,
+    box-shadow 120ms ease !important;
+}
+
+.lifeos-ai-edit-answer-mode:hover,
+.lifeos-ai-edit-answer-mode:focus-visible {
+  color: var(--text-normal) !important;
+  background: color-mix(in srgb, var(--background-modifier-hover) 72%, transparent 28%) !important;
+}
+
+.lifeos-ai-edit-answer-mode:active {
+  transform: scale(0.96) !important;
+}
+
+.lifeos-ai-edit-answer-mode.is-active {
+  color: #fff !important;
+  background: #2563eb !important;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.22) !important;
+}
+
+.lifeos-ai-edit-command {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  min-height: 78px !important;
+  max-height: min(150px, 30svh) !important;
+  resize: vertical !important;
+  padding: 11px 12px !important;
+  border: 1px solid rgba(100, 116, 139, 0.18) !important;
+  border-radius: 14px !important;
+  color: var(--text-normal) !important;
+  background: color-mix(in srgb, var(--background-primary) 86%, transparent 14%) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.26),
+    0 1px 0 rgba(255, 255, 255, 0.50) !important;
+  font-size: 13px !important;
+  line-height: 1.45 !important;
+  outline: none !important;
+}
+
+.lifeos-ai-edit-command:focus {
+  border-color: rgba(37, 99, 235, 0.86) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(37, 99, 235, 0.62),
+    0 0 0 2px rgba(59, 130, 246, 0.16) !important;
+}
+
+.lifeos-ai-edit-preview {
+  min-height: 54px !important;
+  max-height: min(190px, 34svh) !important;
+  overflow: auto !important;
+  overscroll-behavior: contain !important;
+  padding: 10px 12px !important;
+  border-radius: 14px !important;
+  color: var(--text-normal) !important;
+  background: color-mix(in srgb, var(--background-secondary) 78%, transparent 22%) !important;
+  box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.14) !important;
+  font-size: 12px !important;
+  line-height: 1.48 !important;
+}
+
+.lifeos-ai-edit-popover.is-sidebar .lifeos-ai-edit-preview {
+  max-height: min(52svh, 520px) !important;
+}
+
+.lifeos-ai-edit-preview.is-answer {
+  font-size: 13px !important;
+  line-height: 1.55 !important;
+}
+
+.lifeos-ai-edit-preview.is-streaming {
+  box-shadow:
+    inset 0 0 0 1px rgba(59, 130, 246, 0.22),
+    0 0 0 3px rgba(59, 130, 246, 0.08) !important;
+}
+
+.lifeos-ai-edit-stream-status {
+  margin-top: 8px !important;
+  padding-top: 6px !important;
+  border-top: 1px solid rgba(148, 163, 184, 0.18) !important;
+  color: var(--text-muted) !important;
+  font-size: 11px !important;
+  line-height: 1.35 !important;
+}
+
+.lifeos-ai-edit-preview.is-empty {
+  color: var(--text-muted) !important;
+}
+
+.lifeos-ai-edit-preview.is-error {
+  color: #b91c1c !important;
+  background: rgba(239, 68, 68, 0.08) !important;
+  box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.20) !important;
+}
+
+.lifeos-ai-edit-preview pre {
+  margin: 0 !important;
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+  font-family: var(--font-text, inherit) !important;
+  color: inherit !important;
+}
+
+.lifeos-ai-edit-preview strong {
+  display: block !important;
+  margin-bottom: 6px !important;
+  color: var(--text-normal) !important;
+  font-size: 12px !important;
+}
+
+.lifeos-ai-edit-preview ul {
+  margin: 6px 0 0 0 !important;
+  padding-left: 18px !important;
+}
+
+.lifeos-ai-edit-preview :is(p, ul, ol, blockquote, table) {
+  margin-top: 0 !important;
+  margin-bottom: 8px !important;
+}
+
+.lifeos-ai-edit-preview :is(h1, h2, h3, h4) {
+  margin: 4px 0 8px !important;
+  color: var(--text-normal) !important;
+  font-weight: 800 !important;
+  line-height: 1.25 !important;
+  text-wrap: balance !important;
+}
+
+.lifeos-ai-edit-preview :is(p:last-child, ul:last-child, ol:last-child, blockquote:last-child, table:last-child) {
+  margin-bottom: 0 !important;
+}
+
+.lifeos-ai-edit-preview :is(li) {
+  margin-bottom: 4px !important;
+  text-wrap: pretty !important;
+}
+
+.lifeos-ai-edit-actions {
+  display: flex !important;
+  justify-content: flex-end !important;
+  align-items: center !important;
+  gap: 8px !important;
+  min-width: 0 !important;
+  padding-top: 2px !important;
+  background: inherit !important;
+}
+
+.lifeos-ai-edit-action {
+  min-width: 82px !important;
+  min-height: 36px !important;
+  height: auto !important;
+  padding: 8px 12px !important;
+  border: 0 !important;
+  border-radius: 12px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: var(--text-normal) !important;
+  background: color-mix(in srgb, var(--background-secondary) 78%, transparent 22%) !important;
+  box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.16) !important;
+  font-size: 13px !important;
+  line-height: 1.2 !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  text-align: center !important;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease !important;
+}
+
+.lifeos-ai-edit-action:hover,
+.lifeos-ai-edit-action:focus-visible {
+  background: color-mix(in srgb, var(--background-secondary) 92%, transparent 8%) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(100, 116, 139, 0.24),
+    0 8px 20px rgba(15, 23, 42, 0.10) !important;
+}
+
+.lifeos-ai-edit-action:active {
+  transform: translateY(1px) !important;
+}
+
+.lifeos-ai-edit-action-primary {
+  color: #fff !important;
+  background: #0f172a !important;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18) !important;
+}
+
+.lifeos-ai-edit-action-primary:hover,
+.lifeos-ai-edit-action-primary:focus-visible {
+  background: #111827 !important;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.24) !important;
+}
+
+.lifeos-ai-edit-action:disabled {
+  cursor: not-allowed !important;
+  opacity: 0.54 !important;
+  transform: none !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover,
+body.theme-dark .lifeos-ai-edit-popover,
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover,
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover {
+  background:
+    linear-gradient(180deg, rgba(17, 24, 39, 0.96) 0%, rgba(10, 15, 25, 0.96) 100%) !important;
+  color: #e5e7eb !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.10),
+    0 22px 54px rgba(0, 0, 0, 0.46) !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover-icon,
+body.theme-dark .lifeos-ai-edit-popover-icon,
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover-icon,
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover-icon {
+  color: #93c5fd !important;
+  background: rgba(59, 130, 246, 0.15) !important;
+  box-shadow: inset 0 0 0 1px rgba(147, 197, 253, 0.20) !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover-dock,
+body.theme-dark .lifeos-ai-edit-popover-dock,
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover-dock,
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover-dock {
+  color: #93c5fd !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover :is(.lifeos-ai-edit-popover-heading strong, .lifeos-ai-edit-preview strong),
+body.theme-dark .lifeos-ai-edit-popover :is(.lifeos-ai-edit-popover-heading strong, .lifeos-ai-edit-preview strong),
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover :is(.lifeos-ai-edit-popover-heading strong, .lifeos-ai-edit-preview strong),
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover :is(.lifeos-ai-edit-popover-heading strong, .lifeos-ai-edit-preview strong) {
+  color: #f8fafc !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover :is(.lifeos-ai-edit-popover-heading span, .lifeos-ai-edit-context, .lifeos-ai-edit-preview.is-empty),
+body.theme-dark .lifeos-ai-edit-popover :is(.lifeos-ai-edit-popover-heading span, .lifeos-ai-edit-context, .lifeos-ai-edit-preview.is-empty),
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover :is(.lifeos-ai-edit-popover-heading span, .lifeos-ai-edit-context, .lifeos-ai-edit-preview.is-empty),
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover :is(.lifeos-ai-edit-popover-heading span, .lifeos-ai-edit-context, .lifeos-ai-edit-preview.is-empty) {
+  color: #cbd5e1 !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover :is(.lifeos-ai-edit-context, .lifeos-ai-edit-preview),
+body.theme-dark .lifeos-ai-edit-popover :is(.lifeos-ai-edit-context, .lifeos-ai-edit-preview),
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover :is(.lifeos-ai-edit-context, .lifeos-ai-edit-preview),
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover :is(.lifeos-ai-edit-context, .lifeos-ai-edit-preview) {
+  background: rgba(15, 23, 42, 0.72) !important;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.14) !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-skill-panel,
+body.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-skill-panel,
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover .lifeos-ai-edit-skill-panel,
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover .lifeos-ai-edit-skill-panel {
+  background: rgba(15, 23, 42, 0.64) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(148, 163, 184, 0.14),
+    0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-answer-toolbar,
+body.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-answer-toolbar,
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover .lifeos-ai-edit-answer-toolbar,
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover .lifeos-ai-edit-answer-toolbar {
+  background: rgba(15, 23, 42, 0.64) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(148, 163, 184, 0.14),
+    0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover :is(.lifeos-ai-edit-skill-label, .lifeos-ai-edit-skill-hint),
+body.theme-dark .lifeos-ai-edit-popover :is(.lifeos-ai-edit-skill-label, .lifeos-ai-edit-skill-hint),
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover :is(.lifeos-ai-edit-skill-label, .lifeos-ai-edit-skill-hint),
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover :is(.lifeos-ai-edit-skill-label, .lifeos-ai-edit-skill-hint) {
+  color: #cbd5e1 !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-skill-category-title,
+body.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-skill-category-title,
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover .lifeos-ai-edit-skill-category-title,
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover .lifeos-ai-edit-skill-category-title {
+  color: #f8fafc !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-answer-copy strong,
+body.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-answer-copy strong,
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover .lifeos-ai-edit-answer-copy strong,
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover .lifeos-ai-edit-answer-copy strong {
+  color: #f8fafc !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-answer-copy span,
+body.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-answer-copy span,
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover .lifeos-ai-edit-answer-copy span,
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover .lifeos-ai-edit-answer-copy span {
+  color: #cbd5e1 !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-answer-modes,
+body.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-answer-modes,
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover .lifeos-ai-edit-answer-modes,
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover .lifeos-ai-edit-answer-modes {
+  background: rgba(2, 6, 23, 0.50) !important;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.14) !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-answer-mode,
+body.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-answer-mode,
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover .lifeos-ai-edit-answer-mode,
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover .lifeos-ai-edit-answer-mode {
+  color: #cbd5e1 !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-answer-mode.is-active,
+body.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-answer-mode.is-active,
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover .lifeos-ai-edit-answer-mode.is-active,
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover .lifeos-ai-edit-answer-mode.is-active {
+  color: #fff !important;
+  background: #2563eb !important;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.28) !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-skill-chip,
+body.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-skill-chip,
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover .lifeos-ai-edit-skill-chip,
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover .lifeos-ai-edit-skill-chip {
+  color: #e5e7eb !important;
+  background: rgba(30, 41, 59, 0.74) !important;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.16) !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover :is(.lifeos-ai-edit-skill-current-chip, .lifeos-ai-edit-skill-chip.is-active),
+body.theme-dark .lifeos-ai-edit-popover :is(.lifeos-ai-edit-skill-current-chip, .lifeos-ai-edit-skill-chip.is-active),
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover :is(.lifeos-ai-edit-skill-current-chip, .lifeos-ai-edit-skill-chip.is-active),
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover :is(.lifeos-ai-edit-skill-current-chip, .lifeos-ai-edit-skill-chip.is-active) {
+  color: #ffffff !important;
+  background: #2563eb !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 8px 18px rgba(37, 99, 235, 0.26) !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-skill-more,
+body.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-skill-more,
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover .lifeos-ai-edit-skill-more,
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover .lifeos-ai-edit-skill-more {
+  color: #cbd5e1 !important;
+  background: rgba(15, 23, 42, 0.68) !important;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.14) !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-command,
+body.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-command,
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover .lifeos-ai-edit-command,
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover .lifeos-ai-edit-command {
+  color: #f8fafc !important;
+  background: rgba(2, 6, 23, 0.64) !important;
+  border-color: rgba(148, 163, 184, 0.18) !important;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.36) !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-command:focus,
+body.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-command:focus,
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover .lifeos-ai-edit-command:focus,
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover .lifeos-ai-edit-command:focus {
+  border-color: rgba(96, 165, 250, 0.86) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(96, 165, 250, 0.52),
+    0 0 0 2px rgba(59, 130, 246, 0.22) !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-action,
+body.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-action,
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover .lifeos-ai-edit-action,
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover .lifeos-ai-edit-action {
+  color: #e5e7eb !important;
+  background: rgba(30, 41, 59, 0.82) !important;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.16) !important;
+}
+
+.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-action-primary,
+body.theme-dark .lifeos-ai-edit-popover .lifeos-ai-edit-action-primary,
+body.lifeos-theme-codex-dark .lifeos-ai-edit-popover .lifeos-ai-edit-action-primary,
+body.lifeos-theme-night-owl .lifeos-ai-edit-popover .lifeos-ai-edit-action-primary {
+  color: #fff !important;
+  background: #2563eb !important;
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.28) !important;
+}
+
+@media (max-width: 560px), (pointer: coarse) and (max-width: 860px) {
+  .lifeos-ai-edit-popover {
+    width: calc(100vw - 24px) !important;
+    max-height: min(540px, calc(var(--lifeos-visual-viewport-height, 100svh) - 32px)) !important;
+    gap: 8px !important;
+    padding: 10px !important;
+  }
+
+  .lifeos-ai-edit-actions {
+    justify-content: stretch !important;
+    flex-wrap: wrap !important;
+  }
+
+  .lifeos-ai-edit-action {
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+  }
+
+  .lifeos-ai-edit-answer-toolbar {
+    grid-template-columns: 1fr !important;
+  }
+
+  .lifeos-ai-edit-answer-modes {
+    width: 100% !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+  }
+
+  .lifeos-ai-edit-command {
+    min-height: 72px !important;
+    max-height: 118px !important;
+  }
+
+  .lifeos-ai-edit-preview {
+    max-height: 160px !important;
+  }
+}
+
+@media (max-height: 420px) {
+  .lifeos-ai-edit-popover {
+    max-height: calc(var(--lifeos-visual-viewport-height, 100svh) - 32px) !important;
+    gap: 7px !important;
+    padding: 10px !important;
+  }
+
+  .lifeos-ai-edit-popover-icon {
+    width: 30px !important;
+    height: 30px !important;
+  }
+
+  .lifeos-ai-edit-popover-header {
+    grid-template-columns: 30px minmax(0, 1fr) 30px 30px !important;
+  }
+
+  .lifeos-ai-edit-command {
+    min-height: 64px !important;
+    max-height: 96px !important;
+  }
+
+  .lifeos-ai-edit-preview {
+    min-height: 44px !important;
+    max-height: 112px !important;
+  }
+}
+/* Life OS inline AI edit popover final guard end */
+
+/* Life OS inline AI selection persistence */
+.lifeos-ai-edit-selection-highlight {
+  position: fixed;
+  z-index: 9995;
+  pointer-events: none;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--interactive-accent, #7c3aed) 28%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent, #7c3aed) 36%, transparent);
+  mix-blend-mode: multiply;
+}
+.theme-dark .lifeos-ai-edit-selection-highlight,
+body.theme-dark .lifeos-ai-edit-selection-highlight {
+  background: color-mix(in srgb, var(--interactive-accent, #8b5cf6) 38%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent, #8b5cf6) 56%, transparent);
+  mix-blend-mode: screen;
+}
+
+/* Life OS project document import options */
+.lifeos-project-import-options {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border, #d8d8d8) 78%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--background-secondary, #f6f6f7) 86%, transparent);
+}
+.lifeos-project-import-options-copy,
+.lifeos-project-import-option-copy {
+  display: grid;
+  gap: 4px;
+}
+.lifeos-project-import-options-copy span,
+.lifeos-project-import-option-copy span {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.lifeos-project-import-option-list {
+  display: grid;
+  gap: 8px;
+}
+.lifeos-project-import-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--background-modifier-border, #d8d8d8);
+  border-radius: 12px;
+  cursor: pointer;
+  background: var(--background-primary, #fff);
+}
+.lifeos-project-import-option.is-active {
+  border-color: color-mix(in srgb, var(--interactive-accent, #7c3aed) 68%, var(--background-modifier-border, #d8d8d8));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent, #7c3aed) 22%, transparent);
+}
+.lifeos-project-import-option input {
+  margin-top: 3px;
+}
+
+/* Life OS real Obsidian AI edit side panel */
+.lifeos-ai-edit-panel-view {
+  height: 100%;
+  overflow: hidden;
+  padding: 10px;
+  background: var(--background-primary);
+}
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel {
+  position: relative !important;
+  inset: auto !important;
+  left: auto !important;
+  top: auto !important;
+  width: 100% !important;
+  max-width: none !important;
+  height: 100% !important;
+  max-height: none !important;
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  box-shadow: none !important;
+  border-radius: 16px !important;
+  z-index: auto !important;
+}
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-popover-body {
+  min-height: 0;
+  overflow: auto;
+}
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-preview {
+  max-height: none !important;
+}
+.lifeos-ai-edit-panel-empty {
+  display: grid;
+  gap: 6px;
+  align-content: center;
+  min-height: 220px;
+  padding: 18px;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 16px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.lifeos-ai-edit-panel-empty strong {
+  color: var(--text-normal);
+}
+
+/* Life OS inline AI edit answer/edit tabs */
+.lifeos-ai-edit-tab-bar {
+  display: flex !important;
+  gap: 4px !important;
+  padding: 4px 14px 0 !important;
+  background: rgba(248, 250, 252, 0.95) !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04) !important;
+}
+.lifeos-ai-edit-tab {
+  padding: 6px 16px !important;
+  border-radius: 8px 8px 0 0 !important;
+  font-size: 13px !important;
+  border: none !important;
+  background: transparent !important;
+  color: #64748b !important;
+  cursor: pointer !important;
+}
+.lifeos-ai-edit-tab.is-active {
+  background: #fff !important;
+  color: #1e293b !important;
+  font-weight: 600 !important;
+  box-shadow: 0 -2px 0 #3b82f6 !important;
+}
+.theme-dark .lifeos-ai-edit-tab-bar {
+  background: rgba(30, 41, 59, 0.95) !important;
+}
+.theme-dark .lifeos-ai-edit-tab {
+  color: #94a3b8 !important;
+}
+.theme-dark .lifeos-ai-edit-tab.is-active {
+  background: #1e293b !important;
+  color: #e2e8f0 !important;
+}
+.lifeos-ai-edit-history {
+  margin-bottom: 8px !important;
+}
+.lifeos-ai-edit-history-item {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 4px 8px !important;
+  font-size: 12px !important;
+  background: #fffbe6 !important;
+  border-left: 3px solid #f59e0b !important;
+  border-radius: 0 6px 6px 0 !important;
+  margin-bottom: 4px !important;
+}
+.lifeos-ai-edit-history-num {
+  background: #f59e0b !important;
+  color: #fff !important;
+  border-radius: 50% !important;
+  width: 18px !important;
+  height: 18px !important;
+  font-size: 10px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+}
+.lifeos-ai-edit-history-text {
+  flex: 1 !important;
+  color: #92400e !important;
+}
+.lifeos-ai-edit-history-undo {
+  padding: 2px 8px !important;
+  border-radius: 4px !important;
+  font-size: 11px !important;
+  border: 1px solid #fcd34d !important;
+  background: #fff !important;
+  color: #b45309 !important;
+  cursor: pointer !important;
+}
+.theme-dark .lifeos-ai-edit-history-item {
+  background: rgba(251, 191, 36, 0.12) !important;
+  border-left-color: #fbbf24 !important;
+}
+.theme-dark .lifeos-ai-edit-history-text {
+  color: #fde68a !important;
+}
+.theme-dark .lifeos-ai-edit-history-undo {
+  background: rgba(30, 41, 59, 0.8) !important;
+  color: #fbbf24 !important;
+  border-color: rgba(251, 191, 36, 0.4) !important;
+}
+
+/* Life OS inline AI edit lightweight conversation panel final guard */
+.lifeos-ai-edit-panel-view {
+  padding: 6px !important;
+}
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel {
+  gap: 6px !important;
+  padding: 8px !important;
+  border-radius: 12px !important;
+  background: var(--background-primary) !important;
+  grid-template-rows: auto minmax(0, 1fr) auto !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-popover-header {
+  grid-template-columns: 28px minmax(0, 1fr) 28px 28px !important;
+  gap: 6px !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-popover-icon,
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-popover-close {
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  border-radius: 9px !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-popover-heading strong {
+  font-size: 13px !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-popover-heading span {
+  font-size: 11px !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-tab-bar {
+  padding: 0 !important;
+  gap: 4px !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-tab {
+  min-height: 28px !important;
+  padding: 4px 10px !important;
+  border-radius: 999px !important;
+  font-size: 12px !important;
+  background: transparent !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--background-modifier-border) 80%, transparent) !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-tab.is-active {
+  color: #2563eb !important;
+  background: rgba(37, 99, 235, 0.08) !important;
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.18) !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-popover-body {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+  padding: 0 2px !important;
+  overflow: hidden !important;
+  scrollbar-gutter: stable !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-context {
+  padding: 0 2px !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-size: 11px !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-preview.is-answer {
+  order: 1 !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  padding: 6px !important;
+  border: 0 !important;
+  border-radius: 12px !important;
+  background: color-mix(in srgb, var(--background-secondary) 46%, transparent) !important;
+  box-shadow: none !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-skill-panel {
+  order: 2 !important;
+  flex: 0 0 auto !important;
+  margin: 0 !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-answer-toolbar {
+  order: 3 !important;
+  flex: 0 0 auto !important;
+  padding: 6px !important;
+  border-radius: 12px !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-command {
+  order: 4 !important;
+  flex: 0 0 auto !important;
+  min-height: 62px !important;
+  max-height: 118px !important;
+  border-radius: 12px !important;
+  font-size: 12px !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-actions {
+  gap: 6px !important;
+  padding-top: 4px !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-action {
+  min-height: 32px !important;
+  padding: 0 10px !important;
+  border-radius: 10px !important;
+  font-size: 12px !important;
+}
+.lifeos-ai-edit-chat-message {
+  display: grid !important;
+  gap: 5px !important;
+  max-width: 100% !important;
+}
+.lifeos-ai-edit-chat-role {
+  color: var(--text-muted) !important;
+  font-size: 11px !important;
+  line-height: 1.2 !important;
+}
+.lifeos-ai-edit-chat-content {
+  padding: 10px 11px !important;
+  border-radius: 14px !important;
+  background: var(--background-primary) !important;
+  box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.14) !important;
+  font-size: 13px !important;
+  line-height: 1.55 !important;
+}
+.lifeos-ai-edit-chat-content :is(p, ul, ol, blockquote, table) {
+  margin-block: 0 8px !important;
+}
+.lifeos-ai-edit-chat-content :is(p:last-child, ul:last-child, ol:last-child, blockquote:last-child, table:last-child) {
+  margin-bottom: 0 !important;
+}
+.lifeos-ai-edit-selection-highlight {
+  opacity: 0.42 !important;
+}
+
+/* Life OS AI edit panel visibility hotfix: panel popover must not inherit floating hidden state */
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel,
+.lifeos-ai-edit-popover.is-panel {
+  opacity: 1 !important;
+  visibility: visible !important;
+  transform: none !important;
+  position: relative !important;
+  left: auto !important;
+  top: auto !important;
+  display: grid !important;
+}
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel.is-positioned {
+  opacity: 1 !important;
+  transform: none !important;
+}
+
+/* Life OS AI edit panel compact answer layout: answer starts at top and bottom controls stay visible */
+.lifeos-ai-edit-panel-view {
+  padding: 6px 6px 18px !important;
+}
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel {
+  height: calc(100% - 10px) !important;
+  max-height: calc(100% - 10px) !important;
+  gap: 5px !important;
+  padding: 7px 8px 10px !important;
+  grid-template-rows: auto minmax(0, 1fr) auto !important;
+  box-sizing: border-box !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-popover-body {
+  gap: 6px !important;
+  overflow: auto !important;
+  padding: 0 2px 10px !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-preview.is-answer {
+  order: 0 !important;
+  flex: 0 1 auto !important;
+  min-height: 0 !important;
+  max-height: min(58svh, 540px) !important;
+  align-content: start !important;
+  padding: 6px 6px 8px !important;
+  overflow: auto !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-preview.is-answer.is-empty,
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-preview.is-answer.is-streaming {
+  min-height: 72px !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-context {
+  order: 1 !important;
+  flex: 0 0 auto !important;
+  min-height: 0 !important;
+  margin-top: 0 !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-skill-panel {
+  order: 2 !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-answer-toolbar {
+  order: 3 !important;
+  padding: 4px 6px !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-command {
+  order: 4 !important;
+  min-height: 50px !important;
+  max-height: 82px !important;
+  padding: 8px 10px !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-actions {
+  padding-top: 0 !important;
+  padding-bottom: 8px !important;
+  margin-top: -2px !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-action {
+  min-height: 30px !important;
+}
+
+/* Life OS AI edit panel top-start answer stream: mirror AI assistant reading flow */
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-popover-body {
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+  align-content: flex-start !important;
+}
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-preview.is-answer {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: flex-start !important;
+  align-items: stretch !important;
+  align-content: flex-start !important;
+  flex: 0 0 auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: min(54svh, 500px) !important;
+  padding-top: 4px !important;
+  padding-bottom: 6px !important;
+  overflow-y: auto !important;
+}
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-preview.is-answer:not(.is-empty) {
+  min-height: 0 !important;
+}
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-chat-message {
+  margin-top: 0 !important;
+  align-self: stretch !important;
+}
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-chat-role {
+  margin-top: 0 !important;
+}
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-chat-content {
+  margin-top: 0 !important;
+}
+
+/* Life OS AI edit panel four-row grid fix: header, tabs, answer body, actions */
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel,
+.lifeos-ai-edit-popover.is-panel {
+  grid-template-rows: auto auto minmax(0, 1fr) auto !important;
+  align-content: stretch !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-tab-bar {
+  grid-row: 2 !important;
+  align-self: start !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-popover-body {
+  grid-row: 3 !important;
+  align-self: start !important;
+}
+.lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-actions {
+  grid-row: 4 !important;
+  align-self: end !important;
+}
+
+/* Life OS AI edit panel bottom-fixed controls: keep reply tools docked under the scrollable answer */
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel {
+  min-height: 0 !important;
+}
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-popover-body {
+  align-self: stretch !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-preview.is-answer {
+  flex: 1 1 auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow-y: auto !important;
+}
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-skill-panel {
+  margin-top: auto !important;
+}
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-answer-toolbar,
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-command {
+  flex: 0 0 auto !important;
+}
+
+/* Life OS AI edit panel fill answer card: make the conversation box use the whole red-frame area */
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-preview.is-answer {
+  flex: 1 1 auto !important;
+  align-self: stretch !important;
+  min-height: 240px !important;
+  max-height: none !important;
+  background: color-mix(in srgb, var(--background-secondary) 58%, transparent 42%) !important;
+  box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.12) !important;
+}
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-chat-message {
+  min-height: 100% !important;
+}
+
+/* Life OS project import submit readable final guard */
+.modal.lifeos-project-import-modal-host button.lifeos-project-import-submit,
+.modal.lifeos-project-import-modal-host button.lifeos-project-import-submit.is-primary,
+.modal.lifeos-project-import-modal-host button.lifeos-project-import-submit.lifeos-button-primary {
+  min-width: 104px !important;
+  color: #ffffff !important;
+  border-color: transparent !important;
+  background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%) !important;
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.24) !important;
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+.modal.lifeos-project-import-modal-host button.lifeos-project-import-submit:disabled,
+.modal.lifeos-project-import-modal-host button.lifeos-project-import-submit.is-busy {
+  color: #f8fafc !important;
+  border-color: rgba(203, 213, 225, 0.34) !important;
+  background: linear-gradient(135deg, #475569 0%, #1f2937 100%) !important;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.22) !important;
+  opacity: 0.98 !important;
+  filter: none !important;
+}
+
+.modal.lifeos-project-import-modal-host button.lifeos-project-import-submit :is(.lifeos-v2-button-label, .lifeos-v2-button-icon, .lifeos-button-icon, span, svg),
+.modal.lifeos-project-import-modal-host button.lifeos-project-import-submit:disabled :is(.lifeos-v2-button-label, .lifeos-v2-button-icon, .lifeos-button-icon, span, svg),
+.modal.lifeos-project-import-modal-host button.lifeos-project-import-submit.is-busy :is(.lifeos-v2-button-label, .lifeos-v2-button-icon, .lifeos-button-icon, span, svg) {
+  color: currentColor !important;
+  stroke: currentColor !important;
+  opacity: 1 !important;
+}
+
+/* Life OS AI edit selection continuity: do not interrupt a stream when the user selects the next passage. */
+.lifeos-ai-edit-pending-selection {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 30%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-secondary));
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.lifeos-ai-edit-pending-selection span {
+  flex: 1 1 160px;
+}
+.lifeos-ai-edit-pending-selection button,
+.lifeos-ai-edit-context-mode {
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 12px;
+  cursor: pointer;
+}
+.lifeos-ai-edit-pending-selection button:hover,
+.lifeos-ai-edit-context-mode:hover {
+  border-color: var(--interactive-accent);
+}
+.lifeos-ai-edit-selection-history {
+  flex: 0 0 auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--background-secondary) 70%, transparent);
+}
+.lifeos-ai-edit-selection-history > summary {
+  padding: 6px 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.lifeos-ai-edit-selection-history-list {
+  display: grid;
+  gap: 4px;
+  padding: 0 6px 6px;
+}
+.lifeos-ai-edit-selection-history-item {
+  display: grid;
+  grid-template-columns: minmax(70px, 0.28fr) minmax(0, 1fr);
+  gap: 7px;
+  width: 100%;
+  padding: 6px 7px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-normal);
+  text-align: left;
+  cursor: pointer;
+}
+.lifeos-ai-edit-selection-history-item:hover {
+  background: var(--background-modifier-hover);
+}
+.lifeos-ai-edit-selection-history-file,
+.lifeos-ai-edit-selection-history-text,
+.lifeos-ai-edit-answer-context-hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lifeos-ai-edit-selection-history-file {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.lifeos-ai-edit-selection-history-text {
+  font-size: 12px;
+}
+.lifeos-ai-edit-answer-context-modes {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+.lifeos-ai-edit-context-mode.is-active {
+  border-color: var(--interactive-accent);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+.lifeos-ai-edit-answer-context-hint {
+  flex: 1 1 150px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+/* Project import keeps long extraction and AI-formatting work observable. */
+.lifeos-project-import-progress {
+  min-height: 20px;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--background-secondary) 72%, transparent);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* Directory Skill packages remain inspectable instead of looking like one long text file. */
+.lifeos-github-skill-package-kind {
+  width: fit-content;
+  margin-top: 8px;
+  padding: 4px 7px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.lifeos-github-skill-file-tree {
+  margin-top: 10px;
   border: 1px solid var(--background-modifier-border);
   border-radius: 10px;
   background: var(--background-secondary);
 }
-
-.lifeos-ai-edit-skill-summary {
-  min-height: 38px;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 8px 10px;
-  cursor: pointer;
-  list-style: none;
-}
-
-.lifeos-ai-edit-skill-summary::-webkit-details-marker {
-  display: none;
-}
-
-.lifeos-ai-edit-skill-label {
-  flex: 0 0 auto;
+.lifeos-github-skill-file-tree > summary {
+  padding: 7px 9px;
   color: var(--text-muted);
   font-size: 12px;
-  font-weight: 650;
+  cursor: pointer;
 }
-
-.lifeos-ai-edit-skill-current {
-  min-width: 0;
+.lifeos-github-skill-file-tree-list {
+  display: grid;
+  gap: 4px;
+  padding: 0 7px 7px;
+}
+.lifeos-github-skill-file-tree-item {
   overflow: hidden;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: var(--background-primary);
   color: var(--text-normal);
-  font-size: 12px;
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.lifeos-ai-edit-skill-groups {
-  max-height: 220px;
+/* AI answer conversation flow and review stat alignment final guard. */
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-preview.is-answer {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-chat-message {
+  min-height: auto !important;
+  flex: 0 0 auto;
+}
+
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-chat-message.is-user {
+  align-self: flex-end;
+  max-width: 88%;
+}
+
+.lifeos-ai-edit-panel-view .lifeos-ai-edit-popover.is-panel .lifeos-ai-edit-chat-message.is-user .lifeos-ai-edit-chat-role {
+  text-align: right;
+}
+
+.lifeos-root .lifeos-review-stat-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  justify-content: space-between !important;
+  justify-items: stretch !important;
+  column-gap: clamp(16px, 1.35vw, 24px) !important;
+}
+
+.lifeos-root .lifeos-review-stat-grid > .lifeos-stat-card {
+  width: 100%;
+  justify-self: stretch;
+}
+
+@media (max-width: 900px) {
+  .lifeos-root .lifeos-review-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 520px) {
+  .lifeos-root .lifeos-review-stat-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Dashboard and yearly review charts must use both edges of their containers. */
+.lifeos-root .lifeos-dashboard-center > .lifeos-stat-grid {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  width: 100% !important;
+  max-width: none !important;
+  gap: clamp(16px, 1.35vw, 24px) !important;
+  justify-items: stretch !important;
+  align-self: stretch !important;
+}
+
+.lifeos-root .lifeos-dashboard-center > .lifeos-stat-grid > .lifeos-stat-card {
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  justify-self: stretch !important;
+}
+
+.lifeos-root .lifeos-contrib-scroll:not(.is-compact-range) {
+  width: 100% !important;
+}
+
+.lifeos-root .lifeos-contrib-scroll:not(.is-compact-range) .lifeos-contrib-calendar {
+  display: grid !important;
+  grid-template-columns: 32px minmax(0, 1fr) !important;
+  width: 100% !important;
+  min-width: 100% !important;
+}
+
+.lifeos-root .lifeos-contrib-scroll:not(.is-compact-range) .lifeos-contrib-months {
+  grid-template-columns: 40px repeat(var(--lifeos-contrib-weeks, 53), minmax(11px, 1fr)) !important;
+  gap: 3px !important;
+}
+
+.lifeos-root .lifeos-contrib-scroll:not(.is-compact-range) .lifeos-contrib-grid {
+  display: grid !important;
+  grid-template-columns: repeat(var(--lifeos-contrib-weeks, 53), minmax(11px, 1fr)) !important;
+  gap: 3px !important;
+  min-width: 0 !important;
+}
+
+.lifeos-root .lifeos-contrib-scroll:not(.is-compact-range) .lifeos-contrib-week {
+  grid-template-rows: repeat(7, minmax(11px, 1fr)) !important;
+  gap: 3px !important;
+  min-width: 0 !important;
+}
+
+.lifeos-root .lifeos-contrib-scroll:not(.is-compact-range) button.lifeos-contrib-day {
+  width: 100% !important;
+  height: auto !important;
+  min-width: 11px !important;
+  min-height: 11px !important;
+  max-width: none !important;
+  max-height: none !important;
+  aspect-ratio: 1 !important;
+}
+
+@media (max-width: 900px) {
+  .lifeos-root .lifeos-dashboard-center > .lifeos-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 520px) {
+  .lifeos-root .lifeos-dashboard-center > .lifeos-stat-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+/* Period review workspace: keep facts, sources, and the AI draft visually distinct. */
+.modal.lifeos-period-review-modal-host {
+  width: min(960px, calc(100vw - 32px));
+  max-height: min(900px, calc(100vh - 28px));
+}
+
+.lifeos-period-review-modal {
+  width: 100%;
+  max-width: 960px;
+}
+
+.lifeos-period-review-body {
   display: grid;
-  gap: 10px;
-  padding: 10px;
+  gap: 14px;
+  max-height: min(70vh, 680px);
   overflow: auto;
-  border-top: 1px solid var(--background-modifier-border);
 }
 
-.lifeos-ai-edit-skill-category {
-  display: grid;
-  gap: 6px;
-}
-
-.lifeos-ai-edit-skill-category-head {
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.lifeos-ai-edit-skill-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.lifeos-ai-edit-skill-chip {
-  min-height: 28px;
-  padding: 4px 9px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 999px;
-  color: var(--text-muted);
-  background: var(--background-primary);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.lifeos-ai-edit-skill-chip.is-active {
-  border-color: color-mix(in srgb, #3b82f6 62%, var(--background-modifier-border) 38%);
-  color: #1d4ed8;
-  background: color-mix(in srgb, #dbeafe 78%, var(--background-primary) 22%);
-}
-
-.lifeos-ai-edit-answer-toolbar {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.lifeos-ai-edit-answer-copy {
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.lifeos-ai-edit-answer-modes {
-  display: flex;
-  gap: 4px;
-}
-
-.lifeos-ai-edit-answer-mode {
-  min-height: 28px;
-  padding: 4px 9px;
+.lifeos-period-review-section {
   border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
-  color: var(--text-muted);
+  padding: 14px;
   background: var(--background-primary);
-  font-size: 11px;
-  cursor: pointer;
 }
 
-.lifeos-ai-edit-answer-mode.is-active {
-  border-color: #60a5fa;
-  color: #1d4ed8;
-  background: color-mix(in srgb, #dbeafe 72%, var(--background-primary) 28%);
+.lifeos-period-review-section h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
 }
 
-.lifeos-ai-edit-command {
-  width: 100%;
-  min-height: 76px;
-  max-height: 180px;
-  resize: vertical;
-  padding: 10px 11px;
+.lifeos-period-review-presets,
+.lifeos-period-review-draft-actions,
+.lifeos-period-review-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lifeos-period-review-draft-actions {
+  align-items: center;
+}
+
+.lifeos-period-review-mode-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
   border: 1px solid var(--background-modifier-border);
-  border-radius: 10px;
-  color: var(--text-normal);
-  background: var(--background-primary);
-  font: inherit;
-  font-size: 13px;
-  line-height: 1.5;
+  border-radius: 6px;
+  background: var(--background-secondary);
 }
 
-.lifeos-ai-edit-command:focus {
-  border-color: #60a5fa;
-  box-shadow: 0 0 0 2px color-mix(in srgb, #60a5fa 22%, transparent 78%);
+.lifeos-period-review-mode-toggle .lifeos-period-review-mode-button {
+  min-height: 30px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  box-shadow: none;
 }
 
-.lifeos-ai-edit-preview {
-  min-height: 120px;
-  max-height: min(360px, 42vh);
-  padding: 12px;
-  overflow: auto;
+.modal.lifeos-period-review-modal-host .lifeos-period-review-mode-toggle .lifeos-v2-button.is-primary {
+  color: #ffffff !important;
+  background: #1f2a44 !important;
+}
+
+.modal.lifeos-period-review-modal-host .lifeos-period-review-mode-toggle .lifeos-v2-button.is-primary :is(.lifeos-v2-button-icon, .lifeos-v2-button-label) {
+  color: inherit !important;
+}
+
+.lifeos-period-review-draft-preview {
+  min-height: 180px;
+  margin-top: 10px;
+  padding: 14px 16px;
   border: 1px solid var(--background-modifier-border);
-  border-radius: 10px;
+  border-radius: 6px;
   background: var(--background-primary);
-  font-size: 13px;
-  line-height: 1.55;
+  line-height: 1.7;
 }
 
-.lifeos-ai-edit-preview.is-empty {
+.lifeos-period-review-draft-preview > :first-child {
+  margin-top: 0;
+}
+
+.lifeos-period-review-draft-preview > :last-child {
+  margin-bottom: 0;
+}
+
+.lifeos-period-review-draft-preview :is(h1, h2, h3, h4) {
+  margin-top: 1.2em;
+  margin-bottom: 0.55em;
+}
+
+.lifeos-period-review-date-fields,
+.lifeos-period-review-fact-grid {
   display: grid;
-  place-items: center;
-  color: var(--text-faint);
-  text-align: center;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
 }
 
-.lifeos-ai-edit-preview.is-error {
-  border-color: color-mix(in srgb, #ef4444 54%, var(--background-modifier-border) 46%);
-  color: var(--text-error);
-  background: color-mix(in srgb, #fee2e2 30%, var(--background-primary) 70%);
-}
-
-.lifeos-ai-edit-preview.is-streaming {
-  border-color: color-mix(in srgb, #3b82f6 46%, var(--background-modifier-border) 54%);
-}
-
-.lifeos-ai-edit-preview pre {
-  margin: 8px 0 0;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.lifeos-ai-edit-history {
+.lifeos-period-review-date-field {
   display: grid;
   gap: 5px;
-}
-
-.lifeos-ai-edit-history-item {
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
-  gap: 7px;
-  align-items: center;
-  padding: 6px 8px;
-  border-left: 3px solid #f59e0b;
-  border-radius: 0 7px 7px 0;
-  background: color-mix(in srgb, #fef3c7 48%, var(--background-primary) 52%);
-  font-size: 12px;
-}
-
-.lifeos-ai-edit-history-num {
-  width: 18px;
-  height: 18px;
-  display: grid;
-  place-items: center;
-  border-radius: 999px;
-  color: #fff;
-  background: #f59e0b;
-  font-size: 10px;
-}
-
-.lifeos-ai-edit-history-text {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-normal);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.lifeos-ai-edit-history-undo {
-  justify-self: start;
-  min-height: 28px;
-  padding: 4px 9px;
-  border: 1px solid color-mix(in srgb, #f59e0b 48%, var(--background-modifier-border) 52%);
-  border-radius: 7px;
-  color: #b45309;
-  background: var(--background-primary);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.lifeos-ai-edit-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  padding: 11px 14px 13px;
-  border-top: 1px solid var(--background-modifier-border);
-  background: color-mix(in srgb, var(--background-secondary) 78%, transparent 22%);
-}
-
-.lifeos-ai-edit-action {
-  min-height: 34px;
-  padding: 7px 13px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 9px;
-  color: var(--text-normal);
-  background: var(--background-primary);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.lifeos-ai-edit-action:hover:not(:disabled) {
-  border-color: #60a5fa;
-}
-
-.lifeos-ai-edit-action-primary {
-  border-color: #2563eb;
-  color: #fff;
-  background: linear-gradient(135deg, #2563eb, #4f46e5);
-}
-
-.lifeos-ai-edit-action-ghost {
-  margin-right: auto;
   color: var(--text-muted);
-  background: transparent;
+  font-size: 12px;
 }
 
-.lifeos-ai-edit-action:disabled {
-  cursor: not-allowed;
-  opacity: 0.52;
+.lifeos-period-review-date-input {
+  min-width: 0;
+  min-height: 42px;
+  padding: 8px 12px;
+  appearance: none;
+  -webkit-appearance: none;
+  text-indent: 0;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
 }
 
-.theme-dark .lifeos-ai-edit-popover {
-  border-color: color-mix(in srgb, var(--background-modifier-border) 72%, #60a5fa 28%);
-  background: color-mix(in srgb, var(--background-primary) 96%, #0f172a 4%);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.48), 0 4px 16px rgba(0, 0, 0, 0.3);
+.modal.lifeos-period-review-modal-host :is(.lifeos-period-review-primary-action, .lifeos-period-review-draft-actions .lifeos-v2-button.is-primary) {
+  color: #ffffff !important;
+  border-color: transparent !important;
+  background: #1f2a44 !important;
+  box-shadow: 0 8px 18px rgba(31, 42, 68, 0.2);
 }
 
-.theme-dark .lifeos-ai-edit-popover-icon,
-.theme-dark .lifeos-ai-edit-skill-chip.is-active,
-.theme-dark .lifeos-ai-edit-answer-mode.is-active {
-  color: #bfdbfe;
-  background: rgba(37, 99, 235, 0.22);
+.modal.lifeos-period-review-modal-host :is(.lifeos-period-review-primary-action, .lifeos-period-review-draft-actions .lifeos-v2-button.is-primary) :is(.lifeos-v2-button-icon, .lifeos-v2-button-label) {
+  color: inherit !important;
+  opacity: 1;
 }
 
-.theme-dark .lifeos-ai-edit-context {
-  background: rgba(30, 64, 175, 0.12);
+.modal.lifeos-period-review-modal-host :is(.lifeos-period-review-primary-action, .lifeos-period-review-draft-actions .lifeos-v2-button.is-primary):hover {
+  background: #293958 !important;
 }
 
-.theme-dark .lifeos-ai-edit-history-item {
-  background: rgba(245, 158, 11, 0.12);
+.lifeos-period-review-fact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
 }
 
-.theme-dark .lifeos-ai-edit-history-undo {
-  color: #fbbf24;
+.lifeos-period-review-fact span,
+.lifeos-period-review-source-preview {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.lifeos-period-review-warning,
+.lifeos-period-review-note,
+.lifeos-period-review-confirmed {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--text-accent);
+  background: var(--background-secondary);
+  font-size: 12px;
+}
+
+.lifeos-period-review-confirmed {
+  border-left-color: var(--color-green, var(--text-accent));
+}
+
+.lifeos-period-review-source-list {
+  display: grid;
+  gap: 8px;
+}
+
+.lifeos-period-review-empty-state {
+  display: grid;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.lifeos-period-review-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Review dashboard: metrics occupy one stable row; the highlight panel sizes to its content. */
+.lifeos-root .lifeos-main > .lifeos-review-stat-grid {
+  display: flex !important;
+  width: 100% !important;
+  max-width: none !important;
+  gap: clamp(16px, 1.35vw, 24px) !important;
+  align-items: stretch !important;
+}
+
+.lifeos-root .lifeos-main > .lifeos-review-stat-grid > .lifeos-stat-card {
+  flex: 1 1 0 !important;
+  width: auto !important;
+  max-width: none !important;
+  min-width: 0 !important;
+}
+
+.lifeos-root .lifeos-main > .lifeos-review-focus-grid {
+  align-items: stretch !important;
+}
+
+.lifeos-root .lifeos-main > .lifeos-review-focus-grid > .lifeos-review-highlight-host {
+  display: flex;
+  align-self: stretch !important;
+  min-width: 0;
+}
+
+.lifeos-root .lifeos-main .lifeos-review-highlight-host > .lifeos-highlight-card {
+  flex: 1 1 auto;
+  align-self: stretch !important;
+  width: 100%;
+  height: 100% !important;
+  min-height: 0 !important;
+  box-sizing: border-box;
+}
+
+@media (max-width: 900px) {
+  .lifeos-root .lifeos-main > .lifeos-review-stat-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 520px) {
+  .lifeos-root .lifeos-main > .lifeos-review-stat-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+.lifeos-period-review-source {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 9px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+}
+
+.lifeos-period-review-source input[type="checkbox"] {
+  margin-top: 3px;
+}
+
+.lifeos-period-review-source-preview {
+  margin-top: 4px;
+  line-height: 1.45;
+}
+
+.lifeos-period-review-draft-input {
+  width: 100%;
+  margin-top: 10px;
+  resize: vertical;
+}
+
+.lifeos-period-review-loading {
+  padding: 28px;
+  text-align: center;
+  color: var(--text-muted);
 }
 
 @media (max-width: 640px) {
-  .lifeos-ai-edit-popover:not(.is-panel) {
-    left: 8px !important;
-    right: 8px !important;
-    bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
-    top: auto !important;
-    width: auto !important;
-    max-height: min(78vh, calc(100vh - 16px - env(safe-area-inset-bottom, 0px))) !important;
-    border-radius: 16px;
+  .modal.lifeos-period-review-modal-host {
+    width: calc(100vw - 16px);
   }
 
-  .lifeos-ai-edit-popover-header {
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
+  .lifeos-period-review-date-fields,
+  .lifeos-period-review-fact-grid {
+    grid-template-columns: 1fr;
   }
 
-  .lifeos-ai-edit-popover-body {
-    padding: 10px;
+  .lifeos-period-review-source {
+    grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .lifeos-ai-edit-actions {
+  .lifeos-period-review-source > .lifeos-button,
+  .lifeos-period-review-source > button {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+/* AI Workspace */
+.lifeos-ai-workspace {
+  --ai-workspace-codex: #27846b;
+  --ai-workspace-claude: #b66335;
+  --ai-workspace-opencode: #287da1;
+  --ai-workspace-codebuddy: #3a67b1;
+  --ai-workspace-workbuddy: #94651f;
+  --ai-workspace-pi: #875184;
+  --ai-workspace-web: #6b5bb5;
+  --ai-workspace-line: color-mix(in srgb, var(--lifeos-border) 72%, var(--background-modifier-border) 28%);
+  --ai-workspace-soft: color-mix(in srgb, var(--lifeos-surface-soft) 72%, var(--background-primary) 28%);
+  min-width: 0;
+}
+
+.lifeos-ai-workspace > .lifeos-hero {
+  padding: 18px 20px;
+  border-radius: 8px;
+}
+
+.lifeos-ai-workspace > .lifeos-hero h1 {
+  font-size: 32px;
+  line-height: 1.2;
+}
+
+.lifeos-ai-workspace .lifeos-panel,
+.lifeos-ai-workspace .lifeos-card {
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.lifeos-ai-workspace-project-bar,
+.lifeos-ai-workspace-version-selector,
+.lifeos-ai-workspace-prompt-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lifeos-ai-workspace-project-bar {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--ai-workspace-line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--lifeos-surface) 92%, transparent);
+}
+
+.lifeos-ai-workspace-project-selector {
+  display: grid;
+  min-width: min(360px, 100%);
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.lifeos-ai-workspace-project-selector > svg {
+  color: var(--lifeos-primary);
+}
+
+.lifeos-ai-workspace-project-selector select,
+.lifeos-ai-workspace select,
+.lifeos-ai-workspace input,
+.lifeos-ai-workspace textarea {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.lifeos-ai-workspace-project-meta,
+.lifeos-ai-workspace-inline-actions,
+.lifeos-ai-workspace-tool-counts,
+.lifeos-ai-workspace-message-files,
+.lifeos-ai-workspace-reader-filters,
+.lifeos-ai-workspace-prompt-tags {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.lifeos-ai-workspace-project-meta {
+  color: var(--lifeos-muted);
+  font-size: 12px;
+}
+
+.lifeos-ai-workspace-project-meta span + span::before {
+  content: "·";
+  margin-right: 8px;
+}
+
+.lifeos-ai-workspace-last-scan,
+.lifeos-ai-workspace-muted {
+  color: var(--lifeos-muted);
+  font-size: 12px;
+}
+
+.lifeos-ai-workspace-tabs {
+  display: flex;
+  min-width: 0;
+  gap: 2px;
+  margin-bottom: 18px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--ai-workspace-line);
+}
+
+.lifeos-ai-workspace-tab {
+  display: inline-flex;
+  min-width: max-content;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 13px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--lifeos-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.lifeos-ai-workspace-tab:hover,
+.lifeos-ai-workspace-tab.is-active {
+  color: var(--lifeos-primary);
+  background: color-mix(in srgb, var(--lifeos-primary-soft) 48%, transparent);
+}
+
+.lifeos-ai-workspace-tab.is-active {
+  border-bottom-color: var(--lifeos-primary);
+}
+
+.lifeos-ai-workspace-tab svg {
+  width: 16px;
+  height: 16px;
+}
+
+.lifeos-ai-workspace-body {
+  min-width: 0;
+}
+
+.lifeos-ai-workspace-overview-brief {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--ai-workspace-line);
+  border-bottom: 1px solid var(--ai-workspace-line);
+  background: color-mix(in srgb, var(--lifeos-surface-soft) 58%, transparent);
+}
+
+.lifeos-ai-workspace-overview-brief > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.lifeos-ai-workspace-overview-brief strong,
+.lifeos-ai-workspace-overview-brief p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-ai-workspace-overview-brief p {
+  max-width: 780px;
+  margin: 0;
+  color: var(--lifeos-muted);
+  line-height: 1.55;
+}
+
+.lifeos-ai-workspace-overview-eyebrow {
+  color: var(--lifeos-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.lifeos-ai-workspace-overview-meta {
+  display: grid;
+  flex: 0 0 auto;
+  justify-items: end;
+  gap: 6px;
+  color: var(--lifeos-muted);
+  font-size: 11px;
+}
+
+.lifeos-ai-workspace-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  margin-bottom: 16px;
+  overflow: hidden;
+  border: 1px solid var(--ai-workspace-line);
+  border-radius: 8px;
+  background: var(--lifeos-surface);
+}
+
+.lifeos-ai-workspace-stat {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 13px 14px;
+  border-right: 1px solid var(--ai-workspace-line);
+}
+
+.lifeos-ai-workspace-stat:last-child {
+  border-right: 0;
+}
+
+.lifeos-ai-workspace-stat strong {
+  font-size: 22px;
+  line-height: 1.15;
+}
+
+.lifeos-ai-workspace-stat span {
+  color: var(--lifeos-muted);
+  font-size: 12px;
+}
+
+.lifeos-ai-workspace-stat small {
+  color: var(--lifeos-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.lifeos-ai-workspace-overview-grid,
+.lifeos-ai-workspace-version-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 330px);
+  align-items: start;
+  gap: 14px;
+}
+
+.lifeos-ai-workspace-overview-main,
+.lifeos-ai-workspace-overview-side {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 14px;
+}
+
+.lifeos-ai-workspace-panel {
+  min-width: 0;
+  padding: 16px;
+}
+
+.lifeos-ai-workspace-panel-head,
+.lifeos-ai-workspace-reader-head,
+.lifeos-ai-workspace-tree-head,
+.lifeos-ai-workspace-prompt-item-head,
+.lifeos-ai-workspace-import-group-head,
+.lifeos-ai-workspace-tool-source-head,
+.lifeos-ai-workspace-search-head {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lifeos-ai-workspace-panel-head {
+  margin-bottom: 12px;
+}
+
+.lifeos-ai-workspace-panel-head > div:first-child {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+}
+
+.lifeos-ai-workspace-panel-head > div:first-child svg {
+  width: 17px;
+  height: 17px;
+  color: var(--lifeos-primary);
+}
+
+.lifeos-ai-workspace-panel-head h2,
+.lifeos-ai-workspace-reader-head h2,
+.lifeos-ai-workspace-prompt-head h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.lifeos-ai-workspace-panel-head p,
+.lifeos-ai-workspace-reader-head p,
+.lifeos-ai-workspace-tree-head p,
+.lifeos-ai-workspace-prompt-head p,
+.lifeos-ai-workspace-section-heading p {
+  margin: 4px 0 0;
+  color: var(--lifeos-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.lifeos-ai-workspace-activity-row,
+.lifeos-ai-workspace-daily-row,
+.lifeos-ai-workspace-prompt-candidate {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--ai-workspace-line);
+}
+
+.lifeos-ai-workspace-activity-row {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  padding: 13px 6px;
+}
+
+button.lifeos-ai-workspace-activity-row {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  border-top: 0;
+  border-right: 0;
+  border-left: 0;
+  color: var(--lifeos-text);
+  background: transparent;
+  text-align: left;
+  white-space: normal;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+button.lifeos-ai-workspace-activity-row:hover {
+  background: var(--ai-workspace-soft);
+}
+
+.lifeos-ai-workspace-activity-row > div,
+.lifeos-ai-workspace-activity-row :is(strong, p, span) {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-ai-workspace-activity-row:last-of-type,
+.lifeos-ai-workspace-daily-row:last-of-type {
+  border-bottom: 0;
+}
+
+.lifeos-ai-workspace-activity-row p,
+.lifeos-ai-workspace-daily-row p,
+.lifeos-ai-workspace-prompt-candidate p {
+  margin: 3px 0 0;
+  color: var(--lifeos-muted);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-ai-workspace-activity-row p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.lifeos-ai-workspace-activity-row > div > span {
+  display: block;
+  margin-top: 5px;
+  color: var(--lifeos-muted);
+  font-size: 11px;
+}
+
+.lifeos-ai-workspace-tool-dot {
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--lifeos-primary);
+}
+
+.is-codex > .lifeos-ai-workspace-tool-dot,
+.lifeos-ai-workspace-tool-dot.is-codex {
+  background: var(--ai-workspace-codex);
+}
+
+.is-claude > .lifeos-ai-workspace-tool-dot,
+.lifeos-ai-workspace-tool-dot.is-claude {
+  background: var(--ai-workspace-claude);
+}
+
+.is-opencode > .lifeos-ai-workspace-tool-dot,
+.lifeos-ai-workspace-tool-dot.is-opencode {
+  background: var(--ai-workspace-opencode);
+}
+
+.is-codebuddy > .lifeos-ai-workspace-tool-dot,
+.lifeos-ai-workspace-tool-dot.is-codebuddy {
+  background: var(--ai-workspace-codebuddy);
+}
+
+.is-workbuddy > .lifeos-ai-workspace-tool-dot,
+.lifeos-ai-workspace-tool-dot.is-workbuddy {
+  background: var(--ai-workspace-workbuddy);
+}
+
+.is-pi > .lifeos-ai-workspace-tool-dot,
+.lifeos-ai-workspace-tool-dot.is-pi {
+  background: var(--ai-workspace-pi);
+}
+
+.is-web > .lifeos-ai-workspace-tool-dot,
+.lifeos-ai-workspace-tool-dot.is-web {
+  background: var(--ai-workspace-web);
+}
+
+.lifeos-ai-workspace-tool-label,
+.lifeos-ai-workspace-badge {
+  display: inline-flex;
+  width: max-content;
+  align-items: center;
+  padding: 3px 7px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.lifeos-ai-workspace-tool-label.is-codex,
+.lifeos-ai-workspace-tool-count.is-codex {
+  color: var(--ai-workspace-codex);
+  background: color-mix(in srgb, var(--ai-workspace-codex) 10%, transparent);
+}
+
+.lifeos-ai-workspace-tool-label.is-claude,
+.lifeos-ai-workspace-tool-count.is-claude {
+  color: var(--ai-workspace-claude);
+  background: color-mix(in srgb, var(--ai-workspace-claude) 10%, transparent);
+}
+
+.lifeos-ai-workspace-tool-label.is-opencode,
+.lifeos-ai-workspace-tool-count.is-opencode {
+  color: var(--ai-workspace-opencode);
+  background: color-mix(in srgb, var(--ai-workspace-opencode) 10%, transparent);
+}
+
+.lifeos-ai-workspace-tool-label.is-codebuddy,
+.lifeos-ai-workspace-tool-count.is-codebuddy {
+  color: var(--ai-workspace-codebuddy);
+  background: color-mix(in srgb, var(--ai-workspace-codebuddy) 10%, transparent);
+}
+
+.lifeos-ai-workspace-tool-label.is-workbuddy,
+.lifeos-ai-workspace-tool-count.is-workbuddy {
+  color: var(--ai-workspace-workbuddy);
+  background: color-mix(in srgb, var(--ai-workspace-workbuddy) 10%, transparent);
+}
+
+.lifeos-ai-workspace-tool-label.is-pi,
+.lifeos-ai-workspace-tool-count.is-pi {
+  color: var(--ai-workspace-pi);
+  background: color-mix(in srgb, var(--ai-workspace-pi) 10%, transparent);
+}
+
+.lifeos-ai-workspace-tool-label.is-web,
+.lifeos-ai-workspace-tool-count.is-web {
+  color: var(--ai-workspace-web);
+  background: color-mix(in srgb, var(--ai-workspace-web) 10%, transparent);
+}
+
+.lifeos-ai-workspace :is(
+  .lifeos-ai-workspace-tool-label.is-cursor,
+  .lifeos-ai-workspace-tool-label.is-windsurf,
+  .lifeos-ai-workspace-tool-label.is-gemini-cli,
+  .lifeos-ai-workspace-tool-label.is-github-copilot,
+  .lifeos-ai-workspace-tool-label.is-kiro,
+  .lifeos-ai-workspace-tool-label.is-aider,
+  .lifeos-ai-workspace-tool-label.is-qwen-code,
+  .lifeos-ai-workspace-tool-label.is-trae,
+  .lifeos-ai-workspace-tool-label.is-tongyi-lingma,
+  .lifeos-ai-workspace-tool-label.is-cline,
+  .lifeos-ai-workspace-tool-label.is-roo-code,
+  .lifeos-ai-workspace-tool-label.is-continue,
+  .lifeos-ai-workspace-tool-count.is-cursor,
+  .lifeos-ai-workspace-tool-count.is-windsurf,
+  .lifeos-ai-workspace-tool-count.is-gemini-cli,
+  .lifeos-ai-workspace-tool-count.is-github-copilot,
+  .lifeos-ai-workspace-tool-count.is-kiro,
+  .lifeos-ai-workspace-tool-count.is-aider,
+  .lifeos-ai-workspace-tool-count.is-qwen-code,
+  .lifeos-ai-workspace-tool-count.is-trae,
+  .lifeos-ai-workspace-tool-count.is-tongyi-lingma,
+  .lifeos-ai-workspace-tool-count.is-cline,
+  .lifeos-ai-workspace-tool-count.is-roo-code,
+  .lifeos-ai-workspace-tool-count.is-continue
+) {
+  color: var(--lifeos-primary);
+  background: color-mix(in srgb, var(--lifeos-primary) 9%, transparent);
+}
+
+.lifeos-ai-workspace-badge {
+  color: var(--lifeos-primary);
+  background: var(--lifeos-primary-soft);
+}
+
+.lifeos-ai-workspace-badge.is-warning {
+  color: #8b5a16;
+  background: rgba(234, 179, 8, 0.15);
+}
+
+.lifeos-ai-workspace-badge.is-success {
+  color: #247259;
+  background: rgba(39, 132, 107, 0.14);
+}
+
+.lifeos-ai-workspace-handoff {
+  margin-top: 12px;
+  padding: 12px;
+  border-left: 3px solid var(--lifeos-primary);
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--lifeos-primary-soft) 55%, transparent);
+}
+
+.lifeos-ai-workspace-handoff p {
+  margin: 5px 0 10px;
+  line-height: 1.55;
+}
+
+.lifeos-ai-workspace-daily-list,
+.lifeos-ai-workspace-prompt-list {
+  display: grid;
+  min-width: 0;
+}
+
+.lifeos-ai-workspace-path-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.lifeos-ai-workspace-path-row code {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-ai-workspace-tool-counts {
+  margin: 12px 0;
+}
+
+.lifeos-ai-workspace-tool-count {
+  display: grid;
+  gap: 1px;
+  padding: 7px 9px;
+  border-radius: 6px;
+}
+
+.lifeos-ai-workspace-tool-count span {
+  font-size: 11px;
+}
+
+.lifeos-ai-workspace-reader-layout {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(180px, 220px) minmax(360px, 1fr) minmax(190px, 240px);
+  align-items: start;
+  gap: 12px;
+}
+
+.lifeos-ai-workspace-session-rail,
+.lifeos-ai-workspace-reader,
+.lifeos-ai-workspace-outline {
+  min-width: 0;
+  border: 1px solid var(--ai-workspace-line);
+  border-radius: 8px;
+  background: var(--lifeos-surface);
+}
+
+.lifeos-ai-workspace-session-rail,
+.lifeos-ai-workspace-outline {
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 160px);
+  overflow: auto;
+}
+
+.lifeos-ai-workspace-reader {
+  overflow: hidden;
+}
+
+.lifeos-ai-workspace-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--ai-workspace-line);
+}
+
+.lifeos-ai-workspace-rail-head span {
+  color: var(--lifeos-muted);
+  font-size: 11px;
+}
+
+.lifeos-ai-workspace-session-group {
+  padding: 8px;
+}
+
+.lifeos-ai-workspace-session-group + .lifeos-ai-workspace-session-group {
+  border-top: 1px solid var(--ai-workspace-line);
+}
+
+.lifeos-ai-workspace-session-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 3px 4px 7px;
+  color: var(--lifeos-muted);
+  font-size: 11px;
+}
+
+.lifeos-ai-workspace-session-button,
+.lifeos-ai-workspace-outline-button,
+.lifeos-ai-workspace-search-result {
+  display: grid;
+  width: 100%;
+  height: auto !important;
+  min-width: 0;
+  min-height: 46px;
+  gap: 3px;
+  padding: 9px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--lifeos-text);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lifeos-ai-workspace-session-button:hover,
+.lifeos-ai-workspace-session-button.is-active,
+.lifeos-ai-workspace-outline-button:hover,
+.lifeos-ai-workspace-search-result:hover {
+  background: var(--ai-workspace-soft);
+}
+
+.lifeos-ai-workspace-session-button.is-active {
+  box-shadow: inset 3px 0 0 var(--lifeos-primary);
+}
+
+.lifeos-ai-workspace-session-button strong,
+.lifeos-ai-workspace-session-button span,
+.lifeos-ai-workspace-outline-button strong,
+.lifeos-ai-workspace-outline-button span,
+.lifeos-ai-workspace-search-result strong,
+.lifeos-ai-workspace-search-result span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-ai-workspace-session-button span,
+.lifeos-ai-workspace-outline-button span,
+.lifeos-ai-workspace-search-result span {
+  color: var(--lifeos-muted);
+  font-size: 11px;
+}
+
+.lifeos-ai-workspace-reader-head {
+  padding: 15px 16px 12px;
+  border-bottom: 1px solid var(--ai-workspace-line);
+}
+
+.lifeos-ai-workspace-reader-head > div:first-child {
+  min-width: 0;
+}
+
+.lifeos-ai-workspace-reader-head h2,
+.lifeos-ai-workspace-reader-head p {
+  overflow-wrap: anywhere;
+}
+
+.lifeos-ai-workspace-reader-head h2 {
+  display: -webkit-box;
+  max-width: 820px;
+  margin: 7px 0 4px;
+  overflow: hidden;
+  font-size: 20px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.lifeos-ai-workspace-tracking-status {
+  display: block;
+  margin-top: 5px;
+  color: var(--lifeos-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-ai-workspace-tracking-status.is-up-to-date,
+.lifeos-ai-workspace-tracking-status.is-updated,
+.lifeos-ai-workspace-tracking-status.is-watching {
+  color: var(--text-success);
+}
+
+.lifeos-ai-workspace-tracking-status.is-needs-review,
+.lifeos-ai-workspace-tracking-status.is-source-missing,
+.lifeos-ai-workspace-tracking-status.is-error {
+  color: var(--text-warning);
+}
+
+.lifeos-ai-workspace-tracking-button {
+  min-width: 132px;
+  justify-content: center;
+  border-color: var(--ai-workspace-line) !important;
+  color: var(--text-normal) !important;
+  background: var(--lifeos-surface) !important;
+}
+
+.lifeos-ai-workspace-tracking-button.is-active {
+  border-color: color-mix(in srgb, var(--text-success) 38%, var(--ai-workspace-line)) !important;
+  color: color-mix(in srgb, var(--text-success) 52%, var(--text-normal)) !important;
+  background: color-mix(in srgb, var(--text-success) 6%, var(--lifeos-surface)) !important;
+}
+
+.lifeos-ai-workspace-tracking-button:hover {
+  border-color: var(--interactive-accent) !important;
+  color: var(--text-normal) !important;
+  background: var(--background-modifier-hover) !important;
+}
+
+.lifeos-ai-workspace-project-memory-status {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  margin: 12px 0 10px;
+  padding: 10px;
+  border: 1px solid var(--ai-workspace-line);
+  border-radius: 7px;
+  background: var(--background-secondary);
+}
+
+.lifeos-ai-workspace-project-memory-status > span:first-child {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  color: var(--interactive-accent);
+}
+
+.lifeos-ai-workspace-project-memory-status > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.lifeos-ai-workspace-project-memory-status span {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-ai-workspace-reader-toolbar {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(140px, 0.7fr) minmax(180px, 1.2fr) auto auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ai-workspace-line);
+  background: var(--ai-workspace-soft);
+}
+
+.lifeos-ai-workspace-reader-filters,
+.lifeos-ai-workspace-reader-order {
+  display: flex;
+  flex-wrap: nowrap;
+  padding: 2px;
+  border: 1px solid var(--ai-workspace-line);
+  border-radius: 6px;
+  background: var(--lifeos-surface);
+}
+
+.lifeos-ai-workspace-reader-filters button,
+.lifeos-ai-workspace-reader-order button {
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--lifeos-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.lifeos-ai-workspace-reader-filters button.is-active,
+.lifeos-ai-workspace-reader-order button.is-active {
+  color: var(--lifeos-primary);
+  background: var(--lifeos-primary-soft);
+}
+
+.lifeos-ai-workspace-search-matches {
+  max-height: 280px;
+  padding: 10px 12px;
+  overflow: auto;
+  border-bottom: 1px solid var(--ai-workspace-line);
+  background: var(--lifeos-surface);
+}
+
+.lifeos-ai-workspace-search-result {
+  border-bottom: 1px solid var(--ai-workspace-line);
+  border-radius: 0;
+}
+
+.lifeos-ai-workspace-chat {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0;
+  padding: 2px 16px 10px;
+}
+
+.lifeos-ai-workspace-message {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--ai-workspace-line);
+}
+
+.lifeos-ai-workspace-message.is-focused,
+.lifeos-ai-workspace-tree-node.is-focused {
+  outline: 2px solid color-mix(in srgb, var(--lifeos-primary) 50%, transparent);
+  outline-offset: -2px;
+}
+
+.lifeos-ai-workspace-message-marker {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.lifeos-ai-workspace-message-marker::after {
+  content: "";
+  position: absolute;
+  top: 31px;
+  bottom: -17px;
+  width: 1px;
+  background: var(--ai-workspace-line);
+}
+
+.lifeos-ai-workspace-message:last-child .lifeos-ai-workspace-message-marker::after {
+  display: none;
+}
+
+.lifeos-ai-workspace-message-marker span {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ai-workspace-line);
+  border-radius: 50%;
+  color: var(--lifeos-muted);
+  background: var(--lifeos-surface);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.lifeos-ai-workspace-message.is-user .lifeos-ai-workspace-message-marker span {
+  color: var(--lifeos-primary);
+  border-color: color-mix(in srgb, var(--lifeos-primary) 36%, var(--ai-workspace-line));
+}
+
+.lifeos-ai-workspace-message.is-assistant .lifeos-ai-workspace-message-marker span {
+  color: var(--ai-workspace-codex);
+  border-color: color-mix(in srgb, var(--ai-workspace-codex) 36%, var(--ai-workspace-line));
+}
+
+.lifeos-ai-workspace-message-content,
+.lifeos-ai-workspace-message-body {
+  min-width: 0;
+}
+
+.lifeos-ai-workspace-message-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+  color: var(--lifeos-muted);
+  font-size: 11px;
+}
+
+.lifeos-ai-workspace-message-meta .lifeos-button {
+  min-height: 28px;
+  padding: 4px 7px;
+}
+
+.lifeos-ai-workspace-message-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+}
+
+.lifeos-ai-workspace-message.is-opening .lifeos-ai-workspace-message-content {
+  padding: 11px 12px;
+  border-left: 3px solid var(--lifeos-primary);
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--lifeos-primary-soft) 48%, transparent);
+}
+
+.lifeos-ai-workspace-message-body {
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-ai-workspace-message-body.is-collapsed-preview {
+  position: relative;
+  padding: 10px 12px;
+  border: 1px solid var(--ai-workspace-line);
+  border-radius: 6px;
+  background: var(--ai-workspace-soft);
+}
+
+.lifeos-ai-workspace-message-body.is-collapsed-preview p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--lifeos-text);
+  line-height: 1.65;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 7;
+}
+
+.lifeos-ai-workspace-message-body :is(h1, h2, h3) {
+  letter-spacing: 0;
+}
+
+.lifeos-ai-workspace-message-body h1 {
+  font-size: 20px;
+}
+
+.lifeos-ai-workspace-message-body h2 {
+  font-size: 17px;
+}
+
+.lifeos-ai-workspace-message-body pre {
+  max-width: 100%;
+  overflow: auto;
+}
+
+.lifeos-ai-workspace-message-files {
+  margin-top: 8px;
+}
+
+.lifeos-ai-workspace-message-files button {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 7px;
+  border: 1px solid var(--ai-workspace-line);
+  border-radius: 5px;
+  color: var(--lifeos-text);
+  background: var(--ai-workspace-soft);
+  cursor: pointer;
+}
+
+.lifeos-ai-workspace-message-files button span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-ai-workspace-reader-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--ai-workspace-line);
+}
+
+.lifeos-ai-workspace-reader-pager > span {
+  margin-right: auto;
+  color: var(--lifeos-muted);
+  font-size: 12px;
+}
+
+.lifeos-ai-workspace-outline-button {
+  min-height: 58px;
+  align-content: start;
+  border-radius: 0;
+  border-bottom: 1px solid var(--ai-workspace-line);
+}
+
+.lifeos-ai-workspace-outline-button span {
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 1.4;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.lifeos-ai-workspace-tree-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.lifeos-ai-workspace-tree-head {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(190px, 280px) minmax(220px, 320px);
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--ai-workspace-line);
+}
+
+.lifeos-ai-workspace-tree-head > div:first-child {
+  min-width: 0;
+}
+
+.lifeos-ai-workspace-tree-head p {
+  margin: 3px 0 0;
+}
+
+.lifeos-ai-workspace-tree-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.lifeos-ai-workspace-tree-search > span {
+  position: absolute;
+  z-index: 1;
+  left: 10px;
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  color: var(--lifeos-muted);
+  pointer-events: none;
+}
+
+.lifeos-ai-workspace-tree-search .lifeos-input {
+  width: 100%;
+  padding-left: 34px;
+}
+
+.lifeos-ai-workspace-tree-search-results {
+  display: none;
+  width: 100%;
+  max-height: 280px;
+  overflow: auto;
+  border-bottom: 1px solid var(--ai-workspace-line);
+  background: var(--background-primary);
+}
+
+.lifeos-ai-workspace-tree-search-results.is-visible {
+  display: grid;
+}
+
+.lifeos-ai-workspace-tree-search-summary {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--ai-workspace-line);
+  color: var(--lifeos-muted);
+  font-size: 12px;
+}
+
+.lifeos-ai-workspace-tree-search-results > button {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 9px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--ai-workspace-line);
+  color: var(--lifeos-text);
+  background: transparent;
+  text-align: left;
+}
+
+.lifeos-ai-workspace-tree-search-results > button:hover,
+.lifeos-ai-workspace-tree-search-results > button:focus-visible {
+  background: var(--ai-workspace-soft);
+}
+
+.lifeos-ai-workspace-tree-search-results > button span {
+  overflow: hidden;
+  color: var(--lifeos-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-ai-workspace-tree-toolbar {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--ai-workspace-line);
+  background: var(--ai-workspace-soft);
+}
+
+.lifeos-ai-workspace-tree-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  color: var(--lifeos-muted);
+  font-size: 11px;
+}
+
+.lifeos-ai-workspace-tree-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.lifeos-ai-workspace-tree-legend > span > span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--lifeos-muted);
+}
+
+.lifeos-ai-workspace-tree-legend .is-user > span {
+  background: var(--color-green);
+}
+
+.lifeos-ai-workspace-tree-legend .is-assistant > span {
+  background: var(--color-blue);
+}
+
+.lifeos-ai-workspace-tree-zoom {
+  min-width: 42px;
+  color: var(--lifeos-muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.lifeos-ai-workspace-tree-workspace {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  min-height: 520px;
+}
+
+.lifeos-ai-workspace-tree {
+  position: relative;
+  min-width: 0;
+  height: clamp(520px, calc(100vh - 350px), 760px);
+  overflow: hidden;
+  background: var(--background-primary);
+  cursor: grab;
+  outline: none;
+  touch-action: none;
+}
+
+.lifeos-ai-workspace-tree:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--interactive-accent);
+}
+
+.lifeos-ai-workspace-tree.is-panning {
+  cursor: grabbing;
+}
+
+.lifeos-ai-workspace-tree-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.lifeos-ai-workspace-tree-inspector {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  overflow: auto;
+  border-left: 1px solid var(--ai-workspace-line);
+  background: var(--background-secondary);
+}
+
+.lifeos-ai-workspace-tree-inspector-head {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+}
+
+.lifeos-ai-workspace-tree-inspector-head > span {
+  display: flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ai-workspace-line);
+  border-radius: 50%;
+  color: var(--lifeos-muted);
+  background: var(--background-primary);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.lifeos-ai-workspace-tree-inspector-head > span.is-user {
+  color: var(--color-green);
+  border-color: color-mix(in srgb, var(--color-green) 36%, transparent);
+}
+
+.lifeos-ai-workspace-tree-inspector-head > span.is-assistant {
+  color: var(--color-blue);
+  border-color: color-mix(in srgb, var(--color-blue) 36%, transparent);
+}
+
+.lifeos-ai-workspace-tree-inspector-head > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.lifeos-ai-workspace-tree-inspector-head strong {
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-ai-workspace-tree-inspector-head div > span {
+  color: var(--lifeos-muted);
+  font-size: 11px;
+}
+
+.lifeos-ai-workspace-tree-inspector-preview {
+  margin: 0;
+  color: var(--lifeos-muted);
+  font-size: 12px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-ai-workspace-tree-parent {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--ai-workspace-line);
+  border-radius: 6px;
+  color: var(--lifeos-text);
+  background: var(--background-primary);
+  font-size: 11px;
+}
+
+.lifeos-ai-workspace-tree-parent svg {
+  width: 14px;
+  height: 14px;
+}
+
+.lifeos-ai-workspace-version-selector {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.7fr) minmax(280px, 1fr) auto;
+  align-items: end;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--ai-workspace-line);
+  border-radius: 8px;
+  background: var(--ai-workspace-soft);
+}
+
+.lifeos-ai-workspace-version-selector > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.lifeos-ai-workspace-version-selector > div:first-child span {
+  color: var(--lifeos-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.lifeos-ai-workspace-version-selector select {
+  width: 100%;
+}
+
+.lifeos-ai-workspace-version-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 20px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 0;
+}
+
+.lifeos-ai-workspace-version-row + .lifeos-ai-workspace-version-row {
+  border-top: 1px solid var(--ai-workspace-line);
+}
+
+.lifeos-ai-workspace-version-row > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.lifeos-ai-workspace-version-row > div span {
+  color: var(--lifeos-muted);
+  font-size: 11px;
+}
+
+.lifeos-ai-workspace-version-marker {
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ai-workspace-line);
+  border-radius: 50%;
+}
+
+.lifeos-ai-workspace-version-row.is-current .lifeos-ai-workspace-version-marker {
+  border-color: var(--lifeos-primary);
+}
+
+.lifeos-ai-workspace-version-row.is-current .lifeos-ai-workspace-version-marker span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--lifeos-primary);
+}
+
+.lifeos-ai-workspace-asset-section + .lifeos-ai-workspace-asset-section {
+  margin-top: 14px;
+}
+
+.lifeos-ai-workspace-outcomes {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.lifeos-ai-workspace-version-history {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.lifeos-ai-workspace-outcome-help {
+  margin: 0 0 14px;
+  padding: 9px 10px;
+  border-left: 3px solid var(--lifeos-primary);
+  color: var(--lifeos-muted);
+  background: color-mix(in srgb, var(--lifeos-primary-soft) 42%, transparent);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.lifeos-ai-workspace-handoff-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1.45fr) minmax(270px, 0.55fr);
+  align-items: start;
+  gap: 14px;
+}
+
+.lifeos-ai-workspace-handoff-document,
+.lifeos-ai-workspace-handoff-context {
+  min-width: 0;
+}
+
+.lifeos-ai-workspace-handoff-document .lifeos-ai-workspace-asset-section {
+  padding: 11px 0;
+  border-bottom: 1px solid var(--ai-workspace-line);
+}
+
+.lifeos-ai-workspace-handoff-document .lifeos-ai-workspace-asset-section:last-of-type {
+  border-bottom: 0;
+}
+
+.lifeos-ai-workspace-handoff-context {
+  position: sticky;
+  top: 12px;
+}
+
+.lifeos-ai-workspace-handoff-context .lifeos-ai-workspace-asset-section ul {
+  display: grid;
+  gap: 7px;
+}
+
+.lifeos-ai-workspace-handoff-context .lifeos-ai-workspace-asset-section li {
+  overflow-wrap: anywhere;
+}
+
+.lifeos-ai-workspace-handoff-history {
+  margin-top: 14px;
+  border-top: 1px solid var(--ai-workspace-line);
+}
+
+.lifeos-ai-workspace-handoff-history > summary {
+  min-height: 40px;
+  padding: 11px 2px;
+  color: var(--lifeos-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.lifeos-ai-workspace-handoff-history .lifeos-ai-workspace-version-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.lifeos-ai-workspace-asset-section h3 {
+  margin: 0 0 7px;
+  font-size: 13px;
+}
+
+.lifeos-ai-workspace-asset-section ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.lifeos-ai-workspace-analysis-list {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.lifeos-ai-workspace-analysis-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px 9px;
+  padding: 9px;
+  border: 1px solid var(--ai-workspace-line);
+  border-radius: 6px;
+}
+
+.lifeos-ai-workspace-analysis-row.is-dismissed {
+  opacity: 0.64;
+}
+
+.lifeos-ai-workspace-analysis-row > div:first-child {
+  min-width: 0;
+}
+
+.lifeos-ai-workspace-analysis-row p {
+  margin: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-ai-workspace-analysis-row > div:first-child span {
+  color: var(--lifeos-muted);
+  font-size: 11px;
+}
+
+.lifeos-ai-workspace-analysis-row > .lifeos-ai-workspace-inline-actions {
+  grid-column: 1 / -1;
+}
+
+.lifeos-ai-workspace-lifecycle-select {
+  width: auto;
+  min-width: 96px;
+}
+
+.lifeos-ai-workspace-prompt-candidates {
+  margin-top: 14px;
+}
+
+.lifeos-ai-workspace-prompt-candidate {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.lifeos-ai-workspace-prompt-search {
+  width: min(540px, 100%);
+  margin: 12px 0;
+}
+
+.lifeos-ai-workspace-prompt-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.lifeos-ai-workspace-prompt-item {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--ai-workspace-line);
+  border-radius: 8px;
+  background: var(--lifeos-surface);
+}
+
+.lifeos-ai-workspace-prompt-item-head > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.lifeos-ai-workspace-prompt-item-head span,
+.lifeos-ai-workspace-prompt-preview {
+  color: var(--lifeos-muted);
+  font-size: 12px;
+}
+
+.lifeos-ai-workspace-prompt-preview {
+  max-height: 180px;
+  margin: 10px 0;
+  overflow: auto;
+  line-height: 1.55;
+}
+
+.lifeos-ai-workspace-prompt-tags span {
+  padding: 3px 6px;
+  border-radius: 4px;
+  color: var(--lifeos-primary);
+  background: var(--lifeos-primary-soft);
+  font-size: 10px;
+}
+
+.lifeos-ai-workspace-empty-inline,
+.lifeos-ai-workspace-error,
+.lifeos-ai-workspace-import-empty {
+  padding: 18px;
+  border: 1px dashed var(--ai-workspace-line);
+  border-radius: 7px;
+  color: var(--lifeos-muted);
+  text-align: center;
+}
+
+.lifeos-ai-workspace-error {
+  color: var(--text-error);
+  border-color: color-mix(in srgb, var(--text-error) 35%, transparent);
+}
+
+.lifeos-ai-workspace-failure {
+  display: grid;
+  width: min(680px, calc(100% - 24px));
+  min-width: 0;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  margin: 28px auto;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--text-error) 32%, var(--background-modifier-border));
+  border-radius: 8px;
+  background: var(--background-primary);
+}
+
+.lifeos-ai-workspace-failure > svg {
+  color: var(--text-error);
+}
+
+.lifeos-ai-workspace-failure p {
+  margin: 5px 0 0;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* AI Workspace modals */
+.modal.lifeos-ai-workspace-modal-host {
+  width: min(920px, calc(100vw - 36px));
+  max-width: 920px;
+}
+
+.modal.lifeos-ai-workspace-modal-host .modal-content {
+  max-height: min(84vh, 820px);
+  overflow: auto;
+}
+
+.lifeos-ai-workspace-modal {
+  min-width: 0;
+}
+
+.lifeos-ai-workspace-form-section,
+.lifeos-ai-workspace-import-options,
+.lifeos-ai-workspace-manual-import {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+}
+
+.lifeos-ai-workspace-import-details {
+  min-width: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+}
+
+.lifeos-ai-workspace-import-details + .lifeos-ai-workspace-import-details {
+  margin-top: 8px;
+}
+
+.lifeos-ai-workspace-import-details > summary {
+  padding: 11px 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.lifeos-ai-workspace-import-details[open] > summary {
+  border-bottom: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+}
+
+.lifeos-ai-workspace-import-details > .lifeos-ai-workspace-import-options,
+.lifeos-ai-workspace-import-details > .lifeos-ai-workspace-manual-import {
+  border: 0;
+  border-radius: 0 0 8px 8px;
+}
+
+.lifeos-ai-workspace-form-section + .lifeos-ai-workspace-form-section,
+.lifeos-ai-workspace-import-options + .lifeos-ai-workspace-manual-import {
+  margin-top: 12px;
+}
+
+.lifeos-ai-workspace-directory-list,
+.lifeos-ai-workspace-import-list {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.lifeos-ai-workspace-directory-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.lifeos-ai-workspace-directory-picker,
+.lifeos-ai-workspace-manual-file {
+  display: none;
+}
+
+.lifeos-ai-workspace-tool-source {
+  display: grid;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid var(--background-modifier-border);
+  border-left: 3px solid var(--lifeos-primary);
+  border-radius: 6px;
+}
+
+.lifeos-ai-workspace-tool-source > summary {
+  min-height: 24px;
+  align-items: center;
+  list-style: none;
+  cursor: pointer;
+}
+
+.lifeos-ai-workspace-tool-source > summary::-webkit-details-marker {
+  display: none;
+}
+
+.lifeos-ai-workspace-tool-source > summary::after {
+  width: 8px;
+  height: 8px;
+  margin-left: 4px;
+  border-right: 1.5px solid var(--text-muted);
+  border-bottom: 1.5px solid var(--text-muted);
+  content: "";
+  transform: rotate(45deg);
+  transition: transform 140ms ease;
+}
+
+.lifeos-ai-workspace-tool-source[open] > summary::after {
+  transform: rotate(225deg);
+}
+
+.lifeos-ai-workspace-tool-source.is-disabled {
+  opacity: 0.58;
+}
+
+.lifeos-ai-workspace-source-help {
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.lifeos-ai-workspace-export-sources {
+  display: grid;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-secondary);
+}
+
+.lifeos-ai-workspace-export-sources-copy p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.lifeos-ai-workspace-export-source-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.lifeos-ai-workspace-export-source {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 5px;
+  background: var(--background-primary);
+  cursor: pointer;
+}
+
+.lifeos-ai-workspace-source-status {
+  margin-left: auto;
+  padding: 3px 6px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.lifeos-ai-workspace-source-status.is-ready {
+  color: var(--text-success);
+  background: color-mix(in srgb, var(--text-success) 12%, transparent);
+}
+
+.lifeos-ai-workspace-source-status.is-missing {
+  color: var(--text-warning);
+  background: color-mix(in srgb, var(--text-warning) 12%, transparent);
+}
+
+.lifeos-ai-workspace-switch,
+.lifeos-ai-workspace-check-option {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.lifeos-ai-workspace-option-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.lifeos-ai-workspace-check-option {
+  padding: 9px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+}
+
+.lifeos-ai-workspace-check-option span {
+  display: grid;
+  gap: 2px;
+}
+
+.lifeos-ai-workspace-check-option small,
+.lifeos-ai-workspace-import-copy span {
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.lifeos-ai-workspace-progress {
+  margin: 12px 0 8px;
+  padding: 9px 11px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: var(--background-secondary);
+}
+
+.lifeos-ai-workspace-import-search {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 5px 6px 5px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 7px;
+  background: var(--background-primary);
+}
+
+.lifeos-ai-workspace-import-search[hidden] {
+  display: none;
+}
+
+.lifeos-ai-workspace-import-search:focus-within {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+}
+
+.lifeos-ai-workspace-import-search-icon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.lifeos-ai-workspace-import-search > input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.lifeos-ai-workspace-import-search > input:focus {
+  border: 0;
+  box-shadow: none;
+}
+
+.lifeos-ai-workspace-import-search-meta {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.lifeos-ai-workspace-import-search-clear {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  padding: 0;
+  justify-content: center;
+}
+
+.lifeos-ai-workspace-import-search-clear[hidden] {
+  display: none;
+}
+
+.lifeos-ai-workspace-import-search-clear .lifeos-v2-button-label {
+  display: none;
+}
+
+.lifeos-ai-workspace-import-search-clear :is(.lifeos-v2-button-icon, .lifeos-button-icon) {
+  margin: 0;
+}
+
+.lifeos-ai-workspace-import-toolbar,
+.lifeos-ai-workspace-preview-summary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 11px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary);
+}
+
+.lifeos-ai-workspace-import-toolbar > div:first-child,
+.lifeos-ai-workspace-preview-summary > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.lifeos-ai-workspace-import-toolbar span,
+.lifeos-ai-workspace-preview-summary span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.lifeos-ai-workspace-import-group {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+}
+
+.lifeos-ai-workspace-import-group-head {
+  padding: 9px 11px;
+  background: var(--background-secondary);
+}
+
+.lifeos-ai-workspace-import-row,
+.lifeos-ai-workspace-import-preview-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 9px;
+  padding: 10px 11px;
+}
+
+.lifeos-ai-workspace-import-row + .lifeos-ai-workspace-import-row,
+.lifeos-ai-workspace-import-preview-row + .lifeos-ai-workspace-import-preview-row {
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.lifeos-ai-workspace-import-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.lifeos-ai-workspace-import-copy strong,
+.lifeos-ai-workspace-import-copy span {
+  overflow-wrap: anywhere;
+}
+
+.lifeos-ai-workspace-import-content-preview {
+  margin-top: 8px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+}
+
+.lifeos-ai-workspace-import-content-preview > summary {
+  padding: 8px 9px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.lifeos-ai-workspace-import-preview-message {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 9px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.lifeos-ai-workspace-import-preview-message strong {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.lifeos-ai-workspace-import-preview-message p {
+  margin: 0;
+  color: var(--text-normal);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.lifeos-ai-workspace-import-content-preview > small {
+  display: block;
+  padding: 7px 9px;
+  border-top: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.lifeos-ai-workspace-continuation-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.lifeos-ai-workspace-continuation-inclusions {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.lifeos-ai-workspace-inclusion-option {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  padding: 10px 11px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 7px;
+  background: var(--background-primary-alt);
+  cursor: pointer;
+}
+
+.lifeos-ai-workspace-inclusion-option input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+}
+
+.lifeos-ai-workspace-inclusion-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.lifeos-ai-workspace-inclusion-copy strong {
+  color: var(--text-normal);
+  font-size: 12px;
+}
+
+.lifeos-ai-workspace-inclusion-copy span {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.lifeos-ai-workspace-continuation-preview {
+  min-height: 240px;
+  max-height: 52vh;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 7px;
+  background: var(--background-primary);
+}
+
+.lifeos-ai-workspace-prompt-textarea {
+  width: 100%;
+  min-height: 240px;
+  resize: vertical;
+}
+
+.lifeos-ai-workspace-prompt-details {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 7px;
+  background: var(--background-primary);
+}
+
+.lifeos-ai-workspace-prompt-details > summary {
+  padding: 10px 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.lifeos-ai-workspace-prompt-advanced {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 11px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.modal.lifeos-ai-workspace-modal-host .lifeos-v2-button.is-primary,
+.modal.lifeos-ai-workspace-modal-host .lifeos-button-primary {
+  border-color: transparent !important;
+  background: var(--interactive-accent) !important;
+  color: #ffffff !important;
+}
+
+.modal.lifeos-ai-workspace-modal-host :is(.lifeos-v2-button.is-primary, .lifeos-button-primary) :is(
+  .lifeos-v2-button-label,
+  .lifeos-v2-button-icon,
+  span,
+  svg
+) {
+  color: #ffffff !important;
+  stroke: currentColor !important;
+}
+
+.lifeos-ai-workspace-file-segment {
+  max-width: 100%;
+  min-height: 260px;
+  max-height: 58vh;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 7px;
+  background: var(--background-primary);
+  white-space: pre;
+}
+
+@media (max-width: 1180px) {
+  .lifeos-ai-workspace-reader-layout {
+    grid-template-columns: minmax(170px, 210px) minmax(0, 1fr);
+  }
+
+  .lifeos-ai-workspace-outline {
+    position: static;
+    grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    padding: 10px;
+    max-height: 240px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .lifeos-ai-edit-action {
+  .lifeos-ai-workspace-outline .lifeos-ai-workspace-rail-head {
+    grid-column: 1 / -1;
+  }
+
+  .lifeos-ai-workspace-reader-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .lifeos-ai-workspace-stats,
+  .lifeos-ai-workspace-prompt-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lifeos-ai-workspace-overview-grid,
+  .lifeos-ai-workspace-version-grid,
+  .lifeos-ai-workspace-handoff-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lifeos-ai-workspace-handoff-context {
+    position: static;
+  }
+
+  .lifeos-ai-workspace-version-selector {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .lifeos-ai-workspace-outcomes,
+  .lifeos-ai-workspace-version-history {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .lifeos-ai-workspace-reader-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lifeos-ai-workspace-session-rail,
+  .lifeos-ai-workspace-outline {
+    position: static;
+    max-height: 260px;
+  }
+
+  .lifeos-ai-workspace-session-rail {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(170px, 1fr));
+    overflow: auto;
+  }
+
+  .lifeos-ai-workspace-session-rail .lifeos-ai-workspace-rail-head {
+    grid-column: 1 / -1;
+  }
+
+  .lifeos-ai-workspace-session-group + .lifeos-ai-workspace-session-group {
+    border-top: 0;
+    border-left: 1px solid var(--ai-workspace-line);
+  }
+
+  .lifeos-ai-workspace-tree-head {
+    grid-template-columns: minmax(0, 1fr) minmax(160px, 1fr);
+  }
+
+  .lifeos-ai-workspace-tree-head > div:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .lifeos-ai-workspace-tree-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lifeos-ai-workspace-tree-inspector {
+    max-height: 320px;
+    border-top: 1px solid var(--ai-workspace-line);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 680px) {
+  .lifeos-ai-workspace > .lifeos-hero {
+    padding: 16px;
+  }
+
+  .lifeos-ai-workspace > .lifeos-hero h1 {
+    font-size: 27px;
+    line-height: 1.2;
+  }
+
+  .lifeos-ai-workspace-project-bar,
+  .lifeos-ai-workspace-prompt-head,
+  .lifeos-ai-workspace-reader-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .lifeos-ai-workspace-project-selector {
+    min-width: 0;
+  }
+
+  .lifeos-ai-workspace-project-bar,
+  .lifeos-ai-workspace-project-bar > *,
+  .lifeos-ai-workspace-overview-grid > *,
+  .lifeos-ai-workspace-overview-main > *,
+  .lifeos-ai-workspace-overview-side > *,
+  .lifeos-ai-workspace-panel > * {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .lifeos-ai-workspace-project-meta {
+    justify-content: space-between;
+  }
+
+  .lifeos-ai-workspace-overview-brief {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .lifeos-ai-workspace-overview-meta {
+    justify-items: start;
+  }
+
+  .lifeos-ai-workspace-project-meta span + span::before {
+    display: none;
+  }
+
+  .lifeos-ai-workspace-stats,
+  .lifeos-ai-workspace-prompt-list,
+  .lifeos-ai-workspace-option-grid,
+  .lifeos-ai-workspace-export-source-grid,
+  .lifeos-ai-workspace-prompt-advanced,
+  .lifeos-ai-workspace-reader-toolbar,
+  .lifeos-ai-workspace-outline {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lifeos-ai-workspace-reader-order {
     width: 100%;
   }
 
-  .lifeos-ai-edit-action-ghost {
-    margin-right: 0;
+  .lifeos-ai-workspace-reader-order button {
+    flex: 1;
   }
 
-  .lifeos-ai-edit-action-primary {
-    grid-column: 1 / -1;
+  .lifeos-ai-workspace-stat {
+    border-right: 0;
+    border-bottom: 1px solid var(--ai-workspace-line);
+  }
+
+  .lifeos-ai-workspace-stat:last-child {
+    border-bottom: 0;
+  }
+
+  .lifeos-ai-workspace-session-rail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lifeos-ai-workspace-session-rail .lifeos-ai-workspace-rail-head {
+    grid-column: 1;
+  }
+
+  .lifeos-ai-workspace-session-group + .lifeos-ai-workspace-session-group {
+    border-top: 1px solid var(--ai-workspace-line);
+    border-left: 0;
+  }
+
+  .lifeos-ai-workspace-outline .lifeos-ai-workspace-rail-head {
+    grid-column: 1;
+  }
+
+  .lifeos-ai-workspace-tree-head,
+  .lifeos-ai-workspace-continuation-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lifeos-ai-workspace-import-toolbar,
+  .lifeos-ai-workspace-preview-summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .lifeos-ai-workspace-import-search {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .lifeos-ai-workspace-import-search-meta {
+    grid-column: 2 / -1;
+    grid-row: 2;
+    white-space: normal;
+  }
+
+  .lifeos-ai-workspace-import-toolbar .lifeos-ai-workspace-inline-actions,
+  .lifeos-ai-workspace-preview-summary > .lifeos-button {
+    width: 100%;
+  }
+
+  .lifeos-ai-workspace-tree-head > div:first-child {
+    grid-column: 1;
+  }
+
+  .lifeos-ai-workspace-tree-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .lifeos-ai-workspace-tree-toolbar .lifeos-ai-workspace-inline-actions {
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    gap: 6px;
+    padding-bottom: 2px;
+  }
+
+  .lifeos-ai-workspace-tree-toolbar .lifeos-ai-workspace-tree-control {
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
+    min-height: 42px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .lifeos-ai-workspace-tree-toolbar .lifeos-ai-workspace-tree-control .lifeos-v2-button-label {
+    display: none;
+  }
+
+  .lifeos-ai-workspace-tree-toolbar .lifeos-ai-workspace-tree-control :is(.lifeos-v2-button-icon, .lifeos-button-icon) {
+    margin: 0;
+  }
+
+  .lifeos-ai-workspace-tree-toolbar .lifeos-ai-workspace-tree-zoom {
+    min-width: 38px;
+    align-self: center;
+    text-align: center;
+  }
+
+  .lifeos-ai-workspace-tree {
+    height: min(62vh, 600px);
+  }
+
+  .lifeos-ai-workspace-version-row {
+    grid-template-columns: 18px minmax(0, 1fr) auto;
+  }
+
+  .lifeos-ai-workspace-version-row > .lifeos-button {
+    grid-column: 2 / -1;
+    justify-self: start;
+  }
+
+  .lifeos-ai-workspace-activity-row,
+  .lifeos-ai-workspace-daily-row,
+  .lifeos-ai-workspace-prompt-candidate,
+  .lifeos-ai-workspace-import-row,
+  .lifeos-ai-workspace-import-preview-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .lifeos-ai-workspace-activity-row > .lifeos-button,
+  .lifeos-ai-workspace-daily-row > .lifeos-button,
+  .lifeos-ai-workspace-prompt-candidate > .lifeos-button,
+  .lifeos-ai-workspace-import-row > .lifeos-button,
+  .lifeos-ai-workspace-import-preview-row > .lifeos-button {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .modal.lifeos-ai-workspace-modal-host {
+    width: calc(100vw - 16px);
+  }
+
+  .lifeos-ai-workspace-message-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .lifeos-ai-workspace-failure {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .lifeos-ai-workspace-failure > .lifeos-button {
+    grid-column: 2;
+    justify-self: start;
   }
 }
-/* Life OS AI edit popover end */
+
+@media (max-width: 420px) {
+  .lifeos-ai-workspace-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lifeos-ai-workspace-chat {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .lifeos-ai-workspace-message {
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .lifeos-ai-workspace-message-marker span {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+/* Runtime matrix fixes: keep the composer inside Obsidian's usable viewport. */
+.lifeos-chat-view-host .lifeos-main.lifeos-chat-main-host,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-main.lifeos-chat-main-host {
+  box-sizing: border-box !important;
+}
+
+@media (min-width: 1101px) {
+  .lifeos-chat-view-host .lifeos-main.lifeos-chat-main-host,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-main.lifeos-chat-main-host,
+  .lifeos-root.lifeos-chat-root .lifeos-main.lifeos-chat-main-host {
+    padding-bottom: max(28px, calc(18px + env(safe-area-inset-bottom, 0px))) !important;
+  }
+}
+
+.lifeos-chat-view-host .lifeos-chat-main,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-main {
+  overflow-x: hidden !important;
+}
+
+@media (max-width: 1100px) {
+  .lifeos-chat-view-host .lifeos-root.lifeos-chat-root .lifeos-sidebar,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root .lifeos-sidebar {
+    min-height: 0 !important;
+    height: 68px !important;
+    align-self: start !important;
+  }
+}
+
+/* Dark derived themes must not retain Liquid Glass's pale highlight layer. */
+.lifeos-root.lifeos-theme-liquid-glass:is(
+  .lifeos-theme-night-owl,
+  .lifeos-theme-anime-moonlit,
+  .lifeos-theme-academic-ink
+) :is(
+  .lifeos-glass,
+  .lifeos-glass-card,
+  .lifeos-card,
+  .lifeos-panel,
+  .lifeos-stat-card,
+  .lifeos-chat-main,
+  .lifeos-chat-log,
+  .lifeos-chat-welcome,
+  .lifeos-chat-composer,
+  .lifeos-page-header,
+  .lifeos-hero
+)::before {
+  display: none !important;
+  content: none !important;
+  background: none !important;
+}
+
+.lifeos-root.lifeos-theme-night-owl {
+  --lifeos-surface: rgba(10, 15, 28, 0.94);
+  --lifeos-surface-soft: rgba(16, 24, 41, 0.9);
+  --lifeos-surface-strong: rgba(21, 30, 50, 0.96);
+}
+
+.lifeos-root.lifeos-theme-night-owl :is(
+  .lifeos-ai-workspace-project-bar,
+  .lifeos-ai-workspace-stat
+) {
+  border-color: rgba(120, 144, 180, 0.24);
+  background: rgba(16, 24, 41, 0.94);
+  color: #f0f6fc;
+}
+
+/* Codex themes use visible active states and consistent control geometry. */
+.lifeos-settings:is(.lifeos-theme-codex-light, .lifeos-theme-codex-dark) .lifeos-input {
+  border-radius: 6px !important;
+}
+
+.lifeos-root.lifeos-theme-codex-dark .lifeos-chip.is-active,
+body.lifeos-theme-codex-dark .lifeos-chat-main .lifeos-chip.is-active,
+.lifeos-settings.lifeos-theme-codex-dark :is(
+  .lifeos-theme-quick-button.is-active,
+  .lifeos-theme-family-tab.is-active,
+  .lifeos-theme-swatch.is-active
+) {
+  border-color: #3b82f6 !important;
+  background: #2563eb !important;
+  color: #ffffff !important;
+}
+
+.lifeos-root.lifeos-theme-codex-dark .lifeos-chip:not(.is-active),
+body.lifeos-theme-codex-dark .lifeos-chat-main .lifeos-chip:not(.is-active) {
+  border-color: #2f3033 !important;
+  background: #1f1f1f !important;
+  color: #f4f2ed !important;
+}
+
+.lifeos-settings.lifeos-theme-codex-dark :is(
+  .lifeos-input,
+  .lifeos-theme-quick-button,
+  .lifeos-theme-family-tab,
+  .lifeos-theme-swatch
+) {
+  border-color: #2f3033;
+  background: #1f1f1f !important;
+  color: #f4f4f5;
+}
+
+body.lifeos-theme-codex-dark .modal.mod-settings .lifeos-settings.lifeos-theme-codex-dark :is(
+  .lifeos-input,
+  .lifeos-theme-quick-button,
+  .lifeos-theme-family-tab,
+  .lifeos-theme-swatch
+) {
+  border-color: #2f3033 !important;
+  background: #1f1f1f !important;
+  color: #f4f4f5 !important;
+}
+
+body.lifeos-theme-codex-dark .modal.mod-settings .lifeos-settings.lifeos-theme-codex-dark :is(
+  .lifeos-theme-quick-button.is-active,
+  .lifeos-theme-family-tab.is-active,
+  .lifeos-theme-swatch.is-active
+) {
+  border-color: #3b82f6 !important;
+  background: #2563eb !important;
+  color: #ffffff !important;
+}
+
+/* AI handoff, process map, and assistant workflow polish */
+.lifeos-ai-workspace-handoff-alert {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin: 8px 0 12px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-orange) 38%, var(--ai-workspace-line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-orange) 8%, var(--background-primary));
+}
+
+.lifeos-ai-workspace-handoff-alert > svg {
+  color: var(--color-orange);
+}
+
+.lifeos-ai-workspace-handoff-alert > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.lifeos-ai-workspace-handoff-alert strong {
+  color: var(--text-normal);
+  font-size: 12px;
+}
+
+.lifeos-ai-workspace-handoff-alert span {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.lifeos-ai-workspace-handoff-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 2px;
+}
+
+.lifeos-ai-workspace-handoff-chip {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  padding: 3px 8px;
+  border: 1px solid var(--ai-workspace-line);
+  border-radius: 999px;
+  background: var(--background-primary-alt);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.lifeos-ai-workspace-handoff-chip.is-good {
+  border-color: color-mix(in srgb, var(--color-green) 32%, var(--ai-workspace-line));
+  color: var(--color-green);
+}
+
+.lifeos-ai-workspace-handoff-chip.is-warning {
+  border-color: color-mix(in srgb, var(--color-orange) 36%, var(--ai-workspace-line));
+  color: var(--color-orange);
+}
+
+.lifeos-ai-workspace-handoff-summary {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 16px;
+  padding: 14px 16px;
+  border-left: 3px solid var(--lifeos-primary);
+  background: var(--ai-workspace-soft);
+}
+
+.lifeos-ai-workspace-handoff-summary > span {
+  color: var(--lifeos-primary);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.lifeos-ai-workspace-handoff-summary > p {
+  max-width: 78ch;
+  margin: 0;
+  color: var(--lifeos-text);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.65;
+}
+
+.lifeos-ai-workspace-handoff-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  color: var(--lifeos-muted);
+  font-size: 12px;
+}
+
+.lifeos-ai-workspace-handoff-progress strong {
+  color: var(--lifeos-text);
+}
+
+.lifeos-ai-workspace-handoff-primary {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 22px;
+}
+
+.lifeos-ai-workspace-handoff-primary .lifeos-ai-workspace-asset-section {
+  min-width: 0;
+  margin: 0;
+}
+
+.lifeos-ai-workspace-handoff-addendum {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+  padding: 11px 12px;
+  border: 1px dashed var(--ai-workspace-line);
+  border-radius: 8px;
+  background: var(--ai-workspace-soft);
+}
+
+.lifeos-ai-workspace-handoff-addendum > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.lifeos-ai-workspace-handoff-addendum strong {
+  color: var(--lifeos-text);
+  font-size: 11px;
+}
+
+.lifeos-ai-workspace-handoff-addendum p {
+  margin: 0;
+  color: var(--lifeos-muted);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.lifeos-ai-workspace-handoff-addendum-input {
+  min-height: 220px;
+  resize: vertical;
+}
+
+.lifeos-ai-workspace-handoff-supporting {
+  margin-top: 8px;
+  border-top: 1px solid var(--ai-workspace-line);
+}
+
+.lifeos-ai-workspace-handoff-supporting > summary {
+  min-height: 42px;
+  padding: 12px 2px;
+  color: var(--lifeos-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.lifeos-ai-workspace-handoff-supporting[open] > summary {
+  color: var(--lifeos-text);
+}
+
+.lifeos-ai-workspace-handoff-supporting-body {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 22px;
+  padding-bottom: 6px;
+}
+
+.lifeos-ai-workspace-handoff-document :is(li, p),
+.lifeos-ai-workspace-handoff-context :is(li, p) {
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-ai-workspace-tree {
+  min-height: 580px;
+  background-color: var(--background-primary);
+  background-image:
+    linear-gradient(var(--ai-workspace-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ai-workspace-line) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.lifeos-ai-workspace-tree-inspector-eyebrow {
+  color: var(--lifeos-primary) !important;
+  font-size: 10px !important;
+  font-weight: 750;
+}
+
+.lifeos-ai-workspace-tree-inspector-content {
+  border-top: 1px solid var(--ai-workspace-line);
+}
+
+.lifeos-ai-workspace-tree-inspector-content > summary {
+  padding: 10px 0;
+  color: var(--lifeos-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.lifeos-ai-workspace-tree-inspector-content[open] > summary {
+  color: var(--lifeos-text);
+}
+
+.lifeos-ai-workspace-daily-row.is-confirmed {
+  background: color-mix(in srgb, var(--color-green) 6%, transparent);
+}
+
+.lifeos-ai-workspace-daily-row.is-confirmed > input[type="checkbox"] {
+  visibility: hidden;
+}
+
+.lifeos-ai-workspace-continuation-controls {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.lifeos-ai-workspace-handoff-generator-modal .lifeos-ai-workspace-form-section {
+  margin-top: 12px;
+}
+
+.lifeos-ai-workspace-local-handoff-steps {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: handoff-step;
+}
+
+.lifeos-ai-workspace-local-handoff-steps li {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 9px;
+  line-height: 1.55;
+  counter-increment: handoff-step;
+}
+
+.lifeos-ai-workspace-local-handoff-steps li::before {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 50%;
+  color: var(--lifeos-muted);
+  content: counter(handoff-step);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.lifeos-ai-workspace-local-handoff-path {
+  padding: 9px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-secondary);
+  font-family: var(--font-monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-chat-view-host .lifeos-chat-main,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-main,
+.lifeos-root.lifeos-chat-root .lifeos-chat-main {
+  display: grid !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  grid-template-rows: auto auto minmax(220px, 1fr) auto auto auto !important;
+  gap: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border-radius: 8px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-top,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-top,
+.lifeos-root.lifeos-chat-root .lifeos-chat-top {
+  padding: 16px 18px 12px !important;
+  border-bottom: 1px solid var(--lifeos-border-soft, var(--lifeos-border)) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-top-copy h1,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-top-copy h1,
+.lifeos-root.lifeos-chat-root .lifeos-chat-top-copy h1 {
+  font-size: 24px !important;
+  line-height: 1.2 !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-control-summary,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-control-summary,
+.lifeos-root.lifeos-chat-root .lifeos-chat-control-summary {
+  display: flex !important;
+  min-width: 0 !important;
+  min-height: 38px !important;
+  align-items: center !important;
+  gap: 6px 14px !important;
+  padding: 7px 18px !important;
+  overflow-x: auto !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--lifeos-border-soft, var(--lifeos-border)) !important;
+  border-radius: 0 !important;
+  background: var(--lifeos-surface-soft, var(--background-secondary)) !important;
+  box-shadow: none !important;
+  scrollbar-width: thin;
+}
+
+.lifeos-chat-view-host .lifeos-chat-control-summary-chip,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-control-summary-chip,
+.lifeos-root.lifeos-chat-root .lifeos-chat-control-summary-chip {
+  display: inline-flex !important;
+  min-width: 0 !important;
+  align-items: baseline !important;
+  gap: 5px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-control-summary-chip > span,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-control-summary-chip > span,
+.lifeos-root.lifeos-chat-root .lifeos-chat-control-summary-chip > span {
+  color: var(--lifeos-muted) !important;
+  font-size: 11px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-control-summary-chip > strong,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-control-summary-chip > strong,
+.lifeos-root.lifeos-chat-root .lifeos-chat-control-summary-chip > strong {
+  max-width: 210px !important;
+  overflow: hidden !important;
+  color: var(--lifeos-text) !important;
+  font-size: 11px !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-control-summary-context,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-control-summary-context,
+.lifeos-root.lifeos-chat-root .lifeos-chat-control-summary-context {
+  display: inline-flex !important;
+  margin-left: auto !important;
+  align-items: center !important;
+  gap: 8px !important;
+  color: var(--lifeos-muted) !important;
+  font-size: 11px !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-log,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-log,
+.lifeos-root.lifeos-chat-root .lifeos-chat-log {
+  min-height: 220px !important;
+  padding: 18px clamp(14px, 3vw, 36px) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: var(--lifeos-surface, var(--background-primary)) !important;
+  box-shadow: none !important;
+  scrollbar-gutter: stable;
+}
+
+.lifeos-chat-view-host .lifeos-chat-welcome,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-welcome,
+.lifeos-root.lifeos-chat-root .lifeos-chat-welcome {
+  width: min(520px, 100%) !important;
+  margin: clamp(24px, 8vh, 88px) auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-quick,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-quick,
+.lifeos-root.lifeos-chat-root .lifeos-chat-quick {
+  display: flex !important;
+  min-width: 0 !important;
+  flex-wrap: wrap !important;
+  gap: 6px !important;
+  padding: 8px 14px !important;
+  overflow: visible !important;
+  border-top: 1px solid var(--lifeos-border-soft, var(--lifeos-border)) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer {
+  display: grid !important;
+  min-width: 0 !important;
+  gap: 8px !important;
+  padding: 10px 14px 8px !important;
+  overflow: visible !important;
+  border: 0 !important;
+  border-top: 1px solid var(--lifeos-border-soft, var(--lifeos-border)) !important;
+  border-radius: 0 !important;
+  background: var(--lifeos-surface, var(--background-primary)) !important;
+  box-shadow: none !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer > textarea,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer > textarea,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer > textarea {
+  width: 100% !important;
+  min-height: 96px !important;
+  max-height: min(36vh, 360px) !important;
+  padding: 12px 14px !important;
+  border-radius: 7px !important;
+  line-height: 1.55 !important;
+  resize: none !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-send-actions,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-send-actions,
+.lifeos-root.lifeos-chat-root .lifeos-chat-send-actions {
+  display: flex !important;
+  min-width: 0 !important;
+  justify-content: flex-end !important;
+  gap: 8px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls {
+  display: block !important;
+  min-width: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  contain: none !important;
+  border: 0 !important;
+  border-top: 1px solid var(--lifeos-border-soft, var(--lifeos-border)) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-settings-summary,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-settings-summary,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-settings-summary {
+  display: grid !important;
+  min-height: 38px !important;
+  grid-template-columns: 18px auto minmax(0, 1fr) !important;
+  align-items: center !important;
+  gap: 7px !important;
+  padding: 8px 2px !important;
+  color: var(--lifeos-muted) !important;
+  cursor: pointer !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  list-style: none !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-settings-summary::-webkit-details-marker,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-settings-summary::-webkit-details-marker,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-settings-summary::-webkit-details-marker {
+  display: none;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-settings-summary > small,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-settings-summary > small,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-settings-summary > small {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  color: var(--lifeos-muted) !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  text-align: right !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-settings-body,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-settings-body,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-settings-body {
+  display: grid !important;
+  min-width: 0 !important;
+  gap: 10px !important;
+  padding: 8px 0 2px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-primary-controls {
+  display: grid !important;
+  min-width: 0 !important;
+  grid-template-columns: minmax(240px, 1.25fr) minmax(200px, 0.75fr) minmax(220px, 1fr) !important;
+  align-items: start !important;
+  gap: 10px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-toggles,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-toggles,
+.lifeos-root.lifeos-chat-root .lifeos-chat-toggles {
+  display: flex !important;
+  min-width: 0 !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-runtime-status,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-status,
+.lifeos-root.lifeos-chat-root .lifeos-chat-runtime-status {
+  display: flex !important;
+  min-width: 0 !important;
+  min-height: 38px !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 6px 14px !important;
+  border: 0 !important;
+  border-top: 1px solid var(--lifeos-border-soft, var(--lifeos-border)) !important;
+  border-radius: 0 !important;
+  background: var(--lifeos-surface-soft, var(--background-secondary)) !important;
+  box-shadow: none !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-runtime-metric,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-metric,
+.lifeos-root.lifeos-chat-root .lifeos-chat-runtime-metric {
+  display: inline-flex !important;
+  align-items: baseline !important;
+  gap: 5px !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-runtime-actions,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-actions,
+.lifeos-root.lifeos-chat-root .lifeos-chat-runtime-actions {
+  display: flex !important;
+  margin-left: auto !important;
+  gap: 6px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-bubble-header,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-bubble-header,
+.lifeos-root.lifeos-chat-root .lifeos-chat-bubble-header {
+  display: flex !important;
+  min-width: 0 !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-message-actions,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-message-actions,
+.lifeos-root.lifeos-chat-root .lifeos-chat-message-actions {
+  display: flex !important;
+  flex: 0 0 auto !important;
+  align-items: center !important;
+  gap: 3px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-message-actions button,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-message-actions button,
+.lifeos-root.lifeos-chat-root .lifeos-chat-message-actions button {
+  min-height: 28px !important;
+  padding: 3px 7px !important;
+  border-radius: 5px !important;
+  color: var(--lifeos-muted) !important;
+  background: transparent !important;
+  font-size: 11px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-message-actions button:hover,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-message-actions button:hover,
+.lifeos-root.lifeos-chat-root .lifeos-chat-message-actions button:hover {
+  color: var(--lifeos-text) !important;
+  background: var(--lifeos-surface-soft, var(--background-secondary)) !important;
+}
+
+@media (max-width: 980px) {
+  .lifeos-chat-view-host .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls .lifeos-chat-primary-controls,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls .lifeos-chat-primary-controls {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-ai-workspace-handoff-primary,
+  .lifeos-ai-workspace-handoff-supporting-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .lifeos-ai-workspace-handoff-alert,
+  .lifeos-ai-workspace-handoff-addendum {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lifeos-ai-workspace-handoff-alert > svg {
+    display: none;
+  }
+
+  .lifeos-ai-workspace-handoff-summary {
+    padding: 12px;
+  }
+
+  .lifeos-ai-workspace-tree {
+    min-height: 480px;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-top,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-top,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-top {
+    align-items: stretch !important;
+    padding: 12px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-top-actions,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-top-actions,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-top-actions {
+    width: 100% !important;
+    overflow-x: auto !important;
+    flex-wrap: nowrap !important;
+    justify-content: flex-start !important;
+    padding-bottom: 2px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-control-summary,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-control-summary,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-control-summary {
+    padding-inline: 12px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-control-summary-context,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-control-summary-context,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-control-summary-context {
+    margin-left: 0 !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-log,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-log,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-log {
+    padding: 14px 10px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-quick,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-quick,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-quick {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    padding-inline: 10px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-quick > button,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-quick > button,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-quick > button {
+    width: 100% !important;
+    min-width: 0 !important;
+    justify-content: center !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer {
+    padding-inline: 10px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-attachment-hint,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-attachment-hint,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-attachment-hint {
+    display: none !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer-settings-summary,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-settings-summary,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-settings-summary {
+    grid-template-columns: 18px minmax(0, 1fr) !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer-settings-summary > small,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-settings-summary > small,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-settings-summary > small {
+    display: none !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-runtime-status,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-status,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-runtime-status {
+    align-items: stretch !important;
+    flex-wrap: wrap !important;
+    padding-inline: 10px !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-runtime-actions,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-actions,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-runtime-actions {
+    width: 100% !important;
+    margin-left: 0 !important;
+    overflow-x: auto !important;
+  }
+
+  .lifeos-ai-workspace-continuation-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lifeos-ai-workspace-continuation-inclusions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Keep the assistant's empty state and composer fully inside Obsidian's usable desktop viewport. */
+@media (min-width: 761px) {
+  .lifeos-chat-view-host .lifeos-chat-welcome,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-welcome,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-welcome {
+    display: grid !important;
+    min-height: 120px !important;
+    box-sizing: border-box !important;
+    align-content: center !important;
+    gap: 7px !important;
+    padding: 18px 22px !important;
+    box-shadow: none !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-welcome::before,
+  .lifeos-chat-view-host .lifeos-chat-welcome::after,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-welcome::before,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-welcome::after,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-welcome::before,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-welcome::after {
+    display: none !important;
+    content: none !important;
+  }
+}
+
+@media (min-width: 1101px) {
+  .lifeos-chat-view-host .lifeos-chat-main,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-main,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-main {
+    max-height: calc(100dvh - 96px) !important;
+  }
+}
+
+@media (min-width: 1101px) and (max-height: 1000px) {
+  .lifeos-chat-view-host .lifeos-chat-composer > textarea,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer > textarea,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer > textarea {
+    min-height: 72px !important;
+    max-height: 120px !important;
+  }
+}
+
+/* Life OS compact project document library final guard start */
+.lifeos-root .lifeos-project-doc-panel {
+  gap: 10px !important;
+  padding: 12px !important;
+  border-radius: 8px !important;
+  box-shadow: 0 8px 24px rgba(45, 58, 94, 0.06) !important;
+}
+
+.lifeos-root .lifeos-project-doc-group {
+  gap: 8px !important;
+  min-width: 0 !important;
+}
+
+.lifeos-root .lifeos-project-doc-group-title-copy {
+  display: flex !important;
+  gap: 8px !important;
+  align-items: baseline !important;
+  min-width: 0 !important;
+}
+
+.lifeos-root .lifeos-project-doc-group-title-copy > strong {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-root .lifeos-project-doc-list-toolbar {
+  display: flex !important;
+  gap: 10px !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  min-width: 0 !important;
+}
+
+.lifeos-root .lifeos-project-doc-search {
+  display: grid !important;
+  grid-template-columns: 18px minmax(0, 1fr) !important;
+  gap: 7px !important;
+  align-items: center !important;
+  width: min(420px, 100%) !important;
+  min-width: 0 !important;
+  min-height: 34px !important;
+  padding: 0 10px !important;
+  border: 1px solid color-mix(in srgb, var(--text-muted) 22%, transparent) !important;
+  border-radius: 7px !important;
+  background: color-mix(in srgb, var(--background-primary) 94%, var(--background-secondary) 6%) !important;
+}
+
+.lifeos-root .lifeos-project-doc-search-icon,
+.lifeos-root .lifeos-project-doc-search-icon svg {
+  width: 16px !important;
+  height: 16px !important;
+  color: var(--text-muted) !important;
+}
+
+.lifeos-root .lifeos-project-doc-search .lifeos-input {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 30px !important;
+  height: 30px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  outline: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--text-normal) !important;
+}
+
+.lifeos-root .lifeos-project-doc-result-count {
+  flex: 0 0 auto !important;
+  color: var(--text-muted) !important;
+  font-size: 12px !important;
+  line-height: 1.35 !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-root .lifeos-project-doc-scroll {
+  display: grid !important;
+  gap: 0 !important;
+  max-height: min(44vh, 420px) !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain !important;
+  scrollbar-gutter: stable !important;
+  border-block: 1px solid color-mix(in srgb, var(--text-muted) 15%, transparent) !important;
+}
+
+.lifeos-root .lifeos-project-doc-item {
+  display: grid !important;
+  grid-template-columns: 30px minmax(0, 1fr) auto !important;
+  gap: 9px !important;
+  align-items: center !important;
+  min-width: 0 !important;
+  min-height: 72px !important;
+  padding: 9px 4px !important;
+  border: 0 !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--text-muted) 14%, transparent) !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.lifeos-root .lifeos-project-doc-item:last-child {
+  border-bottom: 0 !important;
+}
+
+.lifeos-root .lifeos-project-doc-item:hover {
+  background: color-mix(in srgb, var(--interactive-accent) 5%, transparent) !important;
+}
+
+.lifeos-root .lifeos-project-doc-leading {
+  display: grid !important;
+  place-items: center !important;
+  width: 30px !important;
+  height: 30px !important;
+  border-radius: 7px !important;
+  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary) 90%) !important;
+  color: var(--interactive-accent) !important;
+}
+
+.lifeos-root .lifeos-project-doc-leading svg {
+  width: 16px !important;
+  height: 16px !important;
+}
+
+.lifeos-root .lifeos-project-doc-body {
+  display: grid !important;
+  gap: 3px !important;
+  min-width: 0 !important;
+  cursor: pointer !important;
+  outline: none !important;
+}
+
+.lifeos-root .lifeos-project-doc-body:focus-visible {
+  border-radius: 4px !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 58%, transparent) !important;
+}
+
+.lifeos-root .lifeos-project-doc-title-row {
+  display: flex !important;
+  gap: 7px !important;
+  align-items: center !important;
+  min-width: 0 !important;
+}
+
+.lifeos-root .lifeos-project-doc-title-row > strong {
+  overflow: hidden !important;
+  min-width: 0 !important;
+  color: var(--text-normal) !important;
+  font-size: 13px !important;
+  line-height: 1.35 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-root .lifeos-project-doc-kind {
+  flex: 0 0 auto !important;
+  padding: 1px 5px !important;
+  border-radius: 4px !important;
+  background: color-mix(in srgb, var(--interactive-accent) 9%, transparent) !important;
+  color: color-mix(in srgb, var(--interactive-accent) 82%, var(--text-normal) 18%) !important;
+  font-size: 10px !important;
+  font-weight: 650 !important;
+  line-height: 1.5 !important;
+}
+
+.lifeos-root .lifeos-project-doc-meta {
+  display: flex !important;
+  gap: 0 !important;
+  align-items: center !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  color: var(--text-muted) !important;
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-root .lifeos-project-doc-meta > span {
+  overflow: hidden !important;
+  min-width: 0 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-root .lifeos-project-doc-meta > span + span::before {
+  content: "·" !important;
+  padding: 0 5px !important;
+  color: color-mix(in srgb, var(--text-muted) 58%, transparent) !important;
+}
+
+.lifeos-root .lifeos-project-doc-excerpt {
+  display: -webkit-box !important;
+  overflow: hidden !important;
+  max-width: 100% !important;
+  color: var(--text-muted) !important;
+  font-size: 11px !important;
+  line-height: 1.42 !important;
+  text-overflow: ellipsis !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 2 !important;
+}
+
+.lifeos-root .lifeos-project-doc-excerpt.is-empty {
+  font-style: italic !important;
+  opacity: 0.78 !important;
+}
+
+.lifeos-root .lifeos-project-doc-actions {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  gap: 3px !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+}
+
+.lifeos-root .lifeos-project-doc-icon-action {
+  width: 30px !important;
+  min-width: 30px !important;
+  max-width: 30px !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  padding: 0 !important;
+  border-radius: 6px !important;
+}
+
+.lifeos-root .lifeos-project-doc-icon-action .lifeos-v2-button-label {
+  display: none !important;
+}
+
+.lifeos-root .lifeos-project-doc-icon-action :is(.lifeos-button-icon, .lifeos-v2-button-icon, svg) {
+  width: 15px !important;
+  height: 15px !important;
+  margin: 0 !important;
+}
+
+.theme-dark .lifeos-root .lifeos-project-doc-search {
+  border-color: var(--lifeos-dark-border) !important;
+  background: rgba(15, 23, 42, 0.78) !important;
+}
+
+.theme-dark .lifeos-root .lifeos-project-doc-item {
+  border-bottom-color: var(--lifeos-dark-border) !important;
+  background: transparent !important;
+}
+
+.theme-dark .lifeos-root .lifeos-project-doc-item:hover {
+  background: rgba(96, 165, 250, 0.08) !important;
+}
+
+@media (max-width: 760px) {
+  .lifeos-root .lifeos-project-doc-head-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    width: 100% !important;
+  }
+
+  .lifeos-root .lifeos-project-doc-head-actions .lifeos-button {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .lifeos-root .lifeos-project-doc-list-toolbar {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+  }
+
+  .lifeos-root .lifeos-project-doc-scroll {
+    max-height: min(52vh, 460px) !important;
+  }
+
+  .lifeos-root .lifeos-project-doc-item {
+    grid-template-columns: 28px minmax(0, 1fr) auto !important;
+    gap: 7px !important;
+    min-height: 68px !important;
+  }
+
+  .lifeos-root .lifeos-project-doc-actions .lifeos-project-doc-icon-action {
+    width: 28px !important;
+    min-width: 28px !important;
+    max-width: 28px !important;
+  }
+}
+/* Life OS compact project document library final guard end */
+
+/* Life OS agent composer clarity and input reliability final guard start */
+.lifeos-chat-view-host .lifeos-chat-composer,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  align-items: end !important;
+  gap: 8px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-toolbar,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-toolbar,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-toolbar {
+  grid-column: 1 / -1 !important;
+  display: flex !important;
+  min-width: 0 !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding-bottom: 2px !important;
+  overflow: hidden !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-toolbar .lifeos-chat-attachment-bar,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-toolbar .lifeos-chat-attachment-bar,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-toolbar .lifeos-chat-attachment-bar {
+  display: flex !important;
+  min-width: 0 !important;
+  flex: 0 0 auto !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-toolbar .lifeos-chat-quick,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-toolbar .lifeos-chat-quick,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-toolbar .lifeos-chat-quick {
+  display: flex !important;
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 5px !important;
+  padding: 0 0 0 8px !important;
+  overflow: visible !important;
+  border: 0 !important;
+  border-left: 1px solid var(--lifeos-border-soft, var(--lifeos-border)) !important;
+  background: transparent !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-toolbar :is(.lifeos-chat-upload-button, .lifeos-chat-quick-action),
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-toolbar :is(.lifeos-chat-upload-button, .lifeos-chat-quick-action),
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-toolbar :is(.lifeos-chat-upload-button, .lifeos-chat-quick-action) {
+  min-width: 0 !important;
+  min-height: 32px !important;
+  height: 32px !important;
+  padding: 4px 9px !important;
+  border-radius: 6px !important;
+  white-space: nowrap !important;
+  box-shadow: none !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-toolbar .lifeos-chat-upload-button,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-toolbar .lifeos-chat-upload-button,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-toolbar .lifeos-chat-upload-button {
+  border-color: color-mix(in srgb, var(--lifeos-primary, #2563eb) 34%, var(--background-modifier-border)) !important;
+  color: var(--lifeos-primary, #2563eb) !important;
+  font-weight: 700 !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer > textarea,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer > textarea,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer > textarea {
+  grid-column: 1 / 2 !important;
+  min-height: 72px !important;
+  height: var(--lifeos-chat-composer-height, 82px) !important;
+  max-height: min(42svh, 420px) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-send-actions,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-send-actions,
+.lifeos-root.lifeos-chat-root .lifeos-chat-send-actions {
+  grid-column: 2 / 3 !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer-controls,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-controls,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-controls {
+  grid-column: 1 / -1 !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-runtime-status,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-status,
+.lifeos-root.lifeos-chat-root .lifeos-chat-runtime-status {
+  flex-wrap: wrap !important;
+}
+
+@media (max-width: 820px) {
+  .lifeos-chat-view-host .lifeos-chat-composer-toolbar,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-toolbar,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-toolbar {
+    align-items: stretch !important;
+    overflow: visible !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer-toolbar .lifeos-chat-quick,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-toolbar .lifeos-chat-quick,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer-toolbar .lifeos-chat-quick {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    scrollbar-width: thin !important;
+  }
+
+  body.is-mobile .lifeos-root.lifeos-chat-root .lifeos-chat-composer-toolbar .lifeos-chat-attachment-bar,
+  .lifeos-root.lifeos-chat-root.lifeos-is-mobile-runtime .lifeos-chat-composer-toolbar .lifeos-chat-attachment-bar,
+  .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-composer-toolbar .lifeos-chat-attachment-bar {
+    width: auto !important;
+    max-width: none !important;
+    flex: 0 0 auto !important;
+    overflow: visible !important;
+  }
+
+  body.is-mobile .lifeos-root.lifeos-chat-root .lifeos-chat-composer-toolbar .lifeos-chat-quick,
+  .lifeos-root.lifeos-chat-root.lifeos-is-mobile-runtime .lifeos-chat-composer-toolbar .lifeos-chat-quick,
+  .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-composer-toolbar .lifeos-chat-quick {
+    width: auto !important;
+    max-width: none !important;
+    flex: 1 1 0 !important;
+    box-sizing: border-box !important;
+  }
+}
+
+@media (max-width: 560px) {
+  .lifeos-chat-view-host .lifeos-chat-composer,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-composer > textarea,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer > textarea,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-composer > textarea,
+  .lifeos-chat-view-host .lifeos-chat-send-actions,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-send-actions,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-send-actions {
+    grid-column: 1 / -1 !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-send-actions,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-send-actions,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-send-actions {
+    display: flex !important;
+    width: 100% !important;
+    justify-content: flex-end !important;
+  }
+}
+
+@media (max-width: 380px) {
+  body.is-mobile .lifeos-root.lifeos-chat-root .lifeos-chat-composer,
+  .lifeos-root.lifeos-chat-root.lifeos-is-mobile-runtime .lifeos-chat-composer,
+  .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-composer {
+    padding-bottom: 8px !important;
+  }
+}
+/* Life OS agent composer clarity and input reliability final guard end */
+
+/* Life OS Agent RAG source transparency start */
+.lifeos-chat-view-host .lifeos-chat-context-drawer,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-context-drawer,
+.lifeos-root.lifeos-chat-root .lifeos-chat-context-drawer {
+  gap: 12px;
+}
+
+.lifeos-chat-view-host :is(.lifeos-context-trace, .lifeos-context-source-card),
+.workspace-leaf-content[data-type="personal-life-system-chat"] :is(.lifeos-context-trace, .lifeos-context-source-card),
+.lifeos-root.lifeos-chat-root :is(.lifeos-context-trace, .lifeos-context-source-card) {
+  border: 1px solid var(--background-modifier-border, var(--lifeos-border));
+  border-radius: 12px;
+  background: var(--background-primary, var(--lifeos-surface));
+  color: var(--text-normal, var(--lifeos-ink));
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.lifeos-chat-view-host .lifeos-context-trace,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-context-trace,
+.lifeos-root.lifeos-chat-root .lifeos-context-trace {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--interactive-accent, var(--lifeos-primary)) 7%, var(--background-primary, white));
+}
+
+.lifeos-context-trace-head,
+.lifeos-context-section-head,
+.lifeos-context-source-head,
+.lifeos-context-source-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lifeos-context-trace-summary,
+.lifeos-context-source-locator {
+  color: var(--text-muted, var(--lifeos-muted));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.lifeos-context-route,
+.lifeos-context-citation-id {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--interactive-accent, var(--lifeos-primary));
+  background: color-mix(in srgb, var(--interactive-accent, var(--lifeos-primary)) 12%, transparent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.lifeos-context-source-list,
+.lifeos-context-status-list {
+  display: grid;
+  gap: 8px;
+}
+
+.lifeos-context-section-head {
+  padding: 2px 2px 0;
+  color: var(--text-muted, var(--lifeos-muted));
+  font-size: 12px;
+}
+
+.lifeos-context-source-card {
+  display: grid;
+  gap: 7px;
+  padding: 11px;
+}
+
+.lifeos-context-source-head {
+  justify-content: flex-start;
+}
+
+.lifeos-context-source-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-context-source-excerpt {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-normal, var(--lifeos-ink));
+  font-size: 12px;
+  line-height: 1.6;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.lifeos-context-source-footer {
+  color: var(--text-faint, var(--lifeos-muted));
+  font-size: 11px;
+}
+
+.lifeos-context-source-footer button,
+.lifeos-chat-citation-button {
+  min-height: 32px;
+  border: 1px solid var(--background-modifier-border, var(--lifeos-border));
+  border-radius: 9px;
+  padding: 5px 9px;
+  background: var(--background-secondary, var(--lifeos-surface-soft));
+  color: var(--text-normal, var(--lifeos-ink));
+  cursor: pointer;
+}
+
+.lifeos-context-source-footer button:hover,
+.lifeos-context-source-footer button:focus-visible,
+.lifeos-chat-citation-button:hover,
+.lifeos-chat-citation-button:focus-visible {
+  border-color: var(--interactive-accent, var(--lifeos-primary));
+  color: var(--interactive-accent, var(--lifeos-primary));
+}
+
+.lifeos-context-empty {
+  border: 1px dashed var(--background-modifier-border, var(--lifeos-border));
+  border-radius: 10px;
+  padding: 12px;
+  color: var(--text-muted, var(--lifeos-muted));
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+@media (max-width: 720px) {
+  .lifeos-context-source-footer button,
+  .lifeos-chat-citation-button {
+    min-height: 40px;
+    padding-inline: 12px;
+  }
+}
+/* Life OS Agent RAG source transparency end */
+/* Life OS review evidence and pending-draft workflow v2 start */
+.lifeos-review-draft-queue {
+  display: grid;
+  gap: 14px;
+  margin-block: 16px;
+  padding: 18px;
+  min-width: 0;
+}
+
+.lifeos-review-draft-queue > .lifeos-card-heading-row {
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.lifeos-review-draft-queue h2,
+.lifeos-review-draft-queue p {
+  margin: 0;
+}
+
+.lifeos-review-draft-queue p {
+  margin-top: 4px;
+}
+
+.lifeos-review-draft-list {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.lifeos-review-draft-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 15px;
+  border: 1px solid var(--lifeos-border, var(--background-modifier-border));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--lifeos-surface, var(--background-primary)) 94%, var(--interactive-accent) 6%);
+}
+
+.lifeos-review-draft-row.is-stale {
+  border-color: color-mix(in srgb, var(--color-orange, #d97706) 48%, var(--lifeos-border, var(--background-modifier-border)));
+  background: color-mix(in srgb, var(--lifeos-surface, var(--background-primary)) 92%, var(--color-orange, #d97706) 8%);
+}
+
+.lifeos-review-draft-copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.lifeos-review-draft-title,
+.lifeos-review-draft-actions,
+.lifeos-review-draft-empty {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.lifeos-review-draft-meta,
+.lifeos-review-draft-preview {
+  color: var(--lifeos-muted, var(--text-muted));
+  line-height: 1.55;
+}
+
+.lifeos-review-draft-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-review-draft-empty {
+  justify-content: flex-start;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--background-secondary);
+}
+
+.lifeos-period-review-user-notes {
+  width: 100%;
+  min-height: 82px;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.lifeos-period-review-quality {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--lifeos-border, var(--background-modifier-border));
+  border-radius: 12px;
+  background: var(--background-secondary);
+}
+
+.lifeos-period-review-quality.is-pass {
+  border-color: color-mix(in srgb, var(--color-green, #16845b) 42%, var(--lifeos-border, var(--background-modifier-border)));
+}
+
+.lifeos-period-review-quality.is-warning {
+  border-color: color-mix(in srgb, var(--color-orange, #d97706) 48%, var(--lifeos-border, var(--background-modifier-border)));
+}
+
+.lifeos-period-review-quality ul,
+.lifeos-period-review-pending-evidence ul {
+  margin: 0;
+  padding-inline-start: 20px;
+}
+
+.lifeos-period-review-quality li,
+.lifeos-period-review-pending-evidence li {
+  margin-block: 4px;
+  line-height: 1.55;
+}
+
+.lifeos-period-review-pending-evidence {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--lifeos-border, var(--background-modifier-border));
+  border-radius: 12px;
+}
+
+.lifeos-period-review-pending-evidence > summary {
+  cursor: pointer;
+  color: var(--lifeos-muted, var(--text-muted));
+  font-weight: 650;
+}
+
+.lifeos-period-review-modal .lifeos-period-review-draft-actions {
+  align-items: center;
+  max-width: 100%;
+}
+
+.lifeos-period-review-modal .lifeos-period-review-draft-preview {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .lifeos-review-draft-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lifeos-review-draft-actions > .lifeos-button,
+  .lifeos-review-draft-empty > .lifeos-button {
+    flex: 1 1 150px;
+  }
+
+  .lifeos-review-draft-preview {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+  }
+}
+
+body.is-mobile .lifeos-period-review-modal .lifeos-period-review-draft-actions > .lifeos-button {
+  flex: 1 1 100%;
+  min-height: 44px;
+}
+/* Life OS review evidence and pending-draft workflow v2 end */

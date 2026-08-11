@@ -4,6 +4,7 @@ import { LlmWikiPathService } from "./LlmWikiPathService";
 import { appendFile, ensureFolder } from "../utils/vault";
 import { buildKeywordLinkedMarkdown } from "./KeywordLinkService";
 import {
+  detectLlmWikiPrivacyLevel,
   normalizedLlmWikiSimilarity,
   replaceLlmWikiFrontmatterValue,
   simpleLlmWikiHash,
@@ -192,6 +193,10 @@ export class LlmWikiDraftService {
       return this.rejectedAcceptance("这不是待接受的 LLM Wiki Draft。", action, targetPath);
     }
 
+    if (this.isUnsafeDraftForAcceptance(current, body, draftFile.basename)) {
+      return this.rejectedAcceptance("敏感或本地限定 Draft 不允许写入正式 Wiki，已保持暂存。", action, targetPath);
+    }
+
     if (!this.isCurrentDraftFile(draftPath, draftFile)) {
       return this.rejectedAcceptance("Draft 已变化或不再是当前 Draft，未执行写入。", action, targetPath);
     }
@@ -303,12 +308,13 @@ export class LlmWikiDraftService {
   private buildFormalWikiMarkdown(draftMarkdown: string, body: string, privacyOverride?: "normal" | "private"): string {
     const frontmatter = this.parseDraftFrontmatter(draftMarkdown) ?? {};
     const privacyLevel = privacyOverride ?? this.normalizeDraftPrivacyLevel(frontmatter.privacy_level);
+    const aiProcessingAllowed = this.isDraftAiProcessingAllowed(frontmatter.ai_processing_allowed) ? "true" : "false";
     const title = this.inferDraftTitle(draftMarkdown, "");
     return buildKeywordLinkedMarkdown([
       "---",
       "type: llm-wiki-formal",
       `privacy_level: ${privacyLevel}`,
-      "ai_processing_allowed: true",
+      `ai_processing_allowed: ${aiProcessingAllowed}`,
       "---",
       "",
       body,
@@ -380,6 +386,18 @@ export class LlmWikiDraftService {
     const normalized = String(value || "").trim().toLowerCase();
     if (normalized === "private" || normalized === "sensitive") return normalized;
     return "normal";
+  }
+
+  private isDraftAiProcessingAllowed(value: string | undefined): boolean {
+    return String(value ?? "true").trim().toLowerCase() !== "false";
+  }
+
+  private isUnsafeDraftForAcceptance(markdown: string, body: string, fallbackTitle = ""): boolean {
+    const frontmatter = this.parseDraftFrontmatter(markdown);
+    if (this.normalizeDraftPrivacyLevel(frontmatter?.privacy_level) === "sensitive") return true;
+    if (!this.isDraftAiProcessingAllowed(frontmatter?.ai_processing_allowed)) return true;
+    const title = String(frontmatter?.title || "").trim() || this.inferDraftTitle(body, fallbackTitle);
+    return detectLlmWikiPrivacyLevel(`${title}\n${body}`) === "sensitive";
   }
 
   private parseYamlScalar(value: string): string {

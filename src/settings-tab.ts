@@ -1,13 +1,14 @@
 ﻿import { App, Notice, PluginSettingTab, setIcon } from "obsidian";
 import PersonalLifeSystemPlugin from "./main";
 import { Setting } from "obsidian";
-import type { AiProviderType, AiReasoningEffort, AssistantStyle, AssistantVerbosity, ChatContextMode, ChatMode, ChatSendBehavior, DirectoryLanguage, DisplayLanguage, ExamProfileType, HeatmapRange, LlmWikiCompileDepth, LlmWikiLongMaterialMode, LlmWikiSensitiveDefault, ThemeStyle } from "./settings";
-import { analyzeAiConnectionTestModels, DEFAULT_SETTINGS, EXAM_PROFILE_OPTIONS, getAiProviderPreset, getExamChatModeLabel, getExamProfileLabel, getStoredAiApiKey, getStoredAiProviderConfig, getThemeStyleClasses, normalizeAiApiKeyInput, normalizeThemeStyle, setStoredAiApiKey, setStoredAiProviderConfig, THEME_STYLES, validateAiProviderConfig } from "./settings";
+import type { AiProviderType, AiReasoningEffort, AssistantStyle, AssistantVerbosity, ChatContextMode, ChatMode, ChatSendBehavior, DirectoryLanguage, DisplayLanguage, ExamProfileType, HeatmapRange, LlmWikiCompileDepth, LlmWikiLongMaterialMode, LlmWikiSensitiveDefault, PdfOcrEngine, ThemeStyle } from "./settings";
+import { analyzeAiConnectionTestModels, DEFAULT_SETTINGS, EXAM_PROFILE_OPTIONS, getAiProviderPreset, getExamChatModeLabel, getExamProfileLabel, getStoredAiApiKey, getStoredAiProviderConfig, getThemeStyleClasses, normalizeAiApiKeyInput, normalizeBrowserCapturePort, normalizeThemeStyle, setStoredAiApiKey, setStoredAiProviderConfig, THEME_STYLES, validateAiProviderConfig } from "./settings";
 import { requireProFeature, resolveLicenseStatus } from "./licensing/entitlement";
 import { createImportedAiSkills, getAiSkillCategories, getAiSkills, getAiSkillsByCategory, normalizeAiSkillIds } from "./services/AiSkillService";
 import { getUiThemeFamilies, getUiThemeMeta, getUiThemesByFamily } from "./ui/theme";
 import type { UiThemeDensity, UiThemeFamily, UiThemeMaterial, UiThemeMeta } from "./ui/types";
 import { installLifeOSResponsiveShell } from "./utils/responsive-shell";
+import { normalizeAutoReviewTime } from "./services/AutoReviewService";
 
 const PROVIDERS: Array<[AiProviderType, string]> = [
   ["openai", "OpenAI 官方"],
@@ -70,8 +71,10 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     this.renderThemePreferences(grid);
     this.renderBasics(grid);
     this.renderAi(grid);
+    this.renderAutoReview(grid);
     this.renderChatAi(grid);
     this.renderSafety(grid);
+    this.renderBrowserCapture(grid);
     this.renderProLicense(grid);
     this.renderLlmWiki(grid);
     this.renderExperience(grid);
@@ -272,6 +275,73 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       this.plugin.settings.visionAiModel = visionInput.value.trim();
       await this.saveImmediate("视觉模型设置已保存。");
     };
+    this.select<PdfOcrEngine>(
+      card,
+      "PDF OCR 引擎",
+      "自动模式会在配置 PP-StructureV3 地址后优先使用 PaddleOCR 结构化识别，不可用时回退到内置本地 OCR。",
+      this.plugin.settings.pdfOcrEngine ?? "auto",
+      [
+        ["auto", "自动（结构化优先，失败回退）"],
+        ["tesseract", "内置本地 OCR（轻量）"],
+        ["paddle", "PaddleOCR PP-StructureV3（复杂版面）"]
+      ],
+      async (value) => {
+        this.plugin.settings.pdfOcrEngine = value;
+        await this.saveImmediate("PDF OCR 引擎设置已保存。");
+      }
+    );
+    const paddleEndpoint = this.text(
+      card,
+      "PaddleOCR 服务地址",
+      "填写自托管 PP-StructureV3 的 /layout-parsing 地址；留空时不会发起外部请求。",
+      this.plugin.settings.paddleOcrEndpoint ?? "",
+      () => undefined
+    );
+    paddleEndpoint.placeholder = "http://127.0.0.1:8080/layout-parsing";
+    paddleEndpoint.onblur = async () => {
+      this.plugin.settings.paddleOcrEndpoint = paddleEndpoint.value.trim();
+      await this.saveImmediate("PaddleOCR 服务地址已保存。");
+    };
+  }
+
+  private renderAutoReview(parent: HTMLElement): void {
+    const card = this.section(parent, "自动复盘草稿", "到点后只生成待确认草稿，不修改日记正文，也不会自动保存为正式复盘。", "calendar-clock");
+    this.toggle(card, "启用自动复盘", "默认关闭。开启后仅在 AI 已配置且当前授权可用时运行。", this.plugin.settings.autoReviewEnabled === true, async (value) => {
+      this.plugin.settings.autoReviewEnabled = value;
+      await this.saveImmediate(value ? "自动复盘已开启，只会生成待确认草稿。" : "自动复盘已关闭。");
+      this.display();
+    });
+    const timeRow = this.row(card, "每日生成时间", "到达该时间后生成当天草稿；同一天同一来源只调用一次 AI。");
+    const time = timeRow.createEl("input", { cls: "lifeos-input", attr: { type: "time", "aria-label": "自动复盘生成时间" } }) as HTMLInputElement;
+    time.value = normalizeAutoReviewTime(this.plugin.settings.autoReviewTime);
+    time.disabled = !this.plugin.settings.autoReviewEnabled;
+    time.onchange = async () => {
+      this.plugin.settings.autoReviewTime = normalizeAutoReviewTime(time.value);
+      time.value = this.plugin.settings.autoReviewTime;
+      await this.saveImmediate("自动复盘时间已保存。");
+    };
+    this.toggle(card, "启动时补生成昨日遗漏", "默认开启；每天最多检查一次，仍然只创建待确认草稿。", this.plugin.settings.autoReviewCatchUp !== false, async (value) => {
+      this.plugin.settings.autoReviewCatchUp = value;
+      await this.saveImmediate("自动复盘补生成设置已保存。");
+    });
+
+    const license = resolveLicenseStatus(
+      this.plugin.settings.licenseSnapshot,
+      new Date(),
+      this.plugin.settings.licenseEntitlementToken
+    );
+    const blockers = [
+      this.plugin.ai.isConfigured() ? "" : "AI 尚未配置",
+      license === "free" ? "当前授权不包含 AI 复盘" : ""
+    ].filter(Boolean);
+    this.info(
+      card,
+      blockers.length > 0 ? "当前不会自动生成" : "运行条件已满足",
+      blockers.length > 0
+        ? `${blockers.join("；")}。设置会保留，条件满足后再运行。`
+        : `每天 ${normalizeAutoReviewTime(this.plugin.settings.autoReviewTime)} 检查；结果在复盘页“待确认草稿”中处理。`
+    );
+    this.button(card, "打开复盘草稿", () => void this.plugin.activateReview(), false);
   }
 
   private renderSafety(parent: HTMLElement): void {
@@ -279,6 +349,67 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     this.info(card, "本地保存", `已启用：所有内容都保存在你的 Vault：${this.plugin.getRoot()}`);
     this.info(card, "AI 写回确认", "已启用：AI 内容会先进入预览，确认后才写入日记、知识库或记忆。" );
     this.info(card, "长期记忆需确认", "已启用：候选记忆必须人工确认后才进入正式分类记忆。" );
+  }
+
+  private renderBrowserCapture(parent: HTMLElement): void {
+    const card = this.section(parent, "网页 AI 会话保存", "连接 Life OS 浏览器扩展，把当前网页对话保存到所选项目。", "globe-2");
+    const status = this.plugin.getBrowserCaptureStatus();
+    this.info(
+      card,
+      "本地桥状态",
+      this.plugin.settings.browserCaptureEnabled
+        ? status.message
+        : "未启用。扩展仍可下载标准 JSON，再从项目上下文手动导入。"
+    );
+    this.toggle(
+      card,
+      "启用本地保存桥",
+      "仅监听 127.0.0.1，项目列表和保存请求都必须携带连接令牌。",
+      this.plugin.settings.browserCaptureEnabled,
+      async (value) => {
+        this.plugin.settings.browserCaptureEnabled = value;
+        await this.plugin.saveSettings();
+        const next = await this.plugin.refreshBrowserCaptureBridge();
+        new Notice(value ? next.message : "网页 AI 本地保存桥已关闭。", 6000);
+        this.display();
+      }
+    );
+    const portRow = this.row(card, "本地端口", "默认 27183；只有端口被其他程序占用时才需要修改。");
+    const port = portRow.createEl("input", {
+      cls: "lifeos-input lifeos-browser-capture-port",
+      attr: { type: "number", min: "1024", max: "65535", step: "1" }
+    });
+    port.value = String(this.plugin.settings.browserCapturePort);
+    port.onblur = async () => {
+      this.plugin.settings.browserCapturePort = normalizeBrowserCapturePort(port.value);
+      await this.plugin.saveSettings();
+      const next = await this.plugin.refreshBrowserCaptureBridge();
+      new Notice(next.message, 6000);
+      this.display();
+    };
+    const tokenRow = this.row(card, "连接令牌", "令牌只保存在本机，用于阻止其他网页向 Life OS 写入内容。");
+    const token = tokenRow.createEl("input", {
+      cls: "lifeos-input lifeos-browser-capture-token",
+      attr: { type: "password", readonly: "true", "aria-label": "浏览器扩展连接令牌" }
+    });
+    token.value = this.plugin.settings.browserCaptureToken;
+    const actions = card.createDiv({ cls: "lifeos-settings-actions lifeos-browser-capture-actions" });
+    this.button(actions, "复制连接信息", () => void (async () => {
+      const connection = this.plugin.getBrowserCaptureConnection();
+      await navigator.clipboard.writeText(JSON.stringify(connection, null, 2));
+      new Notice("浏览器扩展连接信息已复制。", 4000);
+    })(), true);
+    this.button(actions, "重新启动", () => void (async () => {
+      const next = await this.plugin.refreshBrowserCaptureBridge();
+      new Notice(next.message, 6000);
+      this.display();
+    })());
+    this.button(actions, "更换令牌", () => void (async () => {
+      if (!window.confirm("更换令牌后，浏览器扩展里的旧连接信息会立即失效。确认继续吗？")) return;
+      await this.plugin.regenerateBrowserCaptureToken();
+      new Notice("连接令牌已更换，请重新粘贴到浏览器扩展。", 7000);
+      this.display();
+    })());
   }
 
   private renderProLicense(parent: HTMLElement): void {
@@ -755,9 +886,13 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       licenseLastPaymentSnapshot: this.plugin.settings.licenseLastPaymentSnapshot,
       licenseLastCheckedAt: this.plugin.settings.licenseLastCheckedAt
     };
+    const preservedBrowserCapture = {
+      browserCaptureToken: this.plugin.settings.browserCaptureToken
+    };
     this.plugin.settings = {
       ...DEFAULT_SETTINGS,
       ...preservedLicense,
+      ...preservedBrowserCapture,
       aiApiKeys: { ...DEFAULT_SETTINGS.aiApiKeys },
       aiProviderConfigs: { ...DEFAULT_SETTINGS.aiProviderConfigs },
       reportTopics: [...DEFAULT_SETTINGS.reportTopics]
@@ -765,6 +900,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     await this.plugin.saveSettings();
     this.resetDraft();
     this.plugin.applyTheme();
+    await this.plugin.refreshBrowserCaptureBridge();
     new Notice("已恢复默认设置。");
     this.display();
   }

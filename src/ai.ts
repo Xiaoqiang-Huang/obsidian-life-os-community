@@ -28,6 +28,7 @@ export interface AiRequest {
   responseFormat?: "text" | "json";
   model?: string;
   reasoningEffort?: AiReasoningEffort;
+  skipModelCheck?: boolean;
 }
 
 export interface AiUsage {
@@ -778,7 +779,7 @@ export class AiClient {
     }
 
     try {
-      if (settings.checkModelBeforeRequest) {
+      if (settings.checkModelBeforeRequest && !request.skipModelCheck) {
         const modelWarning = await this.getModelWarning(settings);
         if (modelWarning) {
           new Notice(modelWarning);
@@ -828,7 +829,7 @@ export class AiClient {
     }
 
     try {
-      if (settings.checkModelBeforeRequest) {
+      if (settings.checkModelBeforeRequest && !request.skipModelCheck) {
         const modelWarning = await this.getModelWarning(settings);
         if (modelWarning) {
           new Notice(modelWarning);

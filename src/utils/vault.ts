@@ -34,6 +34,10 @@ export async function ensureFolder(app: App, folderPath: string): Promise<void> 
       if (afterCreate instanceof TFolder) {
         continue;
       }
+      const adapterStat = await app.vault.adapter.stat(current).catch(() => null);
+      if (adapterStat?.type === "folder") {
+        continue;
+      }
       throw error;
     }
   }

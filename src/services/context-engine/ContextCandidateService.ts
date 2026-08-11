@@ -54,14 +54,10 @@ export class ContextCandidateService {
     }
 
     const selected = this.selectDiverse(candidates, limit);
-    const sections = selected.map((candidate, index) => this.candidateSection(candidate, index));
-    sections.push(this.auditSection({
-      scannedCount: scannedItems.length,
-      candidateCount: candidates.length,
-      selected,
-      omittedCount: Math.max(0, candidates.length - selected.length)
-    }));
-    return sections;
+    // Retrieval diagnostics belong in ContextRetrievalTrace, never in the model
+    // prompt. Keeping this method evidence-only prevents audit text from being
+    // mistaken for user knowledge.
+    return selected.map((candidate, index) => this.candidateSection(candidate, index));
   }
 
   private scanItems(inventory: ContextInventoryItem[], keywords: string[], userMessage: string): ContextInventoryItem[] {

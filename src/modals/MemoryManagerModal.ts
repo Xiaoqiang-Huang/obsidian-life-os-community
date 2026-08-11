@@ -1,4 +1,4 @@
-import { App, Modal, Notice, TFile, setIcon } from "obsidian";
+import { App, Component, Modal, Notice, TFile, setIcon } from "obsidian";
 import { createButton } from "../components/Button";
 import { createEmptyState } from "../components/EmptyState";
 import { createModalShell } from "../components/ModalShell";
@@ -16,12 +16,14 @@ export class MemoryManagerModal extends Modal {
   private activeTab: MemoryTab = "pending";
   private entries: PendingMemory[] = [];
   private category = "其他";
+  private readonly markdownComponent = new Component();
 
   constructor(app: App, private plugin: PersonalLifeSystemPlugin) {
     super(app);
   }
 
   async onOpen(): Promise<void> {
+    this.markdownComponent.load();
     this.modalEl.addClass("lifeos-modal-host", "lifeos-memory-modal-host");
     await this.render();
   }
@@ -184,7 +186,7 @@ export class MemoryManagerModal extends Modal {
     }
     for (const record of records) {
       const item = parent.createDiv({ cls: "lifeos-memory-item" });
-      renderMarkdownDisplay(this.app, this, item.createDiv({ cls: "lifeos-memory-content" }), record.content);
+      renderMarkdownDisplay(this.app, this.markdownComponent, item.createDiv({ cls: "lifeos-memory-content" }), record.content);
       const meta = item.createDiv({ cls: "lifeos-memory-meta" });
       meta.createSpan({ cls: "lifeos-badge", text: record.status || "已保存" });
       if (record.source) meta.createSpan({ text: record.source });
@@ -216,5 +218,10 @@ export class MemoryManagerModal extends Modal {
 
   private service(): MemoryService {
     return new MemoryService(this.app, new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage));
+  }
+
+  onClose(): void {
+    this.markdownComponent.unload();
+    this.contentEl.empty();
   }
 }

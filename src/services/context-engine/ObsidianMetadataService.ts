@@ -53,13 +53,30 @@ interface ParsedMarkdownMetadata {
   links: string[];
 }
 
+interface CachedMarkdownDocument {
+  mtime: number;
+  markdown: string;
+  metadata: ParsedMarkdownMetadata;
+}
+
+const DOCUMENT_CACHE = new WeakMap<object, Map<string, CachedMarkdownDocument>>();
+
 export class ObsidianMetadataService {
   private readonly app: AppLike;
   private readonly policy: ContextSourcePolicyService;
+  private readonly documentCache: Map<string, CachedMarkdownDocument>;
 
   constructor(app: App, rootFolder: string, policy = new ContextSourcePolicyService(rootFolder)) {
     this.app = app as unknown as AppLike;
     this.policy = policy;
+    const appKey = app as unknown as object;
+    const cached = DOCUMENT_CACHE.get(appKey);
+    if (cached) {
+      this.documentCache = cached;
+    } else {
+      this.documentCache = new Map<string, CachedMarkdownDocument>();
+      DOCUMENT_CACHE.set(appKey, this.documentCache);
+    }
   }
 
   async getInventory(): Promise<ContextInventoryItem[]> {
@@ -94,8 +111,14 @@ export class ObsidianMetadataService {
     if (!file || !this.policy.isAllowedPath(file.path)) return "";
 
     try {
+      const mtime = file.stat?.mtime ?? 0;
+      const cached = this.documentCache.get(file.path);
+      if (cached && cached.mtime === mtime) {
+        return this.policy.isAllowedFrontmatter(cached.metadata.frontmatter) ? cached.markdown : "";
+      }
       const markdown = await this.app.vault.read(file);
       const parsed = this.parseMarkdown(markdown);
+      this.documentCache.set(file.path, { mtime, markdown, metadata: parsed });
       return this.policy.isAllowedFrontmatter(parsed.frontmatter) ? markdown : "";
     } catch {
       return "";
@@ -138,7 +161,13 @@ export class ObsidianMetadataService {
   private async metadataFromMarkdown(file: FileLike): Promise<ParsedMarkdownMetadata | null> {
     try {
       // Local metadata fallback only: callers still receive metadata fields, never the body text.
-      return this.parseMarkdown(await this.app.vault.read(file));
+      const mtime = file.stat?.mtime ?? 0;
+      const cached = this.documentCache.get(file.path);
+      if (cached && cached.mtime === mtime) return cached.metadata;
+      const markdown = await this.app.vault.read(file);
+      const metadata = this.parseMarkdown(markdown);
+      this.documentCache.set(file.path, { mtime, markdown, metadata });
+      return metadata;
     } catch {
       return null;
     }

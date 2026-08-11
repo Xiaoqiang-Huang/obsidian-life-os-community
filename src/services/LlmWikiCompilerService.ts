@@ -48,10 +48,12 @@ export class LlmWikiCompilerService {
     const depth = input.compileDepth || this.settings.llmWikiShortCompileDepth || "standard";
     const relation = await this.projects.inferRelatedProjects(input.rawContent);
     const effectivePrivacyLevel = this.getEffectivePrivacyLevel(input.privacyLevel, input.title, input.rawContent);
-    const prompt = this.buildCompilePrompt(input.title, input.rawContent, depth);
-    const response = await this.safeComplete(prompt);
+    const effectiveAiProcessingAllowed = input.aiProcessingAllowed !== false && effectivePrivacyLevel !== "sensitive";
+    const localOnlyReason = this.getLocalOnlyReason(input, effectivePrivacyLevel);
+    const prompt = localOnlyReason ? "" : this.buildCompilePrompt(input.title, input.rawContent, depth);
+    const response = localOnlyReason ? { ok: false, error: localOnlyReason } : await this.safeComplete(prompt);
     const aiBody = response.ok ? response.text?.trim() : "";
-    const body = aiBody ? aiBody : this.fallbackDraftBody(input.rawContent, depth, response.ok ? "" : response.error);
+    const body = aiBody ? aiBody : this.fallbackDraftBody(input.rawContent, depth, localOnlyReason || (response.ok ? "" : response.error));
     const capturedStamp = this.normalizeCapturedStamp(input.capturedAt);
     const titleSlug = this.buildFilenameSlug(input.title);
     const baseId = `draft_${capturedStamp}_${titleSlug}_${simpleLlmWikiHash(input.title)}`;
@@ -61,7 +63,7 @@ export class LlmWikiCompilerService {
       depth,
       confidence: aiBody ? "medium" : "low",
       privacyLevel: effectivePrivacyLevel,
-      aiProcessingAllowed: true,
+      aiProcessingAllowed: effectiveAiProcessingAllowed,
       relation,
       body
     });
@@ -78,6 +80,17 @@ export class LlmWikiCompilerService {
       sensitive: 2
     };
     return severity[left] >= severity[right] ? left : right;
+  }
+
+  private getLocalOnlyReason(input: CompileLlmWikiSourceInput, effectivePrivacyLevel: LlmWikiPrivacyLevel): string {
+    if (input.aiProcessingAllowed === false) {
+      return "隐私/敏感资料未发送 AI，本地兜底草稿：上游明确禁止 AI 处理。";
+    }
+    if (effectivePrivacyLevel === "sensitive") {
+      const policy = this.settings.llmWikiSensitiveDefault || "local-only";
+      return `隐私/敏感资料未发送 AI，本地兜底草稿：资料被判定为 sensitive（策略：${policy}）。`;
+    }
+    return "";
   }
 
   private async safeComplete(prompt: string): Promise<AiResponse> {

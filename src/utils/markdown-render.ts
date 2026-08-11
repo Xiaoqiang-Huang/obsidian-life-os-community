@@ -8,7 +8,7 @@ export interface MarkdownDisplayOptions {
 export function createMarkdownDisplay(
   parent: HTMLElement,
   app: App,
-  component: Component | unknown,
+  component: Component,
   markdown: string,
   options: MarkdownDisplayOptions = {}
 ): HTMLElement {
@@ -19,7 +19,7 @@ export function createMarkdownDisplay(
 
 export function renderMarkdownDisplay(
   app: App,
-  component: Component | unknown,
+  component: Component,
   el: HTMLElement,
   markdown: string,
   sourcePath = ""
@@ -28,7 +28,7 @@ export function renderMarkdownDisplay(
   el.addClass("lifeos-markdown-content");
   const normalized = normalizeDisplayMarkdown(markdown);
   if (!normalized) return;
-  void MarkdownRenderer.renderMarkdown(normalized, el, sourcePath, component as Component);
+  void MarkdownRenderer.renderMarkdown(normalized, el, sourcePath, component);
 }
 
 export function normalizeDisplayMarkdown(markdown: string): string {

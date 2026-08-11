@@ -13,6 +13,7 @@ const NAV_ITEMS: Array<{ key: LifeOSNavKey; label: string; hint: string; icon: s
   { key: "knowledge", label: "\u77e5\u8bc6\u5e93", hint: "\u8d44\u6599\u4e0e\u7b14\u8bb0", icon: "library" },
   { key: "memory", label: "\u8bb0\u5fc6", hint: "\u786e\u8ba4\u540e\u518d\u6c89\u6dc0", icon: "brain" },
   { key: "review", label: "\u590d\u76d8", hint: "\u770b\u89c1\u6210\u957f", icon: "bar-chart-3" },
+  { key: "workspace", label: "\u9879\u76ee\u4e0a\u4e0b\u6587", hint: "\u7ba1\u7406 AI \u534f\u4f5c\u8d44\u4ea7", icon: "git-branch" },
   { key: "checkins", label: "\u5b66\u4e60\u6253\u5361", hint: "\u7559\u4e0b\u8fdb\u5ea6", icon: "graduation-cap" },
   { key: "settings", label: "\u8bbe\u7f6e", hint: "\u6570\u636e\u4e0e\u5b89\u5168", icon: "settings" }
 ];
@@ -20,7 +21,7 @@ const NAV_ITEMS: Array<{ key: LifeOSNavKey; label: string; hint: string; icon: s
 const NAV_GROUPS: Array<{ title: string; keys: LifeOSNavKey[] }> = [
   { title: "\u4e3b\u9875", keys: ["chat"] },
   { title: "\u4eca\u5929", keys: ["dashboard", "tasks", "diary", "checkins"] },
-  { title: "\u6c89\u6dc0", keys: ["knowledge", "memory", "review"] }
+  { title: "\u6c89\u6dc0", keys: ["knowledge", "memory", "review", "workspace"] }
 ];
 
 export function createSidebar(parent: HTMLElement, plugin: PersonalLifeSystemPlugin, active: LifeOSNavKey): HTMLElement {
@@ -79,6 +80,7 @@ function renderNavItem(
     if (item.key === "tasks") void plugin.activateTasks();
     if (item.key === "memory") void plugin.activateMemory();
     if (item.key === "review") void plugin.activateReview();
+    if (item.key === "workspace") void plugin.activateAiWorkspace();
     if (item.key === "chat") void plugin.activateChat();
     if (item.key === "guide") void plugin.activateUserGuide();
     if (item.key === "proCompare") void plugin.activateProCompare();

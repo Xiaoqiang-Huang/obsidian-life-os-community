@@ -4,12 +4,20 @@ import { createModalShell } from "../components/ModalShell";
 import type PersonalLifeSystemPlugin from "../main";
 import { FileSystemService } from "../services/FileSystemService";
 import { ProjectService } from "../services/ProjectService";
+import type { LifeOSProject } from "../types";
+
+interface NewProjectModalOptions {
+  title?: string;
+  subtitle?: string;
+  submitLabel?: string;
+}
 
 export class NewProjectModal extends Modal {
   constructor(
     app: App,
     private plugin: PersonalLifeSystemPlugin,
-    private onSaved?: () => void | Promise<void>
+    private onSaved?: (project: LifeOSProject) => void | Promise<void>,
+    private options: NewProjectModalOptions = {}
   ) {
     super(app);
   }
@@ -17,8 +25,8 @@ export class NewProjectModal extends Modal {
   onOpen(): void {
     this.modalEl.addClass("lifeos-modal-host", "lifeos-project-modal-host");
     const { body, footer } = createModalShell(this.contentEl, {
-      title: "新增项目",
-      subtitle: "把一组任务组织成可以追踪的推进状态。",
+      title: this.options.title ?? "新增项目",
+      subtitle: this.options.subtitle ?? "把任务、文档和 AI 协作记录组织成可以持续推进的项目。",
       icon: "folder-plus",
       className: "lifeos-project-modal"
     });
@@ -41,10 +49,10 @@ export class NewProjectModal extends Modal {
     createButton(footer, "取消", () => this.close(), { ghost: true });
     createButton(
       footer,
-      "保存项目",
+      this.options.submitLabel ?? "保存项目",
       async () => {
         try {
-          await new ProjectService(this.app, new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage)).createProject({
+          const project = await new ProjectService(this.app, new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage)).createProject({
             name: name.value,
             type: type.value,
             status: status.value,
@@ -52,7 +60,7 @@ export class NewProjectModal extends Modal {
           });
           new Notice("项目已创建。", 5000);
           this.close();
-          await this.onSaved?.();
+          await this.onSaved?.(project);
         } catch (error) {
           new Notice(error instanceof Error ? error.message : "项目保存失败。");
         }

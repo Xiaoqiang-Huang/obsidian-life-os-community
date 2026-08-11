@@ -20,7 +20,7 @@ const FEATURE_GROUPS = [
     copy: "不用先判断该打开哪个模块，把原始内容直接发给 AI 助手即可。",
     items: [
       { title: "随手输入", icon: "send", copy: "一句话、长文本、资料链接、今天发生的事、计划和困惑都可以直接发给 AI。" },
-      { title: "上下文理解", icon: "scan-text", copy: "AI 会结合已有日记、任务、记忆、知识库和复盘，判断你当前真正需要处理什么。" },
+      { title: "上下文理解", icon: "scan-text", copy: "AI 会检索相关的日记、任务、记忆、知识库和复盘；回答中的 [S1] 等标记可在“上下文来源”中打开原文核对。" },
       { title: "候选写入", icon: "file-check-2", copy: "需要落库的内容先生成预览，确认后再进入日记、任务、知识或记忆。" },
       { title: "继续追问", icon: "messages-square", copy: "不确定怎么处理时，可以继续让 AI 拆小、改写、总结或生成下一步。" }
     ]
@@ -43,7 +43,10 @@ const FEATURE_GROUPS = [
     items: [
       { title: "今日行动", icon: "layout-dashboard", copy: "集中查看今天该做什么、已经记录了什么、还缺什么。" },
       { title: "学习打卡", icon: "graduation-cap", copy: "学习、备考和训练进度可以持续记录。" },
-      { title: "复盘趋势", icon: "bar-chart-3", copy: "查看日、周、月、年总结，以及任务、日记、打卡形成的成长线索。" },
+      { title: "周期复盘", icon: "bar-chart-3", copy: "按日期确认日报来源，用已确认项目活动、任务和打卡核对事实；用户补充不会被 AI 重生成覆盖。" },
+      { title: "待确认草稿", icon: "file-clock", copy: "可选自动复盘只生成待确认稿。来源变化会标记过期，审核后才保存为正式复盘。" },
+      { title: "项目上下文", icon: "git-branch", copy: "导入并跟踪多种 AI 会话，在节点画布定位过程，生成带证据的交接 V2，并迁移给不同目标工具。" },
+      { title: "外部 AI 协议", icon: "file-key-2", copy: "Codex、Claude、OpenCode、Pi 等工具先读取 Life OS 指南，并通过候选收件箱安全回写。" },
       { title: "主题与模型", icon: "sliders-horizontal", copy: "在设置里切换视觉主题、AI 服务商、模型和回复风格。" },
       { title: "Pro 授权", icon: "badge-check", copy: "免费版免费使用，定位为基础手动使用，支持 1 台本地使用；月付、买断、兑换码和授权码都集中在授权中心。" }
     ]
@@ -62,9 +65,14 @@ const WORKFLOWS = [
     steps: ["把资料、错题或复习状态丢给 AI", "让 AI 提炼知识点和下一步", "确认沉淀到知识库或打卡", "用复盘查看长期趋势"]
   },
   {
-    title: "长期使用",
-    icon: "route",
-    steps: ["持续把零散内容交给 AI 处理", "只确认真正有价值的写入", "按周/月复盘趋势", "用 Pro 处理多设备授权和恢复"]
+    title: "周期复盘",
+    icon: "bar-chart-3",
+    steps: ["在多维复盘页打开日、周或月复盘", "选择日期范围并确认日报与已确认事实", "生成草稿并核对来源、行动项和质量提示", "在独立用户补充区编辑，按需重生成 AI 区", "保存为正式新版本；自动流程只产生待确认草稿"]
+  },
+  {
+    title: "项目 AI 会话",
+    icon: "git-branch",
+    steps: ["选择项目并绑定工作目录", "主动检查支持工具或导入标准会话文件", "按名称搜索并预览归属、重复和冲突", "在阅读器或过程树追溯每条对话", "核对交接 V2 后迁移当前会话或整个项目到任意目标工具"]
   }
 ];
 
@@ -169,6 +177,7 @@ export class UserGuideView extends ItemView {
     const localActions = local.createDiv({ cls: "lifeos-guide-card-actions" });
     createButton(localActions, "打开知识库", () => void this.plugin.activateKnowledge(), { ghost: true, icon: "library" });
     createButton(localActions, "打开今日日记", () => void this.plugin.openTodayNote(false), { ghost: true, icon: "book-open" });
+    createButton(localActions, "打开项目上下文", () => void this.plugin.activateAiWorkspace(), { ghost: true, icon: "git-branch" });
 
     const pro = createCard(grid, "lifeos-guide-action-card");
     this.cardTitle(pro, "免费版 / 完整体验 Pro / 短期 Pro 使用 / 长期 Pro 使用", "columns-3");

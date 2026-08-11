@@ -1,4 +1,4 @@
-import { ItemView, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
+import { ItemView, Notice, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import { REVIEW_VIEW_TYPE } from "../constants";
 import type PersonalLifeSystemPlugin from "../main";
 import { createButton } from "../components/Button";
@@ -9,10 +9,13 @@ import { createHeroHeader } from "../components/HeroHeader";
 import { createLifeOSShell } from "../components/LifeOSComponent";
 import { createStatCard } from "../components/StatCard";
 import { QuickCaptureModal } from "../modals/QuickCaptureModal";
+import { PeriodReviewModal } from "../modals/PeriodReviewModal";
 import { ActivityService, type DailyActivity } from "../services/ActivityService";
 import { DailyNoteService } from "../services/DailyNoteService";
 import { DisplayFormatService, type DisplayBlock } from "../services/DisplayFormatService";
 import { FileSystemService } from "../services/FileSystemService";
+import { AutoReviewService, type AutoReviewDraft } from "../services/AutoReviewService";
+import { PeriodReviewService } from "../services/PeriodReviewService";
 import { ReviewService, type ReviewSummaryPeriod, type SummaryInfo } from "../services/ReviewService";
 import { today } from "../utils/dates";
 import { renderMarkdownDisplay } from "../utils/markdown-render";
@@ -54,6 +57,7 @@ export class ReviewView extends ItemView {
     const container = this.containerEl.children[1];
     container.empty();
     const main = createLifeOSShell(container as HTMLElement, this.plugin, "review");
+    main.addClass("lifeos-review-main");
     this.renderLoadingState(main);
 
     await this.plugin.ensureBaseStructure();
@@ -62,15 +66,21 @@ export class ReviewView extends ItemView {
     main.empty();
     const fs = new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage);
     const reviews = new ReviewService(this.app, fs, this.plugin.settings);
-    const activities = Array.from(
-      (await new ActivityService(this.app, fs, this.plugin.settings).getDailyActivityMap()).values()
-    );
+    const periodReviews = new PeriodReviewService(this.app, fs, this.plugin.settings);
+    const autoReviews = new AutoReviewService(this.app, fs, this.plugin.settings, this.plugin.ai);
+    const [activityMap, pendingDrafts] = await Promise.all([
+      new ActivityService(this.app, fs, this.plugin.settings).getDailyActivityMap(),
+      autoReviews.listDrafts()
+    ]);
+    const activities = Array.from(activityMap.values());
     if (!this.isCurrentRender(token)) return;
     const summaryGroups = reviews.listSummariesByPeriod();
+    const formalPeriodReviewCount = periodReviews.listReviews().length;
     const activeDays = activities.filter((item) => item.score > 0).length;
     const streak = this.continuousStreak(activities);
     const completedTasks = activities.reduce((sum, item) => sum + item.completedTaskCount, 0);
-    const summaryCount = activities.filter((item) => item.summaryExists).length;
+    const legacySummaryCount = Object.values(summaryGroups).reduce((total, items) => total + items.length, 0);
+    const summaryCount = legacySummaryCount + formalPeriodReviewCount;
 
     createHeroHeader(main, {
       kicker: "成长看板",
@@ -78,7 +88,7 @@ export class ReviewView extends ItemView {
       description: "日记、任务、打卡和复盘会逐渐形成一条可回看的成长轨迹。",
       icon: "bar-chart-3",
       actions: [
-        { label: "生成今日复盘", icon: "wand-2", primary: true, onClick: () => void this.generateSummary(reviews, "Daily") },
+        { label: "生成今日复盘", icon: "wand-2", primary: true, onClick: () => void this.generateSummary("Daily") },
         { label: "打开今日日记", icon: "book-open", onClick: () => void this.plugin.openTodayNote(false) }
       ]
     });
@@ -89,16 +99,21 @@ export class ReviewView extends ItemView {
     createStatCard(stats, "完成任务数", String(completedTasks), "purple", "check-check");
     createStatCard(stats, "复盘次数", String(summaryCount), "orange", "sparkles");
 
+    await this.renderPendingDrafts(main, pendingDrafts, autoReviews, periodReviews);
+
     const focus = main.createDiv({ cls: "lifeos-review-focus-grid" });
     this.renderHeatmap(focus, activities);
-    await this.renderHighlight(focus, fs);
-    if (!this.isCurrentRender(token)) return;
-
+    const highlightHost = focus.createDiv({ cls: "lifeos-review-highlight-host" });
     const summaries = main.createDiv({ cls: "lifeos-review-grid" });
-    await this.renderSummaryList(summaries, "今日复盘", "每天三句话也能沉淀状态。", reviews, "Daily", summaryGroups.Daily);
-    await this.renderSummaryList(summaries, "本周回顾", "回看这一周完成了什么。", reviews, "Weekly", summaryGroups.Weekly);
-    await this.renderSummaryList(summaries, "月度总结", "看见长期主题和反复出现的问题。", reviews, "Monthly", summaryGroups.Monthly);
-    await this.renderSummaryList(summaries, "年度脉络", "把一年里的变化整理成脉络。", reviews, "Yearly", summaryGroups.Yearly);
+    const highlightPromise = this.renderHighlight(highlightHost, fs);
+    await Promise.all([
+      highlightPromise,
+      this.renderSummaryList(summaries, "今日复盘", "每天三句话也能沉淀状态。", reviews, periodReviews, "Daily", summaryGroups.Daily, periodReviews.listReviews("daily")),
+      this.renderSummaryList(summaries, "本周回顾", "回看这一周完成了什么。", reviews, periodReviews, "Weekly", summaryGroups.Weekly, periodReviews.listReviews("weekly")),
+      this.renderSummaryList(summaries, "月度总结", "看见长期主题和反复出现的问题。", reviews, periodReviews, "Monthly", summaryGroups.Monthly, periodReviews.listReviews("monthly")),
+      this.renderSummaryList(summaries, "年度脉络", "把一年里的变化整理成脉络。", reviews, periodReviews, "Yearly", summaryGroups.Yearly, [])
+    ]);
+    if (!this.isCurrentRender(token)) return;
   }
 
   private renderLoadingState(main: HTMLElement): void {
@@ -126,7 +141,8 @@ export class ReviewView extends ItemView {
       description: "正在读取最近记录，不会阻塞页面打开。",
       compact: true
     });
-    const highlight = createCard(focus, "lifeos-panel lifeos-highlight-card");
+    const highlightHost = focus.createDiv({ cls: "lifeos-review-highlight-host" });
+    const highlight = createCard(highlightHost, "lifeos-panel lifeos-highlight-card");
     createEmptyState(highlight, {
       icon: "sparkles",
       title: "正在提取高光时刻",
@@ -173,10 +189,58 @@ export class ReviewView extends ItemView {
     }
   }
 
-  private async generateSummary(reviews: ReviewService, period: ReviewSummaryPeriod): Promise<void> {
-    const file = await reviews.generateSummary(period);
-    await this.app.workspace.getLeaf(false).openFile(file);
-    await this.render();
+  private generateSummary(period: ReviewSummaryPeriod): void {
+    const kind = period === "Daily" ? "daily" : period === "Weekly" ? "weekly" : period === "Monthly" ? "monthly" : "custom";
+    void this.plugin.generateReport(kind);
+  }
+
+  private async renderPendingDrafts(
+    parent: HTMLElement,
+    drafts: AutoReviewDraft[],
+    autoReviews: AutoReviewService,
+    periodReviews: PeriodReviewService
+  ): Promise<void> {
+    const card = createCard(parent, "lifeos-panel lifeos-review-draft-queue");
+    const heading = card.createDiv({ cls: "lifeos-card-heading-row" });
+    const copy = heading.createDiv();
+    copy.createEl("h2", { text: "待确认复盘草稿" });
+    copy.createEl("p", { cls: "lifeos-muted", text: "自动复盘只会来到这里。确认、编辑并保存后，才会成为正式复盘。" });
+    heading.createSpan({ cls: "lifeos-badge", text: `${drafts.length} 份待处理` });
+    if (drafts.length === 0) {
+      const empty = card.createDiv({ cls: "lifeos-review-draft-empty" });
+      empty.createEl("strong", { text: "当前没有待确认草稿" });
+      empty.createSpan({ text: this.plugin.settings.autoReviewEnabled ? "到达设定时间后会在这里生成。" : "可在设置中主动开启自动复盘，也可以手动生成。" });
+      createButton(empty, "手动生成今日复盘", () => this.generateSummary("Daily"), { ghost: true, icon: "wand-2" });
+      return;
+    }
+    const checked = await Promise.all(drafts.map(async (draft) => ({
+      draft,
+      sourceChanged: draft.status === "stale" || (await periodReviews.savedReviewSourceChanges(draft.path)).length > 0
+    })));
+    const list = card.createDiv({ cls: "lifeos-review-draft-list" });
+    for (const { draft, sourceChanged } of checked) {
+      const row = list.createDiv({ cls: `lifeos-review-draft-row ${sourceChanged ? "is-stale" : ""}` });
+      const rowCopy = row.createDiv({ cls: "lifeos-review-draft-copy" });
+      const title = rowCopy.createDiv({ cls: "lifeos-review-draft-title" });
+      title.createEl("strong", { text: `${draft.window.start} 日复盘` });
+      title.createSpan({ cls: sourceChanged ? "lifeos-badge is-warning" : "lifeos-badge is-success", text: sourceChanged ? "来源已变化" : "等待确认" });
+      rowCopy.createDiv({
+        cls: "lifeos-review-draft-meta",
+        text: `生成于 ${formatReviewTime(draft.generatedAt)} · 质量 ${draft.qualityScore} 分 · ${draft.qualityStatus === "pass" ? "检查通过" : "需要复核"}`
+      });
+      const preview = draft.draft.replace(/^#+\s*/gmu, "").replace(/\s+/gu, " ").trim();
+      rowCopy.createDiv({ cls: "lifeos-review-draft-preview", text: preview.slice(0, 180) || "草稿内容为空" });
+      const actions = row.createDiv({ cls: "lifeos-review-draft-actions" });
+      createButton(actions, sourceChanged ? "刷新并审核" : "审核草稿", () => {
+        new PeriodReviewModal(this.app, this.plugin, draft.kind, { draftPath: draft.path }).open();
+      }, { primary: true, icon: sourceChanged ? "refresh-cw" : "file-check" });
+      createButton(actions, "丢弃", async () => {
+        if (!window.confirm(`确认丢弃 ${draft.window.start} 的待确认复盘草稿吗？草稿会保留历史状态，不会删除日记。`)) return;
+        await autoReviews.setDraftStatus(draft.path, "dismissed");
+        new Notice("待确认草稿已移出队列。", 4000);
+        await this.render();
+      }, { ghost: true, icon: "archive-x" });
+    }
   }
 
   private async renderSummaryList(
@@ -184,31 +248,47 @@ export class ReviewView extends ItemView {
     title: string,
     description: string,
     reviews: ReviewService,
+    periodReviewService: PeriodReviewService,
     period: ReviewSummaryPeriod,
-    summaries: SummaryInfo[]
+    summaries: SummaryInfo[],
+    periodReviews: Array<{ basename: string; path: string }>
   ): Promise<void> {
     const card = createCard(parent, "lifeos-summary-card");
     card.createDiv({ cls: "lifeos-summary-title", text: title });
     card.createEl("p", { text: description });
-    const items = summaries.slice(0, 5);
+    const checkedPeriodReviews = await Promise.all(periodReviews.map(async (item) => ({
+      ...item,
+      sourceChanged: (await periodReviewService.savedReviewSourceChanges(item.path)).length > 0
+    })));
+    const items = [...checkedPeriodReviews, ...summaries]
+      .filter((item, index, all) => all.findIndex((candidate) => candidate.path === item.path) === index)
+      .slice(0, 5);
     const actions = card.createDiv({ cls: "lifeos-summary-actions" });
     if (items.length === 0) {
       card.createDiv({ cls: "lifeos-summary-status", text: "暂时还没有内容，先从今日复盘开始。" });
-      createButton(actions, this.generateLabel(period), () => void this.generateSummary(reviews, period), { primary: period === "Daily", icon: "wand-2" });
+      createButton(actions, this.generateLabel(period), () => this.generateSummary(period), { primary: period === "Daily", icon: "wand-2" });
       return;
     }
+    createButton(actions, this.generateLabel(period), () => this.generateSummary(period), { primary: period === "Daily", icon: "wand-2" });
     createButton(actions, "查看最新", async () => {
       const file = this.app.vault.getAbstractFileByPath(items[0].path);
       if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
     }, { ghost: true, icon: "external-link" });
-    for (const item of items) {
+    const formatter = new DisplayFormatService();
+    const renderedItems = await Promise.all(items.map(async (item) => {
       const file = this.app.vault.getAbstractFileByPath(item.path);
       const content = file instanceof TFile ? await this.app.vault.read(file) : "";
-      const blocks = await new DisplayFormatService().formatReviewHighlightForDisplay(content, item.basename, item.path);
+      const blocks = await formatter.formatReviewHighlightForDisplay(content, item.basename, item.path);
+      return { item, text: blocks[0]?.text || "已有记录，可打开查看" };
+    }));
+    for (const { item, text } of renderedItems) {
       const row = card.createDiv({ cls: "lifeos-summary-row" });
       const copy = row.createDiv();
       copy.createDiv({ cls: "lifeos-summary-row-date", text: item.basename });
-      renderMarkdownDisplay(this.app, this, copy.createDiv({ cls: "lifeos-summary-row-text" }), blocks[0]?.text || "已有记录，可打开查看", item.path);
+      if ("sourceChanged" in item && item.sourceChanged) {
+        copy.createDiv({ cls: "lifeos-summary-row-status", text: "来源已变化，建议刷新" });
+      }
+      renderMarkdownDisplay(this.app, this, copy.createDiv({ cls: "lifeos-summary-row-text" }), text, item.path);
       createButton(row, "打开记录", async () => {
         const file = this.app.vault.getAbstractFileByPath(item.path);
         if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
@@ -276,4 +356,15 @@ export class ReviewView extends ItemView {
 
 function normalizeVaultPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").replace(/\/{2,}/g, "/").trim();
+}
+
+function formatReviewTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || "未知时间";
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }

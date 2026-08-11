@@ -1,16 +1,24 @@
-import { ItemView, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
+import type { App } from "obsidian";
+import { ItemView, Modal, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import { TASKS_VIEW_TYPE } from "../constants";
 import type PersonalLifeSystemPlugin from "../main";
 import { createButton } from "../components/Button";
 import { createLifeOSShell } from "../components/LifeOSComponent";
+import { createModalShell } from "../components/ModalShell";
 import { ImportProjectDocumentsModal } from "../modals/ImportProjectDocumentsModal";
 import { NewProjectDocumentModal } from "../modals/NewProjectDocumentModal";
 import { NewProjectModal } from "../modals/NewProjectModal";
 import { NewTaskModal } from "../modals/NewTaskModal";
 import { requireProFeature } from "../licensing/entitlement";
 import { FileSystemService } from "../services/FileSystemService";
-import { ProjectDocumentService } from "../services/ProjectDocumentService";
+import { ProjectDocumentService, type ProjectDocumentAiFormatterInput } from "../services/ProjectDocumentService";
+import { PdfOcrService } from "../services/PdfOcrService";
 import { ProjectService, type LifeOSProjectOverview } from "../services/ProjectService";
+import {
+  ProjectWhiteboardService,
+  type ProjectWhiteboardGenerateOptions,
+  type ProjectWhiteboardStyle
+} from "../services/ProjectWhiteboardService";
 import { TaskService } from "../services/TaskService";
 import type { LifeOSProject, LifeOSProjectDocument, LifeOSProjectSummary, LifeOSTask } from "../types";
 import { formatDate, today } from "../utils/dates";
@@ -48,7 +56,8 @@ export class TaskManagerView extends ItemView {
     const fs = new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage);
     const service = new TaskService(this.app, fs);
     const projectService = new ProjectService(this.app, fs);
-    const projectDocumentService = new ProjectDocumentService(this.app, fs);
+    const projectDocumentService = this.createProjectDocumentService(fs);
+    const projectWhiteboardService = new ProjectWhiteboardService(this.app, fs);
     const all = await service.loadAllTasks();
     const open = all.filter((task) => task.source === "open" && !task.isDone);
     const done = all.filter((task) => task.source === "done" || task.isDone);
@@ -64,17 +73,12 @@ export class TaskManagerView extends ItemView {
     this.toastEl = shellMain.createDiv({ cls: "lifeos-toast" });
     this.toastEl.hide();
 
-    if (open.length === 0 && done.length === 0) {
-      this.renderGlobalEmpty(shellMain);
-      return;
-    }
-
     const layout = shellMain.createDiv({ cls: "lifeos-project-task-layout" });
     this.renderProjectList(layout, overview);
     const detail = layout.createDiv({ cls: "lifeos-project-task-detail" });
     this.renderSummary(detail, todayTasks, visibleOpen, visibleDone);
     this.renderProjectTaskGroups(detail, overview, service);
-    await this.renderProjectDocuments(detail, overview, projects, projectDocumentService);
+    await this.renderProjectDocuments(detail, overview, projects, projectDocumentService, projectWhiteboardService);
 
     const board = detail.createDiv({ cls: visibleOpen.length === 0 && visibleDone.length === 0 ? "lifeos-board is-empty-board" : "lifeos-board" });
     this.renderColumn(board, "今日任务", "先处理重要的一件事", todayTasks.length ? todayTasks : visibleOpen.slice(0, 4), service, "calendar-check");
@@ -250,7 +254,8 @@ export class TaskManagerView extends ItemView {
     parent: HTMLElement,
     overview: LifeOSProjectOverview,
     projects: LifeOSProject[],
-    service: ProjectDocumentService
+    service: ProjectDocumentService,
+    whiteboards: ProjectWhiteboardService
   ): Promise<void> {
     const panel = parent.createDiv({ cls: "lifeos-project-doc-panel" });
     const head = panel.createDiv({ cls: "lifeos-project-doc-head" });
@@ -267,20 +272,37 @@ export class TaskManagerView extends ItemView {
       : null;
 
     if (selectedProject) {
+      const docs = await service.listDocuments(selectedProject);
+      const summary = this.summaryForProject(selectedProject, overview);
       const actions = head.createDiv({ cls: "lifeos-project-doc-head-actions" });
-      createButton(actions, "新增文档", () => void this.createProjectDocument(selectedProject, service), {
+      createButton(actions, "生成白板", () => {
+        void this.openProjectWhiteboardModal(selectedProject, summary, docs, overview, whiteboards);
+      }, {
         primary: true,
+        icon: "network"
+      });
+      createButton(actions, "资料生成白板", () => {
+        void this.importProjectDocumentsToWhiteboard(selectedProject, summary, service, whiteboards, overview);
+      }, {
+        ghost: true,
+        icon: "files"
+      });
+      createButton(actions, "打开最近白板", () => void this.openLatestProjectWhiteboard(selectedProject, whiteboards), {
+        ghost: true,
+        icon: "panel-top-open"
+      });
+      createButton(actions, "新增文档", () => void this.createProjectDocument(selectedProject, service), {
+        ghost: true,
         icon: "file-plus"
       });
       createButton(actions, "导入文档", () => void this.importProjectDocuments(selectedProject, service), {
-        primary: true,
+        ghost: true,
         icon: "upload"
       });
       createButton(actions, "打开项目目录", () => void this.openProjectIndex(selectedProject, service), {
         ghost: true,
         icon: "folder-open"
       });
-      const docs = await service.listDocuments(selectedProject);
       this.renderProjectDocumentList(panel, selectedProject, docs, service, true);
       return;
     }
@@ -312,30 +334,243 @@ export class TaskManagerView extends ItemView {
   ): void {
     const group = parent.createDiv({ cls: "lifeos-project-doc-group" });
     const title = group.createDiv({ cls: "lifeos-project-doc-group-title" });
-    title.createEl("strong", { text: project.name });
-    title.createSpan({ text: `${docs.length} 篇文档` });
+    const titleCopy = title.createDiv({ cls: "lifeos-project-doc-group-title-copy" });
+    titleCopy.createEl("strong", { text: project.name });
+    const countEl = titleCopy.createSpan({ text: `${docs.length} 篇文档` });
 
     if (docs.length === 0) {
       group.createDiv({ cls: "lifeos-project-doc-empty", text: "这个项目还没有专属文档。" });
       return;
     }
 
-    for (const doc of docs) {
-      const item = group.createDiv({ cls: "lifeos-project-doc-item" });
-      const body = item.createDiv({ cls: "lifeos-project-doc-body" });
-      body.createEl("strong", { text: doc.title });
-      body.createSpan({ text: doc.path });
-      if (doc.excerpt) body.createDiv({ cls: "lifeos-project-doc-excerpt", text: doc.excerpt });
-      const actions = item.createDiv({ cls: "lifeos-project-doc-actions" });
-      createButton(actions, "打开", () => void this.openProjectDocument(doc.path), { ghost: true, icon: "file-text" });
-      if (!editable) continue;
-      createButton(actions, "重命名", () => void this.renameProjectDocument(project, doc, service), { ghost: true, icon: "pencil" });
-      createButton(actions, "删除", () => void this.deleteProjectDocument(project, doc, service), {
-        ghost: true,
-        icon: "trash-2",
-        className: "lifeos-button-danger"
-      });
+    const toolbar = group.createDiv({ cls: "lifeos-project-doc-list-toolbar" });
+    const search = toolbar.createDiv({ cls: "lifeos-project-doc-search" });
+    setIcon(search.createSpan({ cls: "lifeos-project-doc-search-icon" }), "search");
+    const searchInput = search.createEl("input", {
+      cls: "lifeos-input",
+      attr: {
+        type: "search",
+        placeholder: "搜索标题、正文或来源",
+        "aria-label": `搜索${project.name}的项目文档`
+      }
+    });
+    const resultCount = toolbar.createSpan({ cls: "lifeos-project-doc-result-count", text: `显示 ${docs.length} 篇` });
+    const scroll = group.createDiv({ cls: "lifeos-project-doc-scroll" });
+
+    const renderRows = () => {
+      const filtered = this.filterProjectDocuments(docs, searchInput.value);
+      countEl.setText(`${docs.length} 篇文档`);
+      resultCount.setText(searchInput.value.trim() ? `找到 ${filtered.length} 篇` : `显示 ${filtered.length} 篇`);
+      scroll.empty();
+      if (filtered.length === 0) {
+        scroll.createDiv({ cls: "lifeos-project-doc-empty is-search-empty", text: "没有匹配的项目文档。" });
+        return;
+      }
+
+      for (const doc of filtered) {
+        const item = scroll.createDiv({
+          cls: "lifeos-project-doc-item",
+          attr: { "data-document-kind": doc.sourceKind || doc.kind }
+        });
+        const leading = item.createDiv({ cls: "lifeos-project-doc-leading" });
+        setIcon(leading, this.projectDocumentIcon(doc));
+        const body = item.createDiv({
+          cls: "lifeos-project-doc-body",
+          attr: {
+            role: "button",
+            tabindex: "0",
+            "aria-label": `打开文档：${doc.title}`,
+            title: doc.path
+          }
+        });
+        body.addEventListener("click", () => void this.openProjectDocument(doc.path));
+        body.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          void this.openProjectDocument(doc.path);
+        });
+        const heading = body.createDiv({ cls: "lifeos-project-doc-title-row" });
+        heading.createEl("strong", { text: doc.title });
+        heading.createSpan({
+          cls: "lifeos-project-doc-kind",
+          text: this.projectDocumentKindLabel(doc)
+        });
+        const meta = body.createDiv({ cls: "lifeos-project-doc-meta" });
+        for (const value of this.projectDocumentMeta(doc)) {
+          meta.createSpan({ text: value });
+        }
+        if (doc.excerpt) {
+          body.createDiv({ cls: "lifeos-project-doc-excerpt", text: doc.excerpt });
+        } else {
+          body.createDiv({
+            cls: "lifeos-project-doc-excerpt is-empty",
+            text: doc.textImportMode === "attachment-only" ? "仅保存原始文件，尚未生成可检索正文。" : "暂无正文摘要。"
+          });
+        }
+        const actions = item.createDiv({ cls: "lifeos-project-doc-actions" });
+        this.createProjectDocumentIconAction(actions, "打开文档", "file-text", () => void this.openProjectDocument(doc.path));
+        if (!editable) continue;
+        this.createProjectDocumentIconAction(actions, "重命名文档", "pencil", () => {
+          void this.renameProjectDocument(project, doc, service);
+        });
+        this.createProjectDocumentIconAction(actions, "删除文档", "trash-2", () => {
+          void this.deleteProjectDocument(project, doc, service);
+        }, true);
+      }
+    };
+
+    searchInput.addEventListener("input", renderRows);
+    renderRows();
+  }
+
+  private filterProjectDocuments(docs: LifeOSProjectDocument[], query: string): LifeOSProjectDocument[] {
+    const keywords = query
+      .trim()
+      .toLocaleLowerCase("zh-CN")
+      .split(/\s+/u)
+      .filter(Boolean);
+    if (keywords.length === 0) return docs;
+    return docs.filter((doc) => {
+      const haystack = [
+        doc.title,
+        doc.excerpt,
+        doc.sourceName,
+        doc.sourceKind,
+        doc.sourceSize,
+        doc.kind,
+        doc.path
+      ].filter(Boolean).join("\n").toLocaleLowerCase("zh-CN");
+      return keywords.every((keyword) => haystack.includes(keyword));
+    });
+  }
+
+  private projectDocumentIcon(doc: LifeOSProjectDocument): string {
+    if (doc.sourceKind === "pdf") return "file-type-2";
+    if (doc.sourceKind === "word") return "file-text";
+    if (doc.sourceKind === "image") return "image";
+    if (doc.kind === "meeting") return "messages-square";
+    if (doc.kind === "requirement") return "list-checks";
+    if (doc.kind === "review") return "history";
+    return "file-text";
+  }
+
+  private projectDocumentKindLabel(doc: LifeOSProjectDocument): string {
+    const sourceLabels: Record<string, string> = {
+      pdf: "PDF",
+      word: "Word",
+      image: "图片",
+      markdown: "Markdown",
+      text: "文本",
+      csv: "CSV",
+      json: "JSON"
+    };
+    if (doc.sourceKind && sourceLabels[doc.sourceKind]) return sourceLabels[doc.sourceKind];
+    const kindLabels: Record<LifeOSProjectDocument["kind"], string> = {
+      note: "笔记",
+      meeting: "会议",
+      requirement: "需求",
+      reference: "资料",
+      review: "复盘"
+    };
+    return kindLabels[doc.kind];
+  }
+
+  private projectDocumentMeta(doc: LifeOSProjectDocument): string[] {
+    const meta: string[] = [];
+    if (doc.sourceName && doc.sourceName !== doc.title) meta.push(doc.sourceName);
+    if (doc.sourceSize) meta.push(doc.sourceSize);
+    if (typeof doc.characterCount === "number" && doc.characterCount > 0) {
+      meta.push(doc.characterCount >= 10000
+        ? `${(doc.characterCount / 10000).toFixed(1)} 万字`
+        : `${doc.characterCount.toLocaleString("zh-CN")} 字`);
     }
+    if (doc.textImportMode === "ai-formatted") meta.push("AI 排版");
+    else if (doc.textImportMode === "plain-text") meta.push("原文导入");
+    else if (doc.textImportMode === "attachment-only") meta.push("仅原件");
+    if ((doc.warningCount ?? 0) > 0) meta.push(`${doc.warningCount} 条识别提示`);
+    if (doc.mtime > 0) {
+      meta.push(new Intl.DateTimeFormat("zh-CN", {
+        month: "numeric",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+      }).format(new Date(doc.mtime)));
+    }
+    return meta;
+  }
+
+  private createProjectDocumentIconAction(
+    parent: HTMLElement,
+    label: string,
+    icon: string,
+    onClick: () => void,
+    danger = false
+  ): HTMLButtonElement {
+    const button = createButton(parent, label, onClick, {
+      ghost: true,
+      icon,
+      className: `lifeos-project-doc-icon-action${danger ? " lifeos-button-danger" : ""}`
+    });
+    button.setAttr("aria-label", label);
+    button.title = label;
+    return button;
+  }
+
+  private createProjectDocumentService(fs: FileSystemService): ProjectDocumentService {
+    return new ProjectDocumentService(this.app, fs, {
+      pdfOcr: new PdfOcrService(this.app, {
+        engine: this.plugin.settings.pdfOcrEngine,
+        paddleEndpoint: this.plugin.settings.paddleOcrEndpoint
+      }),
+      aiFormatter: (input) => this.formatImportedProjectDocumentWithAi(input)
+    });
+  }
+
+  private async formatImportedProjectDocumentWithAi(input: ProjectDocumentAiFormatterInput): Promise<{ markdown: string }> {
+    const response = await this.plugin.ai.complete({
+      responseFormat: "text",
+      temperature: 0.15,
+      reasoningEffort: "default",
+      skipModelCheck: true,
+      messages: [
+        {
+          role: "system",
+          content: [
+            "You are the Life OS project document formatting assistant.",
+            "The original file has already been fully extracted and will be sent to you in ordered batches.",
+            "This is a formatting pass over imported source text, not a summarization or analysis task.",
+            "Format the current batch paragraph by paragraph as readable Markdown: headings, paragraphs, lists, tables, or code blocks.",
+            "Every source paragraph, line, question number, option, table cell, figure caption, citation, date, number, and proper noun must still be represented in your output.",
+            "Do not summarize, omit, translate, deduplicate, rewrite facts, merge away paragraphs, or invent content.",
+            "If a fragment is messy or uncertain, copy it unchanged instead of shortening it.",
+            "Return only the formatted Markdown for the current batch. Do not wrap it in code fences and do not add explanations, disclaimers, or an AI signature."
+          ].join("\n")
+        },
+        {
+          role: "user",
+          content: [
+            `Project: ${input.project.name}`,
+            `Document: ${input.title}`,
+            `Source: ${input.sourceName}`,
+            `Type: ${input.importKind}`,
+            `Batch: ${input.chunkIndex ?? 1}/${input.chunkCount ?? 1}`,
+            `Batch characters: ${input.chunkTextLength ?? input.text.length}`,
+            `Full extracted characters: ${input.fullTextLength ?? input.text.length}`,
+            "",
+            "Format only this ordered source batch. Keep one-to-one coverage with the source text and do not omit any sentence, number, option, or line:",
+            "----- SOURCE BATCH START -----",
+            input.text,
+            "----- SOURCE BATCH END -----"
+          ].join("\n")
+        }
+      ]
+    });
+    const responseText = response.text?.trim() ?? "";
+    if (!response.ok || !responseText) {
+      throw new Error(response.error || "AI formatter returned no markdown.");
+    }
+    return { markdown: responseText };
   }
 
   private async createProjectDocument(project: LifeOSProject, service: ProjectDocumentService): Promise<void> {
@@ -353,6 +588,76 @@ export class TaskManagerView extends ItemView {
       if (first) await this.openProjectDocument(first.path);
       await this.render();
     }).open();
+  }
+
+  private async importProjectDocumentsToWhiteboard(
+    project: LifeOSProject,
+    summary: LifeOSProjectSummary,
+    service: ProjectDocumentService,
+    whiteboards: ProjectWhiteboardService,
+    overview: LifeOSProjectOverview
+  ): Promise<void> {
+    if (!requireProFeature(this.plugin, "projectDocuments")) return;
+    new ImportProjectDocumentsModal(this.app, project, service, async (documents) => {
+      const importedDocs = documents.map((item) => item.document);
+      const latestDocs = await service.listDocuments(project);
+      const importedPaths = new Set(importedDocs.map((doc) => doc.path));
+      const mergedDocs = [
+        ...importedDocs,
+        ...latestDocs.filter((doc) => !importedPaths.has(doc.path))
+      ];
+      const result = await whiteboards.generate({
+        project,
+        summary,
+        documents: mergedDocs,
+        relatedTasks: this.relatedTasksForProject(project, overview),
+        options: {
+          style: "file-board",
+          includeDocuments: true,
+          includeRelatedTasks: true,
+          includeDataComponents: true
+        }
+      });
+      new Notice(`已生成资料白板：${result.nodeCount} 个节点。`);
+      await this.openProjectDocument(result.canvasPath);
+      await this.render();
+    }).open();
+  }
+
+  private async openProjectWhiteboardModal(
+    project: LifeOSProject,
+    summary: LifeOSProjectSummary,
+    documents: LifeOSProjectDocument[],
+    overview: LifeOSProjectOverview,
+    service: ProjectWhiteboardService
+  ): Promise<void> {
+    if (!requireProFeature(this.plugin, "projectManagement")) return;
+    new ProjectWhiteboardModal(this.app, project, async (options) => {
+      const result = await service.generate({
+        project,
+        summary,
+        documents,
+        relatedTasks: this.relatedTasksForProject(project, overview),
+        options
+      });
+      new Notice(`已生成项目白板：${result.nodeCount} 个节点。`);
+      await this.openProjectDocument(result.canvasPath);
+      await this.render();
+    }).open();
+  }
+
+  private async openLatestProjectWhiteboard(project: LifeOSProject, service: ProjectWhiteboardService): Promise<void> {
+    if (!requireProFeature(this.plugin, "projectManagement")) return;
+    const prefix = `${service.whiteboardsPath(project)}/`;
+    const files = this.app.vault.getFiles()
+      .filter((file) => file.path.startsWith(prefix) && file.extension === "canvas")
+      .sort((left, right) => (right.stat?.mtime ?? 0) - (left.stat?.mtime ?? 0));
+    const latest = files[0];
+    if (!latest) {
+      new Notice("这个项目还没有白板。");
+      return;
+    }
+    await this.app.workspace.getLeaf(false).openFile(latest);
   }
 
   private async renameProjectDocument(project: LifeOSProject, doc: LifeOSProjectDocument, service: ProjectDocumentService): Promise<void> {
@@ -461,6 +766,31 @@ export class TaskManagerView extends ItemView {
     return overview.projects.find((item) => item.projectId === this.selectedProjectId) ?? null;
   }
 
+  private summaryForProject(project: LifeOSProject, overview: LifeOSProjectOverview): LifeOSProjectSummary {
+    return overview.projects.find((item) => item.projectId === project.id) ?? {
+      project,
+      projectId: project.id,
+      label: project.name,
+      openTasks: [],
+      doneTasks: [],
+      totalCount: 0,
+      openCount: 0,
+      doneCount: 0,
+      progress: 0
+    };
+  }
+
+  private relatedTasksForProject(project: LifeOSProject, overview: LifeOSProjectOverview): LifeOSTask[] {
+    const terms = [project.name, project.goal ?? ""]
+      .flatMap((value) => value.toLowerCase().split(/[\s,，、/|]+/))
+      .map((term) => term.trim())
+      .filter((term) => term.length >= 2);
+    if (terms.length === 0) return [];
+    return overview.unassigned.openTasks
+      .filter((task) => terms.some((term) => task.text.toLowerCase().includes(term)))
+      .slice(0, 10);
+  }
+
   private async extractTasksFromToday(): Promise<void> {
     if (!requireProFeature(this.plugin, "aiTaskExtract")) return;
     const file = this.app.vault.getAbstractFileByPath(this.plugin.getTodayNotePath(today()));
@@ -498,5 +828,105 @@ export class TaskManagerView extends ItemView {
 
   private service(): TaskService {
     return new TaskService(this.app, new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage));
+  }
+}
+
+class ProjectWhiteboardModal extends Modal {
+  private selectedStyle: ProjectWhiteboardStyle = "knowledge-map";
+  private includeDocuments = true;
+  private includeRelatedTasks = true;
+  private includeDataComponents = true;
+  private styleCards = new Map<ProjectWhiteboardStyle, HTMLButtonElement>();
+
+  constructor(
+    app: App,
+    private project: LifeOSProject,
+    private onGenerate: (options: ProjectWhiteboardGenerateOptions) => void | Promise<void>
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    this.modalEl.addClass("lifeos-modal-host", "lifeos-project-whiteboard-modal-host");
+    const { body, footer } = createModalShell(this.contentEl, {
+      title: "生成项目白板",
+      subtitle: `为「${this.project.name}」创建一张可缩放、可连接、可继续整理的 Obsidian Canvas。`,
+      icon: "network",
+      className: "lifeos-task-modal lifeos-project-whiteboard-modal"
+    });
+
+    const styles = body.createDiv({ cls: "lifeos-project-whiteboard-style-grid" });
+    for (const style of ProjectWhiteboardService.styles()) {
+      const card = styles.createEl("button", {
+        cls: "lifeos-project-whiteboard-style-card",
+        attr: { type: "button" }
+      });
+      setIcon(card.createSpan({ cls: "lifeos-project-whiteboard-style-icon" }), style.icon);
+      const copy = card.createDiv({ cls: "lifeos-project-whiteboard-style-copy" });
+      copy.createEl("strong", { text: style.label });
+      copy.createSpan({ text: style.description });
+      card.onclick = () => {
+        this.selectedStyle = style.id;
+        this.syncStyleCards();
+      };
+      this.styleCards.set(style.id, card);
+    }
+
+    const options = body.createDiv({ cls: "lifeos-project-whiteboard-options" });
+    options.createEl("h3", { text: "生成内容" });
+    this.renderOption(options, "项目文档和导入资料", "Markdown、PDF、图片和附件会进入白板文件节点。", this.includeDocuments, (checked) => {
+      this.includeDocuments = checked;
+    });
+    this.renderOption(options, "相关未归属任务", "把名字或目标匹配到当前项目的未归属任务一起放入白板。", this.includeRelatedTasks, (checked) => {
+      this.includeRelatedTasks = checked;
+    });
+    this.renderOption(options, "统计组件", "生成任务进度、看板快照和热力图占位节点。", this.includeDataComponents, (checked) => {
+      this.includeDataComponents = checked;
+    });
+
+    const note = body.createDiv({ cls: "lifeos-project-whiteboard-note" });
+    setIcon(note.createSpan(), "info");
+    note.createSpan({ text: "每次生成都会创建一个新版本，不覆盖已经手动整理过的白板。" });
+
+    footer.addClass("lifeos-task-modal-footer");
+    createButton(footer, "取消", () => this.close(), { ghost: true });
+    createButton(footer, "生成白板", () => void this.generate(), { primary: true, icon: "wand-2" });
+    this.syncStyleCards();
+  }
+
+  private renderOption(
+    parent: HTMLElement,
+    title: string,
+    description: string,
+    checked: boolean,
+    onChange: (checked: boolean) => void
+  ): void {
+    const label = parent.createEl("label", { cls: "lifeos-project-whiteboard-option" });
+    const input = label.createEl("input", { attr: { type: "checkbox" } });
+    input.checked = checked;
+    input.onchange = () => onChange(input.checked);
+    const copy = label.createDiv();
+    copy.createEl("strong", { text: title });
+    copy.createSpan({ text: description });
+  }
+
+  private syncStyleCards(): void {
+    for (const [style, card] of this.styleCards) {
+      card.toggleClass("is-active", style === this.selectedStyle);
+    }
+  }
+
+  private async generate(): Promise<void> {
+    try {
+      await this.onGenerate({
+        style: this.selectedStyle,
+        includeDocuments: this.includeDocuments,
+        includeRelatedTasks: this.includeRelatedTasks,
+        includeDataComponents: this.includeDataComponents
+      });
+      this.close();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : "项目白板生成失败。");
+    }
   }
 }

@@ -6,6 +6,7 @@ export type LifeOSNavKey =
   | "memory"
   | "checkins"
   | "review"
+  | "workspace"
   | "chat"
   | "guide"
   | "proCompare"
@@ -45,6 +46,13 @@ export interface LifeOSProjectDocument {
   kind: LifeOSProjectDocumentKind;
   mtime: number;
   excerpt?: string;
+  sourceName?: string;
+  sourceKind?: string;
+  sourceSize?: string;
+  textImportMode?: "attachment-only" | "plain-text" | "ai-formatted";
+  characterCount?: number;
+  hasSearchableText?: boolean;
+  warningCount?: number;
 }
 
 export interface LifeOSProjectSummary {
