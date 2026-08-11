@@ -1,4 +1,4 @@
-# Life OS Assistant 0.3.8
+# Life OS Assistant 0.3.9
 
 Life OS Assistant 是一个本地优先的 Obsidian 个人工作系统，用来管理日记、任务、知识、长期记忆、AI 项目会话和有证据的周期复盘。用户可读内容保存在当前 Vault 的 Markdown 中；AI 生成的写入先成为候选，由用户确认后再进入正式数据。
 
@@ -145,7 +145,7 @@ npm run build
 
 ## Release 文件
 
-每个精确版本 tag（例如 `0.3.8`，不带 `v`）发布：
+每个精确版本 tag（例如 `0.3.9`，不带 `v`）发布：
 
 - `main.js`
 - `manifest.json`

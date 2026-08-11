@@ -3263,8 +3263,9 @@ export class LifeOSChatView extends ItemView {
 
   private resizeComposer(): void {
     if (!this.inputEl) return;
-    this.inputEl.style.setProperty("--lifeos-chat-composer-height", "auto");
-    this.inputEl.style.height = "auto";
+    this.inputEl.setCssProps({
+      "--lifeos-chat-composer-height": "auto"
+    });
     const contentHeight = this.inputEl.scrollHeight;
     this.setComposerInputHeight(Math.max(contentHeight, this.manualComposerHeight ?? 0));
   }
@@ -3308,8 +3309,9 @@ export class LifeOSChatView extends ItemView {
     if (!this.inputEl) return 0;
     const { min, max } = this.composerHeightBounds();
     const next = Math.round(Math.min(max, Math.max(min, height)));
-    this.inputEl.style.setProperty("--lifeos-chat-composer-height", `${next}px`);
-    this.inputEl.style.height = `${next}px`;
+    this.inputEl.setCssProps({
+      "--lifeos-chat-composer-height": `${next}px`
+    });
     return next;
   }
 

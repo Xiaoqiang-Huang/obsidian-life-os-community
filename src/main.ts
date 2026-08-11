@@ -2607,7 +2607,6 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   async dockAiEditToSidebar(): Promise<void> {
     const leaf = await this.ensureAiEditSidebarResident();
     this.app.workspace.rightSplit?.expand?.();
-    await this.app.workspace.revealLeaf?.(leaf);
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
     this.aiEditPopover?.mountToPanel((leaf.view as { contentEl?: HTMLElement }).contentEl ?? document.body, { pin: true });
     this.aiEditPopover?.clearSelectionHighlight();
@@ -2638,7 +2637,6 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       this.aiEditPopover?.openOrQueue(target, anchor);
       this.aiEditDiagnostics.opened += 1;
       this.app.workspace.rightSplit?.expand?.();
-      await this.app.workspace.revealLeaf?.(leaf);
       this.app.workspace.setActiveLeaf(leaf, { focus: false });
     } catch (error) {
       console.warn("[Life OS] AI edit sidebar unavailable; falling back to floating popover", error);
@@ -2662,7 +2660,6 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     const leaf = await this.ensureAiEditSidebarResident();
     await leaf.setViewState({ type: AI_EDIT_PANEL_VIEW_TYPE, active: true });
     this.app.workspace.rightSplit?.expand?.();
-    await this.app.workspace.revealLeaf?.(leaf);
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
     this.aiEditPopover?.mountToPanel((leaf.view as { contentEl?: HTMLElement }).contentEl ?? document.body, { pin: true });
   }

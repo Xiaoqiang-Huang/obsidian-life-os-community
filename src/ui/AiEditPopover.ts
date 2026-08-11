@@ -1046,12 +1046,6 @@ export class AiEditPopoverController {
     containerEl.appendChild(this.popoverEl);
     this.popoverEl.addClass("is-panel", "is-positioned");
     this.popoverEl.removeClass("is-sidebar");
-    this.popoverEl.style.left = "";
-    this.popoverEl.style.top = "";
-    this.popoverEl.style.maxHeight = "";
-    this.popoverEl.style.opacity = "1";
-    this.popoverEl.style.transform = "none";
-    this.popoverEl.style.visibility = "visible";
     this.syncDockButtonState();
   }
 
@@ -1367,10 +1361,12 @@ export class AiEditPopoverController {
       .slice(0, 80);
     for (const rect of rects) {
       const highlight = document.body.createDiv({ cls: "lifeos-ai-edit-selection-highlight" });
-      highlight.style.left = `${Math.round(rect.left)}px`;
-      highlight.style.top = `${Math.round(rect.top)}px`;
-      highlight.style.width = `${Math.max(2, Math.round(rect.width))}px`;
-      highlight.style.height = `${Math.max(2, Math.round(rect.height))}px`;
+      highlight.setCssProps({
+        "--lifeos-ai-edit-highlight-left": `${Math.round(rect.left)}px`,
+        "--lifeos-ai-edit-highlight-top": `${Math.round(rect.top)}px`,
+        "--lifeos-ai-edit-highlight-width": `${Math.max(2, Math.round(rect.width))}px`,
+        "--lifeos-ai-edit-highlight-height": `${Math.max(2, Math.round(rect.height))}px`
+      });
       this.selectionHighlightEls.push(highlight);
     }
   }
@@ -1400,20 +1396,8 @@ export class AiEditPopoverController {
     const popover = this.popoverEl;
     if (popover.hasClass("is-panel")) {
       popover.addClass("is-positioned");
-      popover.style.left = "";
-      popover.style.top = "";
-      popover.style.maxHeight = "";
-      popover.style.opacity = "1";
-      popover.style.transform = "none";
-      popover.style.visibility = "visible";
       return;
     }
-    const alreadyPositioned = popover.hasClass("is-positioned");
-    if (!alreadyPositioned) {
-      popover.style.left = "0px";
-      popover.style.top = "0px";
-    }
-    popover.style.maxHeight = "";
     requestAnimationFrame(() => {
       if (!this.popoverEl) return;
       const viewport = window.visualViewport;
@@ -1423,8 +1407,6 @@ export class AiEditPopoverController {
       const viewportHeight = viewport?.height ?? window.innerHeight;
       const margin = viewportWidth <= 560 || viewportHeight <= 520 ? 16 : 22;
       const gap = 12;
-      const maxHeight = Math.max(260, viewportHeight - margin * 2);
-      this.popoverEl.style.maxHeight = `${Math.round(maxHeight)}px`;
       const rect = this.popoverEl.getBoundingClientRect();
       const minLeft = viewportLeft + margin;
       const minTop = viewportTop + margin;
@@ -1503,8 +1485,10 @@ export class AiEditPopoverController {
       }).sort((a, b) => a.score - b.score);
 
       const { left, top } = ranked[0] ?? { left: clampLeft(this.anchor.x + gap), top: clampTop(this.anchor.y + gap) };
-      this.popoverEl.style.left = `${Math.round(left)}px`;
-      this.popoverEl.style.top = `${Math.round(top)}px`;
+      this.popoverEl.setCssProps({
+        "--lifeos-ai-edit-left": `${Math.round(left)}px`,
+        "--lifeos-ai-edit-top": `${Math.round(top)}px`
+      });
       this.popoverEl.addClass("is-positioned");
     });
   }

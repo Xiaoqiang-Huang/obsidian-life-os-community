@@ -1,6 +1,6 @@
 # Life OS Assistant
 
-Current release: **0.3.8** · Obsidian `1.5.0+` · Desktop and mobile (`isDesktopOnly: false`)
+Current release: **0.3.9** · Obsidian `1.5.0+` · Desktop and mobile (`isDesktopOnly: false`)
 
 This README is bilingual. English is provided first for Obsidian Community review, followed by Simplified Chinese.
 
@@ -47,7 +47,7 @@ Reload Obsidian, then enable the plugin. Do not copy another user's `data.json`;
 - Before uninstalling, back up the configured Life OS root folder. Disabling or removing the plugin does not delete Markdown data.
 - To remove all data, delete the Life OS root folder yourself only after verifying the backup. Browser-extension data and external AI exports must be removed separately.
 
-## Core workflows in 0.3.8
+## Core workflows in 0.3.9
 
 ### AI assistant and knowledge grounding
 
@@ -161,7 +161,7 @@ The private source workspace additionally runs service, UI, runtime, upgrade, li
 
 ## Release assets
 
-Each exact semantic-version tag (for example `0.3.8`, without a `v` prefix) builds and attaches:
+Each exact semantic-version tag (for example `0.3.9`, without a `v` prefix) builds and attaches:
 
 - `main.js`
 - `manifest.json`
@@ -181,9 +181,9 @@ The repository license and Pro entitlement are separate. Do not remove, bypass, 
 
 ## 简体中文
 
-Life OS Assistant 0.3.8 是一个本地优先的 Obsidian 个人工作系统，用来管理日记、任务、知识、记忆、AI 项目会话和有证据的周期复盘。用户可读内容保存在当前 Vault 的 Markdown 中；AI 生成的写入先成为候选，由用户确认后再进入正式数据。
+Life OS Assistant 0.3.9 是一个本地优先的 Obsidian 个人工作系统，用来管理日记、任务、知识、记忆、AI 项目会话和有证据的周期复盘。用户可读内容保存在当前 Vault 的 Markdown 中；AI 生成的写入先成为候选，由用户确认后再进入正式数据。
 
-### 0.3.8 主要能力
+### 0.3.9 主要能力
 
 - AI 助手使用混合检索和 `[S1]` 来源引用，不再把整个知识库或整段历史无差别塞入上下文。
 - 项目上下文支持多种国内外 AI 编程工具与网页 AI；每条可见对话都是可搜索、可跳转的节点。
@@ -264,4 +264,4 @@ Life OS 仅在用户可见的功能中联网：用户配置的 AI 模型、授�
 
 ### 发布文件与许可证
 
-每个精确版本 tag（例如 `0.3.8`，不带 `v`）发布 `main.js`、`manifest.json`、`styles.css`。本仓库使用 PolyForm Noncommercial License 1.0.0；商业使用需获得 Xiaoqiang Huang 事先书面许可。完整说明见 [`LICENSE`](LICENSE)、[`NOTICE`](NOTICE) 和 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+每个精确版本 tag（例如 `0.3.9`，不带 `v`）发布 `main.js`、`manifest.json`、`styles.css`。本仓库使用 PolyForm Noncommercial License 1.0.0；商业使用需获得 Xiaoqiang Huang 事先书面许可。完整说明见 [`LICENSE`](LICENSE)、[`NOTICE`](NOTICE) 和 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.9 - 2026-08-11
+
+### Fixed
+
+- Kept Obsidian `1.5.0` compatibility by replacing the newer `Workspace.revealLeaf` calls with the existing right-sidebar expansion and leaf activation flow.
+- Moved AI edit popover positioning, selection highlights, and chat composer sizing from direct style assignments to CSS classes and runtime CSS custom properties without changing interaction behavior.
+- Scoped Life OS modal sizing to plugin-owned modals so Obsidian's native settings page no longer gains blank right and bottom regions.
+- Added community-review regression coverage for the declared minimum Obsidian version and DOM styling boundary.
+
 ## 0.3.8 - 2026-08-11
 
 - Security: upgrade the PDF.js runtime to a release that fixes malicious-PDF script execution (GHSA-hq66-cqwq-w95j).

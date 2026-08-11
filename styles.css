@@ -2340,8 +2340,11 @@ body.is-mobile .lifeos-theme-swatch-desc,
   transform: scale(0.96) translateY(1px);
 }
 
-/* ── Resizable modals ── */
-.modal {
+/* ── Resizable Life OS modals (never constrain Obsidian's settings host) ── */
+.modal.lifeos-modal-host,
+.modal:has(.pls-modal),
+.modal:has(.lifeos-github-skill-modal),
+.modal:has(.lifeos-pro-required-modal) {
   max-width: min(720px, 92vw) !important;
   max-height: 88vh !important;
   resize: both;
@@ -2882,7 +2885,10 @@ body.is-mobile .lifeos-theme-swatch-desc,
     grid-template-columns: 1fr;
   }
 
-  .modal {
+  .modal.lifeos-modal-host,
+  .modal:has(.pls-modal),
+  .modal:has(.lifeos-github-skill-modal),
+  .modal:has(.lifeos-pro-required-modal) {
     min-width: min(340px, 92vw);
   }
 
@@ -2895,7 +2901,10 @@ body.is-mobile .lifeos-theme-swatch-desc,
     padding: 12px;
   }
 
-  .modal {
+  .modal.lifeos-modal-host,
+  .modal:has(.pls-modal),
+  .modal:has(.lifeos-github-skill-modal),
+  .modal:has(.lifeos-pro-required-modal) {
     width: calc(100vw - 16px) !important;
     min-width: 0 !important;
     max-width: calc(100vw - 16px) !important;
@@ -2904,8 +2913,10 @@ body.is-mobile .lifeos-theme-swatch-desc,
     border-radius: 16px;
   }
 
-  .modal-content,
-  .modal .modal-content {
+  .modal.lifeos-modal-host .modal-content,
+  .modal:has(.pls-modal) .modal-content,
+  .modal:has(.lifeos-github-skill-modal) .modal-content,
+  .modal:has(.lifeos-pro-required-modal) .modal-content {
     padding: 16px !important;
     max-height: calc(100dvh - 48px);
     overflow: auto;
@@ -49532,6 +49543,8 @@ body.lifeos-theme-night-owl .modal.lifeos-modal-host :is(.lifeos-project-whitebo
 /* Life OS inline AI edit popover final guard start */
 .lifeos-ai-edit-popover {
   position: fixed !important;
+  left: var(--lifeos-ai-edit-left, 0px) !important;
+  top: var(--lifeos-ai-edit-top, 0px) !important;
   z-index: 10030 !important;
   box-sizing: border-box !important;
   width: clamp(312px, 31vw, 430px) !important;
@@ -50354,6 +50367,10 @@ body.lifeos-theme-night-owl .lifeos-ai-edit-popover .lifeos-ai-edit-action-prima
 /* Life OS inline AI selection persistence */
 .lifeos-ai-edit-selection-highlight {
   position: fixed;
+  left: var(--lifeos-ai-edit-highlight-left, 0px);
+  top: var(--lifeos-ai-edit-highlight-top, 0px);
+  width: var(--lifeos-ai-edit-highlight-width, 0px);
+  height: var(--lifeos-ai-edit-highlight-height, 0px);
   z-index: 9995;
   pointer-events: none;
   border-radius: 4px;
