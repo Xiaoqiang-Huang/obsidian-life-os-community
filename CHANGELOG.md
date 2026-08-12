@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.11 - 2026-08-12
+
+### Fixed
+
+- Fixed web AI capture requests that could remain on “Writing to local Life OS” indefinitely while automatic tracking parsed very large Codex, Claude Code, or other session files.
+- Browser captures now validate and durably write the redacted JSON into the selected project Inbox before revision indexing, project-memory refresh, or daily activity analysis. The extension displays the exact saved path as soon as that write succeeds.
+- Added bounded bridge and extension timeouts. A slow background index now returns an explicit queued receipt; a missing durable write returns a retry/download error instead of an endless spinner.
+- Updated ChatGPT extraction for current `conversation-turn` pages, including a guarded ordered-turn fallback when role attributes are no longer exposed. One-sided captures are blocked from direct save to prevent incomplete sessions.
+- Reduced repeated work on actively growing local session files and moved multi-gigabyte source parsing outside the shared mutation queue, so it cannot starve a browser capture's durable Inbox write.
+
+### Delivery
+
+- Updated the browser-extension manual and troubleshooting flow for “saved to Inbox, indexing in background”, single-sided capture detection, extension reload, and page refresh requirements.
+- Synchronized plugin, optional browser extension, manuals, delivery vaults, and release metadata to 0.3.11.
+
 ## 0.3.10 - 2026-08-11
 
 ### Fixed

@@ -323,6 +323,20 @@ export interface AiWorkspaceImportResult {
   skippedMessages: number;
 }
 
+/**
+ * Emitted as soon as a browser conversation has been validated and durably
+ * written to the project Inbox. Indexing, revision generation, memories and
+ * daily activity analysis may continue after this point.
+ */
+export interface AiWorkspaceBrowserCaptureProgress {
+  phase: "staged";
+  inboxPath: string;
+  title: string;
+  messageCount: number;
+  userMessageCount: number;
+  assistantMessageCount: number;
+}
+
 export interface AiWorkspaceContinuationPackage {
   session: AiWorkspaceSessionSummary;
   revision: AiWorkspaceRevisionSummary;

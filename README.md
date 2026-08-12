@@ -1,6 +1,6 @@
 # Life OS Assistant
 
-Current release: **0.3.10** · Obsidian `1.5.0+` · Desktop and mobile (`isDesktopOnly: false`)
+Current release: **0.3.11** · Obsidian `1.5.0+` · Desktop and mobile (`isDesktopOnly: false`)
 
 This README is bilingual. English is provided first for Obsidian Community review, followed by Simplified Chinese.
 
@@ -9,6 +9,13 @@ This README is bilingual. English is provided first for Obsidian Community revie
 ## English
 
 Life OS Assistant is a local-first workspace for diary entries, tasks, project knowledge, long-term memory, AI work sessions, and evidence-based reviews. User-facing content remains readable Markdown in the current vault; AI-generated writes are presented as candidates before they become formal records.
+
+### 0.3.11 web capture reliability
+
+- Browser conversations are validated and written to the selected project's Inbox before indexing, project-memory refresh, or daily activity analysis.
+- The extension receives the exact local Inbox path immediately after the durable write; slow background work no longer leaves the popup on an endless writing state.
+- Current ChatGPT `conversation-turn` pages are supported. Direct save is paused when only the user side or only the assistant side is detected.
+- Very large tracked coding sessions no longer hold a single global queue that blocks browser captures for unrelated projects.
 
 ## Features
 
@@ -47,7 +54,7 @@ Reload Obsidian, then enable the plugin. Do not copy another user's `data.json`;
 - Before uninstalling, back up the configured Life OS root folder. Disabling or removing the plugin does not delete Markdown data.
 - To remove all data, delete the Life OS root folder yourself only after verifying the backup. Browser-extension data and external AI exports must be removed separately.
 
-## Core workflows in 0.3.10
+## Core workflows in 0.3.11
 
 ### AI assistant and knowledge grounding
 
@@ -161,7 +168,7 @@ The private source workspace additionally runs service, UI, runtime, upgrade, li
 
 ## Release assets
 
-Each exact semantic-version tag (for example `0.3.10`, without a `v` prefix) builds and attaches:
+Each exact semantic-version tag (for example `0.3.11`, without a `v` prefix) builds and attaches:
 
 - `main.js`
 - `manifest.json`
@@ -181,9 +188,9 @@ The repository license and Pro entitlement are separate. Do not remove, bypass, 
 
 ## 简体中文
 
-Life OS Assistant 0.3.10 是一个本地优先的 Obsidian 个人工作系统，用来管理日记、任务、知识、记忆、AI 项目会话和有证据的周期复盘。用户可读内容保存在当前 Vault 的 Markdown 中；AI 生成的写入先成为候选，由用户确认后再进入正式数据。
+Life OS Assistant 0.3.11 是一个本地优先的 Obsidian 个人工作系统，用来管理日记、任务、知识、记忆、AI 项目会话和有证据的周期复盘。用户可读内容保存在当前 Vault 的 Markdown 中；AI 生成的写入先成为候选，由用户确认后再进入正式数据。
 
-### 0.3.10 主要能力
+### 0.3.11 主要能力
 
 - AI 助手使用混合检索和 `[S1]` 来源引用，不再把整个知识库或整段历史无差别塞入上下文。
 - 项目上下文支持多种国内外 AI 编程工具与网页 AI；每条可见对话都是可搜索、可跳转的节点。
@@ -264,4 +271,4 @@ Life OS 仅在用户可见的功能中联网：用户配置的 AI 模型、授�
 
 ### 发布文件与许可证
 
-每个精确版本 tag（例如 `0.3.10`，不带 `v`）只发布 Obsidian 插件三件套：`main.js`、`manifest.json`、`styles.css`。可选的网页 AI 浏览器扩展由产品/体验仓库单独分发，不属于 Obsidian 社区审核资产。本仓库使用 PolyForm Noncommercial License 1.0.0；商业使用需获得 Xiaoqiang Huang 事先书面许可。完整说明见 [`LICENSE`](LICENSE)、[`NOTICE`](NOTICE) 和 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+每个精确版本 tag（例如 `0.3.11`，不带 `v`）只发布 Obsidian 插件三件套：`main.js`、`manifest.json`、`styles.css`。可选的网页 AI 浏览器扩展由产品/体验仓库单独分发，不属于 Obsidian 社区审核资产。本仓库使用 PolyForm Noncommercial License 1.0.0；商业使用需获得 Xiaoqiang Huang 事先书面许可。完整说明见 [`LICENSE`](LICENSE)、[`NOTICE`](NOTICE) 和 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。

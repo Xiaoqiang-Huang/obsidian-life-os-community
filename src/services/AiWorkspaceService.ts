@@ -31,6 +31,7 @@ import type {
   AiWorkspaceActivitySummary,
   AiWorkspaceAgentPermission,
   AiWorkspaceAutoSyncReport,
+  AiWorkspaceBrowserCaptureProgress,
   AiWorkspaceContinuationPackage,
   AiWorkspaceDailyFact,
   AiWorkspaceHandoffDocument,
@@ -69,6 +70,13 @@ const CONTINUATION_INLINE_CHARS = 28000;
 const PROJECT_MEMORY_CONTEXT_CHARS = 18000;
 const ACTIVITY_ANALYSIS_CHARS = 14000;
 const MANUAL_IMPORT_MAX_BYTES = 64 * 1024 * 1024;
+const AUTO_SYNC_SOURCE_STABILITY_MS = 120_000;
+
+interface StagedBrowserConversation {
+  candidate: AiWorkspaceSourceCandidate;
+  parsed: AiWorkspacePreparedImport["parsed"];
+  inboxPath: string;
+}
 
 export class AiWorkspaceService {
   private static mutationQueue: Promise<void> = Promise.resolve();
@@ -208,7 +216,13 @@ export class AiWorkspaceService {
   }
 
   async syncTrackedSessions(): Promise<AiWorkspaceAutoSyncReport> {
-    const report = await this.withMutationLock(() => this.syncTrackedSessionsUnlocked());
+    // Source discovery and transcript parsing can involve multi-gigabyte JSONL
+    // files. Keeping that work inside the global mutation lock starves short,
+    // user-initiated writes such as browser capture. Only the actual state
+    // mutation is serialized below; importOne re-checks the latest state before
+    // committing, so a concurrently prepared snapshot cannot overwrite a newer
+    // revision.
+    const report = await this.syncTrackedSessionsUnlocked();
     await this.processImportedActivities(report.results);
     return report;
   }
@@ -249,6 +263,18 @@ export class AiWorkspaceService {
           });
           continue;
         }
+        const sourceUpdatedAt = Date.parse(candidate.updatedAt);
+        if (
+          Number.isFinite(sourceUpdatedAt)
+          && Date.now() - sourceUpdatedAt < AUTO_SYNC_SOURCE_STABILITY_MS
+        ) {
+          updates.set(session.id, {
+            status: "watching",
+            lastCheckedAt: checkedAt,
+            message: "检测到来源仍在写入；稳定 2 分钟后自动追加，避免反复解析未完成会话。"
+          });
+          continue;
+        }
         const prepared = (await this.prepareImports(
           session.projectId,
           [candidate],
@@ -271,7 +297,7 @@ export class AiWorkspaceService {
           });
           continue;
         }
-        const result = await this.importOne(prepared, session.tracking.options);
+        const result = await this.withMutationLock(() => this.importOne(prepared, session.tracking.options));
         report.results.push(result);
         report.updated += 1;
         report.appendedMessages += result.appendedMessages;
@@ -291,13 +317,15 @@ export class AiWorkspaceService {
       }
     }
     if (updates.size > 0) {
-      const latest = await this.loadState(true);
-      for (const session of latest.sessions) {
-        const update = updates.get(session.id);
-        if (update) session.tracking = { ...session.tracking, ...update };
-      }
-      await this.saveState(latest);
-      await this.writeAgentContext(latest);
+      await this.withMutationLock(async () => {
+        const latest = await this.loadState(true);
+        for (const session of latest.sessions) {
+          const update = updates.get(session.id);
+          if (update) session.tracking = { ...session.tracking, ...update };
+        }
+        await this.saveState(latest);
+        await this.writeAgentContext(latest);
+      });
     }
     for (const projectId of Array.from(new Set(report.results.map((result) => result.session.projectId)))) {
       const includeSources = report.results.some((result) =>
@@ -306,7 +334,9 @@ export class AiWorkspaceService {
       const includeToolMemory = report.results.some((result) =>
         result.session.projectId === projectId && result.session.tracking.options.includeToolMemory
       );
-      await this.refreshProjectMemoryUnlocked(projectId, includeSources, includeToolMemory);
+      await this.withMutationLock(() =>
+        this.refreshProjectMemoryUnlocked(projectId, includeSources, includeToolMemory)
+      );
     }
     return report;
   }
@@ -468,20 +498,46 @@ export class AiWorkspaceService {
       includeToolMemory: false,
       retainRawSnapshot: true,
       redactSecrets: true
-    }
+    },
+    onProgress?: (progress: AiWorkspaceBrowserCaptureProgress) => void
   ): Promise<AiWorkspaceImportResult & { inboxPath?: string }> {
+    // The raw, validated conversation is written before waiting for any shared
+    // index mutation. Even if another large import is running, the user's data
+    // is already present in the project Inbox and can be recovered or retried.
+    const staged = await this.stageBrowserConversation(projectId, payload, options);
+    onProgress?.({
+      phase: "staged",
+      inboxPath: staged.inboxPath,
+      title: staged.parsed.source.title,
+      messageCount: staged.parsed.messages.length,
+      userMessageCount: staged.parsed.messages.filter((message) => message.role === "user").length,
+      assistantMessageCount: staged.parsed.messages.filter((message) => message.role === "assistant").length
+    });
     const result = await this.withMutationLock(() =>
-      this.captureBrowserConversationUnlocked(projectId, payload, options)
+      this.importStagedBrowserConversation(projectId, staged, options)
     );
+    // AI activity summaries and project-memory scans are enrichment, not part
+    // of the durability contract. The bridge acknowledges the staged progress
+    // above, while this promise remains alive until the background work settles.
+    // Awaiting here avoids orphaned operations during plugin unload or tests.
     await this.processImportedActivities([result]);
-    return result;
+    if (options.includeProjectMemory || options.includeToolMemory) {
+      await this.withMutationLock(() =>
+        this.refreshProjectMemoryUnlocked(
+          projectId,
+          options.includeProjectMemory,
+          options.includeToolMemory
+        )
+      );
+    }
+    return result.status === "duplicate" ? result : { ...result, inboxPath: staged.inboxPath };
   }
 
-  private async captureBrowserConversationUnlocked(
+  private async stageBrowserConversation(
     projectId: string,
     payload: unknown,
     options: AiWorkspaceImportOptions
-  ): Promise<AiWorkspaceImportResult & { inboxPath?: string }> {
+  ): Promise<StagedBrowserConversation> {
     const root = this.asRecord(payload);
     if (String(root.schema || "") !== "lifeos-ai-conversation-v1") {
       throw new Error("浏览器扩展提交的会话格式无效。");
@@ -494,6 +550,15 @@ export class AiWorkspaceService {
     if (!sourceSessionId) throw new Error("网页会话缺少稳定会话 ID。");
     const platform = String(sourceSession.platform || "web-ai").trim().slice(0, 80) || "web-ai";
     const sourceUrl = this.safeWebUrl(String(sourceSession.url || ""));
+    const normalizedRows = options.redactSecrets
+      ? rows.map((value) => {
+          const row = this.asRecord(value);
+          return {
+            ...row,
+            content: redactWorkspaceSecrets(String(row.content || ""))
+          };
+        })
+      : rows;
     const normalizedPayload = {
       ...root,
       schema: "lifeos-ai-conversation-v1",
@@ -503,7 +568,8 @@ export class AiWorkspaceService {
         id: sourceSessionId,
         platform,
         url: sourceUrl
-      }
+      },
+      messages: normalizedRows
     };
     const json = JSON.stringify(normalizedPayload, null, 2);
     if (new TextEncoder().encode(json).byteLength > 16 * 1024 * 1024) {
@@ -513,7 +579,10 @@ export class AiWorkspaceService {
     const createdAt = this.isoValue(sourceSession.createdAt, updatedAt);
     const inboxRoot = this.manualInboxRoot(projectId, "web");
     const captureHash = stableTextHash(json);
-    const fileName = `capture-${updatedAt.replace(/[:.]/g, "-")}-${this.safeName(sourceSessionId, 48)}-${captureHash.slice(0, 8)}.json`;
+    // One durable Inbox slot per project/platform/session avoids creating a new
+    // raw file every time the same live web conversation is refreshed. Revision
+    // history remains immutable in Sessions and, when enabled, .lifeos/raw.
+    const fileName = `capture-${this.safeName(platform, 32)}-${this.safeName(sourceSessionId, 80)}.json`;
     const inboxPath = `${inboxRoot}/${fileName}`;
     const candidate: AiWorkspaceSourceCandidate = {
       key: `web:${platform}:${sourceSessionId}:lifeos-export`,
@@ -535,6 +604,19 @@ export class AiWorkspaceService {
     };
     const parsed = parseLifeOsConversationExport({ ...candidate }, normalizedPayload, options);
     if (parsed.messages.length === 0) throw new Error("网页会话中没有可导入的可见对话。");
+    await ensureFolder(this.app, inboxRoot);
+    await writeFile(this.app, inboxPath, json);
+    return { candidate, parsed, inboxPath };
+  }
+
+  private async importStagedBrowserConversation(
+    projectId: string,
+    staged: StagedBrowserConversation,
+    options: AiWorkspaceImportOptions
+  ): Promise<AiWorkspaceImportResult> {
+    const { candidate, parsed } = staged;
+    const sourceSessionId = candidate.sourceSessionId;
+    const platform = candidate.sourcePlatform || "web-ai";
     const state = await this.loadState(true);
     const existing = state.sessions.find((session) =>
       session.projectId === projectId
@@ -560,17 +642,8 @@ export class AiWorkspaceService {
       existingSessionId: existing?.id,
       ...comparison
     };
-    if (status !== "duplicate") {
-      await ensureFolder(this.app, inboxRoot);
-      await writeFile(this.app, inboxPath, json);
-    }
     const result = await this.importOne(prepared, options);
-    await this.refreshProjectMemoryUnlocked(
-      projectId,
-      options.includeProjectMemory,
-      options.includeToolMemory
-    );
-    return status === "duplicate" ? result : { ...result, inboxPath };
+    return result;
   }
 
   async rejectCandidates(keys: string[]): Promise<void> {

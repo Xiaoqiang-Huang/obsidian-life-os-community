@@ -721,7 +721,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
         });
         return { id: project.id, name: project.name };
       },
-      capture: async (request, options) => {
+      capture: async (request, options, onProgress) => {
         const projects = await this.createProjectService().loadProjects();
         if (!projects.some((project) => project.id === request.projectId)) {
           throw new Error("目标项目不存在，请在浏览器扩展中刷新项目列表。");
@@ -729,7 +729,8 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
         return this.createAiWorkspaceService().captureBrowserConversation(
           request.projectId,
           request.conversation,
-          options
+          options,
+          onProgress
         );
       }
     });

@@ -1,4 +1,8 @@
-import type { AiWorkspaceImportOptions, AiWorkspaceImportResult } from "./types";
+import type {
+  AiWorkspaceBrowserCaptureProgress,
+  AiWorkspaceImportOptions,
+  AiWorkspaceImportResult
+} from "./types";
 
 type NodeRequireLike = (id: string) => unknown;
 
@@ -20,8 +24,11 @@ export interface BrowserCaptureServerConfig {
   createProject: (input: { name: string; goal?: string }) => Promise<BrowserCaptureProject>;
   capture: (
     request: BrowserCaptureRequest,
-    options: AiWorkspaceImportOptions
+    options: AiWorkspaceImportOptions,
+    onProgress?: (progress: AiWorkspaceBrowserCaptureProgress) => void
   ) => Promise<AiWorkspaceImportResult & { inboxPath?: string }>;
+  /** Internal test hook; production defaults to a short bounded response wait. */
+  captureResponseTimeoutMs?: number;
 }
 
 export interface BrowserCaptureServerStatus {
@@ -57,11 +64,11 @@ interface HttpModuleLike {
 }
 
 const MAX_REQUEST_BYTES = 18 * 1024 * 1024;
+const DEFAULT_CAPTURE_RESPONSE_TIMEOUT_MS = 12_000;
 
 export class AiWorkspaceBrowserCaptureServer {
   private server: ServerLike | null = null;
   private config: BrowserCaptureServerConfig | null = null;
-  private captureQueue: Promise<void> = Promise.resolve();
   private status: BrowserCaptureServerStatus = {
     available: false,
     running: false,
@@ -224,9 +231,57 @@ export class AiWorkspaceBrowserCaptureServer {
           conversation: body.conversation,
           options
         };
-        const run = this.captureQueue.then(() => config.capture(captureRequest, options));
-        this.captureQueue = run.then(() => undefined, () => undefined);
-        const result = await run;
+        let resolveStaged: ((outcome: { kind: "staged"; progress: AiWorkspaceBrowserCaptureProgress }) => void) | undefined;
+        const staged = new Promise<{ kind: "staged"; progress: AiWorkspaceBrowserCaptureProgress }>((resolve) => {
+          resolveStaged = resolve;
+        });
+        const run = config.capture(captureRequest, options, (progress) => {
+          resolveStaged?.({ kind: "staged", progress });
+          resolveStaged = undefined;
+        }).then(
+          (result) => ({ kind: "complete" as const, result }),
+          (error: unknown) => ({ kind: "error" as const, error })
+        );
+        const timeoutMs = this.normalizeCaptureTimeout(config.captureResponseTimeoutMs);
+        let timeoutId: ReturnType<typeof globalThis.setTimeout> | undefined;
+        const outcome = await Promise.race([
+          run,
+          staged,
+          new Promise<{ kind: "timeout" }>((resolve) => {
+            timeoutId = globalThis.setTimeout(() => resolve({ kind: "timeout" }), timeoutMs);
+          })
+        ]);
+        if (timeoutId !== undefined) globalThis.clearTimeout(timeoutId);
+        if (outcome.kind === "staged") {
+          // Acknowledge the browser as soon as the validated payload is on disk.
+          // Revision indexing may still be queued behind another large import,
+          // but the raw capture is already durable and recoverable from Inbox.
+          void run.then((finalOutcome) => {
+            if (finalOutcome.kind === "error") {
+              console.error("[Life OS] Browser capture was staged but background indexing failed.", finalOutcome.error);
+            }
+          });
+          this.sendJson(response, 202, {
+            ok: true,
+            queued: true,
+            status: "queued",
+            title: outcome.progress.title,
+            messageCount: outcome.progress.messageCount,
+            userMessageCount: outcome.progress.userMessageCount,
+            assistantMessageCount: outcome.progress.assistantMessageCount,
+            inboxPath: outcome.progress.inboxPath
+          });
+          return;
+        }
+        if (outcome.kind === "timeout") {
+          this.sendJson(response, 504, {
+            ok: false,
+            error: "Life OS 在限定时间内尚未完成会话落盘，请重试或先下载 JSON。"
+          });
+          return;
+        }
+        if (outcome.kind === "error") throw outcome.error;
+        const result = outcome.result;
         this.sendJson(response, 200, {
           ok: true,
           status: result.status,
@@ -316,6 +371,13 @@ export class AiWorkspaceBrowserCaptureServer {
   private normalizePort(value: number): number {
     const port = Math.floor(Number(value));
     return Number.isFinite(port) && port >= 1024 && port <= 65535 ? port : 27183;
+  }
+
+  private normalizeCaptureTimeout(value: number | undefined): number {
+    const timeout = Math.floor(Number(value));
+    return Number.isFinite(timeout) && timeout >= 10 && timeout <= 120_000
+      ? timeout
+      : DEFAULT_CAPTURE_RESPONSE_TIMEOUT_MS;
   }
 
   private asRecord(value: unknown): Record<string, unknown> {
