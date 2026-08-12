@@ -1,6 +1,6 @@
 # Life OS Assistant
 
-Current release: **0.3.9** · Obsidian `1.5.0+` · Desktop and mobile (`isDesktopOnly: false`)
+Current release: **0.3.10** · Obsidian `1.5.0+` · Desktop and mobile (`isDesktopOnly: false`)
 
 This README is bilingual. English is provided first for Obsidian Community review, followed by Simplified Chinese.
 
@@ -47,7 +47,7 @@ Reload Obsidian, then enable the plugin. Do not copy another user's `data.json`;
 - Before uninstalling, back up the configured Life OS root folder. Disabling or removing the plugin does not delete Markdown data.
 - To remove all data, delete the Life OS root folder yourself only after verifying the backup. Browser-extension data and external AI exports must be removed separately.
 
-## Core workflows in 0.3.9
+## Core workflows in 0.3.10
 
 ### AI assistant and knowledge grounding
 
@@ -90,7 +90,7 @@ The review workbench uses user-authored diary text as the primary narrative. Con
 
 ### Browser AI capture
 
-The companion Chrome/Edge extension captures only the visible rendered conversation after a user click. It connects to a token-protected bridge bound to `127.0.0.1`. It does not read cookies, hidden reasoning, or private provider APIs. If the bridge is unavailable, download the standard JSON and import it manually.
+The companion Chrome/Edge extension captures only the visible rendered conversation after a user click. It connects to a token-protected bridge bound to `127.0.0.1`; current Chromium builds may ask for local-device/local-network access on the first connection. It does not read cookies, hidden reasoning, or private provider APIs. If the bridge is unavailable, download the standard JSON and import it manually. Manual import reads the selected file contents directly and no longer depends on Electron's legacy absolute-path field.
 
 ### Document import and OCR
 
@@ -144,7 +144,7 @@ The configurable root folder contains user-facing data such as `Daily/`, `Tasks/
 
 - **Plugin does not load:** verify the folder name is `personal-life-system`, all three release assets are present, then reload Obsidian and inspect the developer console.
 - **AI answer ignores knowledge:** select the intended project, use Smart/Global context, inspect **Context sources**, and verify the source is not excluded or marked local-only.
-- **Browser extension cannot connect:** enable the bridge in Life OS settings, copy fresh connection JSON, confirm the displayed port, and keep Obsidian running. Use JSON download/import as fallback.
+- **Browser extension cannot connect:** install/reload the extension from the matching product/experience release (it is distributed separately from the Obsidian Community assets), enable the bridge, copy fresh connection JSON, allow the browser's local-device/local-network prompt, confirm the displayed port, and keep Obsidian running. Use JSON download/import as an independent fallback.
 - **A review draft is stale:** open **Review → Pending review drafts → Refresh and review**. Source changes are intentionally not accepted silently.
 - **OCR is slow:** try a text PDF first, process large scans on desktop, or configure a trusted structured OCR endpoint explicitly.
 - **Black screen or layout issue:** reload the plugin, switch to the default Obsidian theme, reduce the active pane count, and attach the console error plus viewport/theme details to a GitHub issue.
@@ -161,13 +161,13 @@ The private source workspace additionally runs service, UI, runtime, upgrade, li
 
 ## Release assets
 
-Each exact semantic-version tag (for example `0.3.9`, without a `v` prefix) builds and attaches:
+Each exact semantic-version tag (for example `0.3.10`, without a `v` prefix) builds and attaches:
 
 - `main.js`
 - `manifest.json`
 - `styles.css`
 
-The default branch stores buildable source. The tag must exactly match `manifest.json.version`.
+The public Obsidian Community repository intentionally publishes only these three plugin assets. The optional Chrome/Edge companion extension is distributed separately through the product/experience repository and is not an Obsidian Community review asset. The default branch stores buildable source, and the tag must exactly match `manifest.json.version`.
 
 ## Support
 
@@ -181,9 +181,9 @@ The repository license and Pro entitlement are separate. Do not remove, bypass, 
 
 ## 简体中文
 
-Life OS Assistant 0.3.9 是一个本地优先的 Obsidian 个人工作系统，用来管理日记、任务、知识、记忆、AI 项目会话和有证据的周期复盘。用户可读内容保存在当前 Vault 的 Markdown 中；AI 生成的写入先成为候选，由用户确认后再进入正式数据。
+Life OS Assistant 0.3.10 是一个本地优先的 Obsidian 个人工作系统，用来管理日记、任务、知识、记忆、AI 项目会话和有证据的周期复盘。用户可读内容保存在当前 Vault 的 Markdown 中；AI 生成的写入先成为候选，由用户确认后再进入正式数据。
 
-### 0.3.9 主要能力
+### 0.3.10 主要能力
 
 - AI 助手使用混合检索和 `[S1]` 来源引用，不再把整个知识库或整段历史无差别塞入上下文。
 - 项目上下文支持多种国内外 AI 编程工具与网页 AI；每条可见对话都是可搜索、可跳转的节点。
@@ -222,7 +222,7 @@ Life OS Assistant 0.3.9 是一个本地优先的 Obsidian 个人工作系统，�
 
 ### 网页 AI、文档和 OCR
 
-浏览器扩展只在用户点击后采集网页中已经渲染的可见对话，通过随机令牌连接 `127.0.0.1` 本地桥；不读取 Cookie、隐藏推理或供应商私有接口。桥不可用时可下载标准 JSON 后手动导入。
+浏览器扩展只在用户点击后采集网页中已经渲染的可见对话，通过随机令牌连接 `127.0.0.1` 本地桥；不读取 Cookie、隐藏推理或供应商私有接口。Chrome / Edge 首次连接时需要允许本机设备/本地网络访问。桥不可用时可下载标准 JSON 后手动导入，文件选择不再依赖 Electron 的绝对路径字段。
 
 文本 PDF 优先本地解析；扫描件使用本地/按需下载的 OCR 资源。只有用户明确配置 PaddleOCR PP-StructureV3 地址时，所选 PDF 才会发送到该端点。
 
@@ -257,11 +257,11 @@ Life OS 仅在用户可见的功能中联网：用户配置的 AI 模型、授�
 ### 常见问题
 
 - **AI 不懂知识库：** 选择正确项目和上下文模式，打开「上下文来源」核对命中的文件与片段。
-- **浏览器扩展连不上：** 启用本地桥、复制最新连接 JSON、保持 Obsidian 运行；必要时下载 JSON 手动导入。
+- **浏览器扩展连不上：** 确认扩展与插件版本一致并重新加载扩展，启用本地桥，复制最新连接 JSON，允许浏览器访问本机设备/本地网络，并保持 Obsidian 运行；必要时下载 JSON 手动导入。
 - **复盘草稿过期：** 打开「复盘 → 待确认复盘草稿 → 刷新并审核」。
 - **OCR 很慢：** 大扫描件优先在桌面处理，或明确配置可信的结构化 OCR 服务。
 - **黑屏或布局异常：** 重载插件、切回 Obsidian 默认主题，并在 issue 中提供版本、平台、主题、复现步骤和脱敏控制台错误。
 
 ### 发布文件与许可证
 
-每个精确版本 tag（例如 `0.3.9`，不带 `v`）发布 `main.js`、`manifest.json`、`styles.css`。本仓库使用 PolyForm Noncommercial License 1.0.0；商业使用需获得 Xiaoqiang Huang 事先书面许可。完整说明见 [`LICENSE`](LICENSE)、[`NOTICE`](NOTICE) 和 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+每个精确版本 tag（例如 `0.3.10`，不带 `v`）只发布 Obsidian 插件三件套：`main.js`、`manifest.json`、`styles.css`。可选的网页 AI 浏览器扩展由产品/体验仓库单独分发，不属于 Obsidian 社区审核资产。本仓库使用 PolyForm Noncommercial License 1.0.0；商业使用需获得 Xiaoqiang Huang 事先书面许可。完整说明见 [`LICENSE`](LICENSE)、[`NOTICE`](NOTICE) 和 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。

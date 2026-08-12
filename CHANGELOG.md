@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.10 - 2026-08-11
+
+### Fixed
+
+- Restored downloaded browser-conversation JSON import on current Obsidian/Electron versions by reading the selected `File` contents and staging them in the selected project's AI Workspace inbox instead of depending on the removed `File.path` field.
+- Added clear validation for empty, oversized, malformed, and non-Life-OS web conversation exports before import preview.
+- Updated the Chrome/Edge bridge request flow to declare the current `loopback` target address space and added compatible private-network preflight responses on the loopback server.
+- Added a one-time bridge setup migration so existing installations no longer remain silently disabled by the earlier settings-normalization bug; users can still turn the bridge off afterwards.
+- Improved bridge connection errors so users are told to allow the browser's local-device/local-network prompt rather than being left with a generic connection failure.
+
+### Delivery
+
+- Synchronized the optional browser extension version with the plugin. Product-distribution releases may provide its versioned `LifeOS-Web-AI-Capture` ZIP separately; the public Obsidian community repository and its releases remain limited to reviewable plugin source plus `main.js`, `manifest.json`, and `styles.css`.
+
 ## 0.3.9 - 2026-08-11
 
 ### Fixed

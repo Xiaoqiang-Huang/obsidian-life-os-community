@@ -162,7 +162,11 @@ export class AiWorkspaceBrowserCaptureServer {
       this.sendJson(response, 403, { ok: false, error: "不允许的浏览器扩展来源。" });
       return;
     }
-    this.applyCors(response, origin);
+    this.applyCors(
+      response,
+      origin,
+      this.header(request, "access-control-request-private-network").toLowerCase() === "true"
+    );
     if (request.method === "OPTIONS") {
       response.statusCode = 204;
       response.end();
@@ -287,12 +291,13 @@ export class AiWorkspaceBrowserCaptureServer {
     return /^(chrome-extension|moz-extension):\/\/[a-z0-9-]+\/?$/i.test(origin);
   }
 
-  private applyCors(response: ResponseLike, origin: string): void {
+  private applyCors(response: ResponseLike, origin: string, privateNetworkRequested: boolean): void {
     if (origin) response.setHeader("Access-Control-Allow-Origin", origin);
     response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-LifeOS-Token");
+    if (privateNetworkRequested) response.setHeader("Access-Control-Allow-Private-Network", "true");
     response.setHeader("Access-Control-Max-Age", "600");
-    response.setHeader("Vary", "Origin");
+    response.setHeader("Vary", "Origin, Access-Control-Request-Private-Network");
     response.setHeader("Cache-Control", "no-store");
   }
 

@@ -609,6 +609,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     const needsInitialLicenseSave = !storedData.licenseInstallationId;
     const needsBrowserCaptureTokenSave = typeof storedData.browserCaptureToken !== "string"
       || storedData.browserCaptureToken.trim().length < 24;
+    const needsBrowserCaptureSetupMigration = Number(storedData.browserCaptureSetupVersion || 0) < 1;
     const storedImportedAiSkills = (storedData as Record<string, unknown>).importedAiSkills;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, storedData);
     this.settings.themeStyle = normalizeThemeStyle(this.settings.themeStyle);
@@ -621,7 +622,10 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.settings.lastTaskDraft = normalizeTaskFormDraft((storedData as Record<string, unknown>).lastTaskDraft);
     this.settings.customAiSkillCategories = normalizeCustomAiSkillCategories((storedData as Record<string, unknown>).customAiSkillCategories);
     this.settings.importedAiSkills = normalizeImportedAiSkillRecords(storedImportedAiSkills);
-    this.settings.browserCaptureEnabled = storedData.browserCaptureEnabled === true;
+    this.settings.browserCaptureEnabled = needsBrowserCaptureSetupMigration
+      ? true
+      : storedData.browserCaptureEnabled !== false;
+    this.settings.browserCaptureSetupVersion = 1;
     this.settings.browserCapturePort = normalizeBrowserCapturePort(storedData.browserCapturePort);
     this.settings.pdfOcrEngine = normalizePdfOcrEngine(storedData.pdfOcrEngine);
     this.settings.paddleOcrEndpoint = normalizePaddleOcrEndpoint(storedData.paddleOcrEndpoint);
@@ -657,7 +661,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       setStoredAiApiKey(this.settings, this.settings.aiProvider, this.settings.aiApiKey);
     }
     setStoredAiProviderConfig(this.settings, this.settings.aiProvider, getCurrentAiProviderConfig(this.settings));
-    if (needsInitialLicenseSave || needsImportedAiSkillMigration || needsBrowserCaptureTokenSave) {
+    if (needsInitialLicenseSave || needsImportedAiSkillMigration || needsBrowserCaptureTokenSave || needsBrowserCaptureSetupMigration) {
       await this.saveSettings();
     }
   }

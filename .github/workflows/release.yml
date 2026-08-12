@@ -25,7 +25,9 @@ jobs:
         run: npm ci
 
       - name: Verify and build plugin
-        run: npm test
+        run: |
+          npm run build
+          npm test
 
       - name: Validate source and release version
         shell: bash

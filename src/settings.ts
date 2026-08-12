@@ -507,6 +507,7 @@ export interface PersonalLifeSystemSettings {
   sidebarDirectoryCollapsed: boolean;
   backgroundImagePath: string;
   browserCaptureEnabled: boolean;
+  browserCaptureSetupVersion: number;
   browserCapturePort: number;
   browserCaptureToken: string;
   licenseApiBaseUrl: string;
@@ -1019,6 +1020,7 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   sidebarDirectoryCollapsed: false,
   backgroundImagePath: "",
   browserCaptureEnabled: true,
+  browserCaptureSetupVersion: 1,
   browserCapturePort: 27183,
   browserCaptureToken: "",
   licenseApiBaseUrl: "https://license.lifeoskit.com",

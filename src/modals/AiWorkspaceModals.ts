@@ -448,26 +448,43 @@ export class AiWorkspaceImportModal extends Modal {
     tool.addEventListener("change", syncSupplementalLabel);
     syncSupplementalLabel();
     createButton(row, "选择文件", () => input.click(), { icon: "file-up", ghost: true });
-    input.addEventListener("change", () => {
+    input.addEventListener("change", () => void (async () => {
+      const files = Array.from(input.files ?? []);
+      if (files.length === 0) return;
+      const errors: string[] = [];
+      let added = 0;
+      this.setBusy(true, `正在读取 ${files.length} 个会话文件…`);
       try {
-        for (const file of Array.from(input.files ?? [])) {
-          const path = (file as File & { path?: string }).path;
-          if (!path) throw new Error("当前环境没有提供文件绝对路径，请在桌面版 Obsidian 中导入。");
-          const candidate = this.service.bridge.candidateFromManualFile(path, tool.value as AiWorkspaceTool);
-          candidate.matchedProjectIds = [this.project.id];
-          this.candidates = [...this.candidates.filter((item) => item.key !== candidate.key), candidate];
-          this.manualCandidateKeys.add(candidate.key);
-          this.selectedKeys.add(candidate.key);
+        for (const file of files) {
+          try {
+            const candidate = await this.service.stageManualImportFile(
+              this.project.id,
+              file,
+              tool.value as AiWorkspaceTool
+            );
+            this.candidates = [...this.candidates.filter((item) => item.key !== candidate.key), candidate];
+            this.manualCandidateKeys.add(candidate.key);
+            this.selectedKeys.add(candidate.key);
+            added += 1;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "文件无法读取。";
+            errors.push(`${file.name}：${message}`);
+          }
         }
         this.prepared = [];
         this.renderCandidates();
         this.syncPrimaryButton();
-      } catch (error) {
-        new Notice(error instanceof Error ? error.message : "导出文件无法读取。", 7000);
+        if (added > 0) {
+          this.setProgress(`已读取 ${added} 个会话文件，请核对名称和内容后预览导入。`);
+        }
+        if (errors.length > 0) {
+          new Notice(errors.slice(0, 3).join("\n"), 9000);
+        }
       } finally {
         input.value = "";
+        this.setBusy(false);
       }
-    });
+    })());
   }
 
   private async scan(): Promise<void> {

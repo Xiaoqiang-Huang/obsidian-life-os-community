@@ -68,6 +68,7 @@ const AI_ANALYSIS_MERGE_BATCH = 6;
 const CONTINUATION_INLINE_CHARS = 28000;
 const PROJECT_MEMORY_CONTEXT_CHARS = 18000;
 const ACTIVITY_ANALYSIS_CHARS = 14000;
+const MANUAL_IMPORT_MAX_BYTES = 64 * 1024 * 1024;
 
 export class AiWorkspaceService {
   private static mutationQueue: Promise<void> = Promise.resolve();
@@ -403,6 +404,58 @@ export class AiWorkspaceService {
       "写入完成后，只回复生成文件的绝对路径和消息数量。"
     ].join("\n");
     return { directoryPath, prompt };
+  }
+
+  async stageManualImportFile(
+    projectId: string,
+    file: Pick<File, "name" | "size" | "lastModified" | "text">,
+    tool: AiWorkspaceTool
+  ): Promise<AiWorkspaceSourceCandidate> {
+    const originalName = String(file.name || "conversation.json").trim();
+    const extensionMatch = originalName.toLowerCase().match(/\.(jsonl|json)$/u);
+    if (!extensionMatch) throw new Error("请选择 JSON 或 JSONL 会话文件。");
+    if (Number(file.size) > MANUAL_IMPORT_MAX_BYTES) {
+      throw new Error("单个会话文件不能超过 64 MB，请分段导出后再导入。");
+    }
+    const content = await file.text();
+    if (!content.trim()) throw new Error(`“${originalName}”是空文件。`);
+    const size = new TextEncoder().encode(content).byteLength;
+    if (size > MANUAL_IMPORT_MAX_BYTES) {
+      throw new Error("单个会话文件不能超过 64 MB，请分段导出后再导入。");
+    }
+    if (tool === "web") {
+      let payload: Record<string, unknown>;
+      try {
+        payload = this.asRecord(JSON.parse(content) as unknown);
+      } catch {
+        throw new Error("网页 AI 导入文件不是合法 JSON，请重新从 Life OS 浏览器扩展下载。");
+      }
+      if (String(payload.schema || "") !== "lifeos-ai-conversation-v1") {
+        throw new Error("网页 AI 导入文件必须是 Life OS 浏览器扩展生成的标准 JSON。");
+      }
+    }
+
+    const extension = extensionMatch[1];
+    const stem = originalName.slice(0, -(extension.length + 1));
+    const fingerprint = stableTextHash(content);
+    const inboxRoot = this.manualInboxRoot(projectId, tool);
+    const stagedName = `${this.safeName(stem, 72)}-${fingerprint.slice(0, 10)}.${extension}`;
+    const inboxPath = `${inboxRoot}/${stagedName}`;
+    await ensureFolder(this.app, inboxRoot);
+    await writeFile(this.app, inboxPath, content);
+
+    const sourcePath = this.absoluteVaultPath(inboxPath);
+    if (!this.bridge.isAvailable()) {
+      throw new Error("当前环境不能解析本地会话文件；请在桌面版 Obsidian 中完成导入。");
+    }
+    const candidate = this.bridge.candidateFromManualFile(sourcePath, tool);
+    return {
+      ...candidate,
+      sourcePath,
+      size,
+      fingerprint: candidate.fingerprint || fingerprint,
+      matchedProjectIds: [projectId]
+    };
   }
 
   async captureBrowserConversation(
