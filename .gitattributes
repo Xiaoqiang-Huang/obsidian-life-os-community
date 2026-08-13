@@ -11,5 +11,6 @@
 *.yaml text eol=lf
 
 *.png binary
+*.webp binary
 *.wasm binary
 *.gz binary
