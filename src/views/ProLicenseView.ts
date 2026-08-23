@@ -3,12 +3,15 @@ import { PRO_LICENSE_VIEW_TYPE } from "../constants";
 import { LicenseClient, type CreateOrderResult, type PaymentOrder, type ActivationResult, type RedeemResult } from "../licensing/license-client";
 import { buildAccountCenterUrl, buildDeviceQuotaMessage, getPaymentPresentation, isDeviceQuotaError } from "../licensing/mobile-payment";
 import {
-  LIFEOS_CURRENT_LIFETIME_PRO_SKU,
-  LIFEOS_CURRENT_MONTHLY_PRO_SKU,
-  type LicenseSku,
   type LicenseStateSnapshot,
   type LicenseStatusLabel
 } from "../licensing/license-types";
+import {
+  resolveLifeOsPurchaseCatalog,
+  sameLifeOsPurchaseProduct,
+  type LifeOsPurchaseCatalog,
+  type LifeOsPurchaseProduct
+} from "../licensing/payment-catalog";
 import { resolveLicenseStatus } from "../licensing/entitlement";
 import { verifyLicenseEntitlementToken } from "../licensing/entitlement-token";
 import type PersonalLifeSystemPlugin from "../main";
@@ -20,30 +23,8 @@ const ORDER_POLL_INTERVAL_MS = 8000;
 const ENTITLEMENT_CLOCK_SKEW_NOTICE =
   "授权已生成，但当前电脑时间和授权服务器时间不一致。请同步系统时间后再点激活；兑换码不要重复输入，可到账号中心复制授权码。";
 
-const PRODUCT_COPY: Record<"monthly" | "lifetime", {
-  sku: LicenseSku;
-  title: string;
-  price: string;
-  description: string;
-  maxDevices: string;
-}> = {
-  monthly: {
-    sku: LIFEOS_CURRENT_MONTHLY_PRO_SKU,
-    title: "月付 Pro",
-    price: "19.9 元 / 30 天",
-    description: "设备数最多 3 台，适合先完整体验 Pro 工作流。",
-    maxDevices: "设备数最多 3 台"
-  },
-  lifetime: {
-    sku: LIFEOS_CURRENT_LIFETIME_PRO_SKU,
-    title: "买断 Pro",
-    price: "299 元一次买断",
-    description: "一次买断，长期使用全部 Pro 能力。",
-    maxDevices: "设备数最多 5 台"
-  }
-};
-
 type ActivationAttempt = "activated" | "device-quota" | "failed";
+type PurchaseCatalogStatus = "loading" | "ready" | "error";
 type ProInputOptions = {
   type?: string;
   inputmode?: string;
@@ -64,6 +45,11 @@ export class ProLicenseView extends ItemView {
   private pollRequestInFlight = false;
   private copyFallbackText = "";
   private licenseIssueMessage = "";
+  private purchaseCatalog: LifeOsPurchaseCatalog = { monthly: null, lifetime: null };
+  private purchaseCatalogStatus: PurchaseCatalogStatus = "loading";
+  private purchaseCatalogError = "";
+  private purchaseCatalogRequestId = 0;
+  private purchaseCatalogHost: HTMLElement | null = null;
 
   constructor(leaf: WorkspaceLeaf, private plugin: PersonalLifeSystemPlugin) {
     super(leaf);
@@ -79,15 +65,18 @@ export class ProLicenseView extends ItemView {
 
   async onOpen(): Promise<void> {
     await this.render();
+    void this.refreshPurchaseCatalog(false);
   }
 
   async onClose(): Promise<void> {
+    this.purchaseCatalogRequestId += 1;
     this.stopPolling();
   }
 
   private async render(): Promise<void> {
     const container = this.containerEl.children[1];
     container.empty();
+    this.purchaseCatalogHost = null;
     const main = createLifeOSShell(container as HTMLElement, this.plugin, "pro");
     main.addClass("lifeos-pro-license-view");
 
@@ -150,7 +139,10 @@ export class ProLicenseView extends ItemView {
       this.plugin.settings.licenseEmail = email.value.trim();
       await this.plugin.saveSettings();
       new Notice("授权服务设置已保存。");
+      this.purchaseCatalogStatus = "loading";
+      this.purchaseCatalogError = "";
       await this.render();
+      void this.refreshPurchaseCatalog(false);
     }, true);
     this.button(action, "复制账号中心链接", "copy", () => void this.copyText(this.accountCenterUrl(), "账号中心链接已复制。"));
   }
@@ -177,9 +169,8 @@ export class ProLicenseView extends ItemView {
     const section = parent.createDiv({ cls: "lifeos-pro-section" });
     this.sectionTitle(section, "购买 Pro", "qr-code");
     this.renderTrialCard(section);
-    const grid = section.createDiv({ cls: "lifeos-pro-product-grid" });
-    this.productCard(grid, PRODUCT_COPY.monthly);
-    this.productCard(grid, PRODUCT_COPY.lifetime);
+    this.purchaseCatalogHost = section.createDiv({ cls: "lifeos-pro-catalog-host" });
+    this.renderPurchaseCatalog(this.purchaseCatalogHost);
 
     const restoredOrder = this.pendingOrder ?? this.restorePendingOrderFromSettings();
     if (restoredOrder && !this.pendingOrder) {
@@ -280,13 +271,37 @@ export class ProLicenseView extends ItemView {
     backup.createEl("code", { text: this.plugin.settings.licenseKey || "尚未保存授权码" });
   }
 
-  private productCard(parent: HTMLElement, product: typeof PRODUCT_COPY[keyof typeof PRODUCT_COPY]): void {
+  private renderPurchaseCatalog(parent: HTMLElement): void {
+    if (this.purchaseCatalogStatus === "loading") {
+      const status = parent.createDiv({ cls: "lifeos-pro-inline-panel lifeos-card" });
+      this.cardTitle(status, "正在同步支付商品", "refresh-cw");
+      status.createEl("p", { text: "正在从授权服务读取当前可购买商品和金额，请稍候。" });
+      return;
+    }
+
+    if (this.purchaseCatalogStatus === "error") {
+      const status = parent.createDiv({ cls: "lifeos-pro-inline-panel lifeos-card" });
+      this.cardTitle(status, "支付服务暂不可用", "circle-alert");
+      status.createEl("p", { cls: "lifeos-pro-warning", text: this.purchaseCatalogError });
+      this.button(status, "重新检查支付服务", "refresh-cw", () => void this.refreshPurchaseCatalog(), true);
+      return;
+    }
+
+    const status = parent.createDiv({ cls: "lifeos-pro-inline-panel lifeos-card" });
+    this.cardTitle(status, "支付服务已连接", "badge-check");
+    status.createEl("p", { text: "商品和金额已从当前授权服务同步；创建订单前还会再次核对，避免版本变化导致支付失败。" });
+    const grid = parent.createDiv({ cls: "lifeos-pro-product-grid" });
+    if (this.purchaseCatalog.monthly) this.productCard(grid, this.purchaseCatalog.monthly);
+    if (this.purchaseCatalog.lifetime) this.productCard(grid, this.purchaseCatalog.lifetime);
+  }
+
+  private productCard(parent: HTMLElement, product: LifeOsPurchaseProduct): void {
     const card = parent.createDiv({ cls: "lifeos-pro-product lifeos-card" });
     card.createDiv({ cls: "lifeos-pro-product-title", text: product.title });
     card.createDiv({ cls: "lifeos-pro-product-price", text: product.price });
     card.createEl("p", { text: product.description });
     card.createDiv({ cls: "lifeos-pro-product-meta", text: product.maxDevices });
-    this.button(card, "选择支付宝支付", "qr-code", () => void this.createOrder(product.sku), true);
+    this.button(card, "选择支付宝支付", "qr-code", () => void this.createOrder(product), true);
   }
 
   private renderPaymentPanel(parent: HTMLElement, result: CreateOrderResult): void {
@@ -321,15 +336,26 @@ export class ProLicenseView extends ItemView {
     }
   }
 
-  private async createOrder(sku: LicenseSku): Promise<void> {
+  private async createOrder(product: LifeOsPurchaseProduct): Promise<void> {
     const email = this.plugin.settings.licenseEmail.trim();
     if (!email.includes("@")) {
       new Notice("请先填写有效邮箱。");
       return;
     }
     try {
-      const result = await this.client.createOrder({
-        sku,
+      const client = this.client;
+      const latestCatalog = await this.loadPurchaseCatalog(client);
+      const latestProduct = latestCatalog[product.kind];
+      this.purchaseCatalog = latestCatalog;
+      this.purchaseCatalogStatus = "ready";
+      this.purchaseCatalogError = "";
+      if (!latestProduct || !sameLifeOsPurchaseProduct(product, latestProduct)) {
+        this.renderPurchaseCatalogOnly();
+        new Notice("商品信息已更新，请确认新价格后再次支付。", 6000);
+        return;
+      }
+      const result = await client.createOrder({
+        sku: latestProduct.sku,
         email,
         installationId: this.plugin.settings.licenseInstallationId,
         payType: "alipay"
@@ -344,8 +370,48 @@ export class ProLicenseView extends ItemView {
       this.openPaymentUrl(result.payment);
       this.startPolling(result.order.id);
     } catch (error) {
+      if (error instanceof Error && /unknown product sku/i.test(error.message)) {
+        new Notice("商品信息已更新，请确认新价格后再次支付。", 6000);
+        void this.refreshPurchaseCatalog();
+        return;
+      }
       new Notice(error instanceof Error ? error.message : String(error));
     }
+  }
+
+  private async loadPurchaseCatalog(client = this.client): Promise<LifeOsPurchaseCatalog> {
+    const payload = await client.getCatalog();
+    const products = Array.isArray(payload?.products) ? payload.products : [];
+    const catalog = resolveLifeOsPurchaseCatalog(products);
+    if (!catalog.monthly && !catalog.lifetime) {
+      throw new Error("支付服务没有返回可购买的 Life OS Pro 商品，请检查服务版本或稍后重试。");
+    }
+    return catalog;
+  }
+
+  private async refreshPurchaseCatalog(renderLoading = true): Promise<void> {
+    const requestId = ++this.purchaseCatalogRequestId;
+    this.purchaseCatalogStatus = "loading";
+    this.purchaseCatalogError = "";
+    if (renderLoading) this.renderPurchaseCatalogOnly();
+    try {
+      const catalog = await this.loadPurchaseCatalog();
+      if (requestId !== this.purchaseCatalogRequestId) return;
+      this.purchaseCatalog = catalog;
+      this.purchaseCatalogStatus = "ready";
+    } catch (error) {
+      if (requestId !== this.purchaseCatalogRequestId) return;
+      this.purchaseCatalog = { monthly: null, lifetime: null };
+      this.purchaseCatalogStatus = "error";
+      this.purchaseCatalogError = error instanceof Error ? error.message : String(error);
+    }
+    if (requestId === this.purchaseCatalogRequestId) this.renderPurchaseCatalogOnly();
+  }
+
+  private renderPurchaseCatalogOnly(): void {
+    if (!this.purchaseCatalogHost?.isConnected) return;
+    this.purchaseCatalogHost.empty();
+    this.renderPurchaseCatalog(this.purchaseCatalogHost);
   }
 
   private openPaymentUrl(payment: CreateOrderResult["payment"]): void {

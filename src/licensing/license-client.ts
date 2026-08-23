@@ -2,16 +2,16 @@ import { Platform, requestUrl } from "obsidian";
 import type {
   ActivationRecordSnapshot,
   LicenseRecordSnapshot,
-  LicenseSku,
   LicenseStateSnapshot
 } from "./license-types";
+import type { PublicPaymentCatalog } from "./payment-catalog";
 
 export type PayType = "alipay" | "wxpay";
 
 export interface PaymentOrder {
   id: string;
   outTradeNo: string;
-  sku: LicenseSku;
+  sku: string;
   amountCents: number;
   priceYuan: number;
   currency: string;
@@ -127,8 +127,12 @@ export function getDeviceLabel(): string {
 export class LicenseClient {
   constructor(private readonly baseUrl: string) {}
 
+  getCatalog(): Promise<PublicPaymentCatalog> {
+    return api<PublicPaymentCatalog>(this.baseUrl, "/api/catalog");
+  }
+
   createOrder(input: {
-    sku: LicenseSku;
+    sku: string;
     email: string;
     installationId: string;
     payType?: PayType;

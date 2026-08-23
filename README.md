@@ -6,7 +6,7 @@
 
 [**English**](README.md) · [简体中文](README.zh-CN.md)
 
-![Version](https://img.shields.io/badge/version-0.3.14-0f172a?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.3.15-0f172a?style=flat-square)
 ![Obsidian](https://img.shields.io/badge/Obsidian-1.5.0%2B-7c3aed?style=flat-square)
 ![Local first](https://img.shields.io/badge/data-local--first-15803d?style=flat-square)
 ![Mobile](https://img.shields.io/badge/mobile-supported-2563eb?style=flat-square)
@@ -17,9 +17,11 @@
 
 Life OS Assistant turns an Obsidian vault into a connected workspace for **today, tasks, diary, knowledge, memory, reviews, AI assistance, and project AI sessions**. Your readable records remain Markdown in the vault. AI writeback is off by default; you can keep preview confirmation or explicitly opt in to automatic writes only when the current request names one unambiguous destination.
 
-Current release: **0.3.14** · Obsidian **1.5.0+** · `isDesktopOnly: false`
+Current release: **0.3.15** · Obsidian **1.5.0+** · `isDesktopOnly: false`
 
-> **About the images:** the walkthrough images below were generated from the current 0.3.14 information architecture and implemented workflows. They use synthetic data and a neutral Obsidian theme; your actual layout follows your Obsidian theme, viewport, and enabled features.
+> **0.3.15 payment reliability:** purchasable Pro plans and amounts now come from the configured authorization service, are checked again before order creation, and refresh safely when the server catalog changes. This prevents client/server SKU drift from producing failed orders.
+
+> **About the images:** the walkthrough images below were generated from the current 0.3.15 information architecture and implemented workflows. They use synthetic data and a neutral Obsidian theme; your actual layout follows your Obsidian theme, viewport, and enabled features.
 
 ![Life OS Today dashboard](readme-assets/01-today-overview.webp)
 
@@ -190,7 +192,7 @@ After the listing is accepted:
 
 ### Manual installation
 
-Create `.obsidian/plugins/personal-life-system/` and copy these three assets from an exact semantic-version release tag such as `0.3.14`:
+Create `.obsidian/plugins/personal-life-system/` and copy these three assets from an exact semantic-version release tag such as `0.3.15`:
 
 - `main.js`
 - `manifest.json`
