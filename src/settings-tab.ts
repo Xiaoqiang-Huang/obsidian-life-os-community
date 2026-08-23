@@ -134,7 +134,8 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     const header = containerEl.createDiv({ cls: "lifeos-settings-hero lifeos-settings-toolbar" });
     const headerCopy = header.createDiv({ cls: "lifeos-settings-toolbar-copy" });
     headerCopy.createDiv({ cls: "lifeos-kicker", text: "Life OS Settings" });
-    headerCopy.createEl("h1", { text: "设置中心" });
+    const pageHeading = new Setting(headerCopy).setName("设置中心").setHeading();
+    pageHeading.settingEl.addClass("lifeos-settings-toolbar-heading");
     headerCopy.createEl("p", { text: "常用配置集中在概览，详细设置按模块切换，不再堆成一张长页面。" });
     const actions = header.createDiv({ cls: "lifeos-settings-actions" });
     this.button(actions, "测试连接", () => void this.testConnection(), true);
@@ -148,7 +149,9 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     const stage = workspace.createDiv({ cls: "lifeos-settings-stage" });
     const stageHeader = stage.createDiv({ cls: "lifeos-settings-stage-header" });
     const stageCopy = stageHeader.createDiv({ cls: "lifeos-settings-stage-copy" });
-    this.settingsStageTitleEl = stageCopy.createEl("h2");
+    const stageHeading = new Setting(stageCopy).setName("常用配置").setHeading();
+    stageHeading.settingEl.addClass("lifeos-settings-stage-heading");
+    this.settingsStageTitleEl = stageHeading.nameEl;
     this.settingsStageDescriptionEl = stageCopy.createEl("p");
     const stageHint = stageHeader.createSpan({ cls: "lifeos-settings-stage-hint" });
     setIcon(stageHint.createSpan({ cls: "lifeos-settings-stage-hint-icon" }), "shield-check");
@@ -697,7 +700,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       this.display();
     });
     const timeRow = this.row(card, "每日生成时间", "到达该时间后生成当天草稿；同一天同一来源只调用一次 AI。");
-    const time = timeRow.createEl("input", { cls: "lifeos-input", attr: { type: "time", "aria-label": "自动复盘生成时间" } }) as HTMLInputElement;
+    const time = timeRow.createEl("input", { cls: "lifeos-input", attr: { type: "time", "aria-label": "自动复盘生成时间" } });
     time.value = normalizeAutoReviewTime(this.plugin.settings.autoReviewTime);
     time.disabled = !this.plugin.settings.autoReviewEnabled;
     time.onchange = async () => {

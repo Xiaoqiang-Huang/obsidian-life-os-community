@@ -4,7 +4,7 @@ import { localizeLifeOsPathParts, normalizeDirectoryLanguage } from "../settings
 import { ensureFolder, joinPath, normalizePath } from "../utils/vault";
 
 export const LIFEOS_AI_PROTOCOL_SCHEMA_VERSION = 1;
-export const LIFEOS_AI_PROTOCOL_GENERATOR_VERSION = "0.3.12";
+export const LIFEOS_AI_PROTOCOL_GENERATOR_VERSION = "0.3.13";
 export const LIFEOS_AI_GUIDE_MANAGED_START = "<!-- lifeos:ai-guide:managed:start schema=1 -->";
 export const LIFEOS_AI_GUIDE_MANAGED_END = "<!-- lifeos:ai-guide:managed:end -->";
 export const LIFEOS_AI_GUIDE_USER_START = "<!-- lifeos:ai-guide:user:start -->";

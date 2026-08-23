@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.13 - 2026-08-23
+
+### Fixed
+
+- Replaced manually created settings-page HTML headings with Obsidian's `Setting.setHeading()` API so the plugin follows the current community UI review rule.
+- Preserved the compact settings-center hierarchy, spacing, theme colors, and dynamic module title after adopting the native heading structure.
+
+### Validation
+
+- Added a regression guard that rejects direct `h1`-`h6` creation in the settings tab and verifies both required native headings.
+
 ## 0.3.12 - 2026-08-23
 
 ### Added
