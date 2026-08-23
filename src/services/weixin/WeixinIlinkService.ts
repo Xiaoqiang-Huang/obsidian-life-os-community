@@ -475,7 +475,7 @@ function stableClientId(value: string, purpose = "reply"): string {
 }
 
 function baseInfo(): { channel_version: string; bot_agent: string } {
-  return { channel_version: CHANNEL_VERSION, bot_agent: "LifeOS/0.3.12" };
+  return { channel_version: CHANNEL_VERSION, bot_agent: "LifeOS/0.3.13" };
 }
 
 function splitReply(value: string): string[] {

@@ -1,4 +1,4 @@
-# Life OS Assistant 0.3.12
+# Life OS Assistant 0.3.13
 
 <div align="center">
 
@@ -6,7 +6,7 @@
 
 [English](README.md) · [**简体中文**](README.zh-CN.md)
 
-![版本](https://img.shields.io/badge/版本-0.3.12-0f172a?style=flat-square)
+![版本](https://img.shields.io/badge/版本-0.3.13-0f172a?style=flat-square)
 ![Obsidian](https://img.shields.io/badge/Obsidian-1.5.0%2B-7c3aed?style=flat-square)
 ![本地优先](https://img.shields.io/badge/数据-本地优先-15803d?style=flat-square)
 ![移动端](https://img.shields.io/badge/移动端-支持-2563eb?style=flat-square)
@@ -17,9 +17,9 @@
 
 Life OS Assistant 把 Obsidian Vault 变成一个相互关联的工作空间，用于管理**今天、任务、日记、知识、记忆、复盘、AI 助手和项目 AI 会话**。用户可读内容仍然保存在 Vault 的 Markdown 中。AI 写入默认关闭；用户可选择预览确认，也可以主动开启“明确指令自动写入”，但只有当前请求点明唯一目标时才会执行。
 
-当前版本：**0.3.12** · Obsidian **1.5.0+** · `isDesktopOnly: false`
+当前版本：**0.3.13** · Obsidian **1.5.0+** · `isDesktopOnly: false`
 
-> **关于配图：** 下方导览图依据 0.3.12 当前的信息架构和已经实现的工作流生成，全部使用虚构数据和中性 Obsidian 主题。实际界面会随你的 Obsidian 主题、窗口尺寸和已启用功能变化。
+> **关于配图：** 下方导览图依据 0.3.13 当前的信息架构和已经实现的工作流生成，全部使用虚构数据和中性 Obsidian 主题。实际界面会随你的 Obsidian 主题、窗口尺寸和已启用功能变化。
 
 ![Life OS 今日总览](readme-assets/01-today-overview.webp)
 
@@ -190,7 +190,7 @@ Life OS 已把微信 iLink Bot 连接层直接内置到插件中，不需要安�
 
 ### 手动安装
 
-创建 `.obsidian/plugins/personal-life-system/`，从精确语义版本 Tag（例如 `0.3.12`）中复制以下三个文件：
+创建 `.obsidian/plugins/personal-life-system/`，从精确语义版本 Tag（例如 `0.3.13`）中复制以下三个文件：
 
 - `main.js`
 - `manifest.json`

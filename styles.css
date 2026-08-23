@@ -57492,9 +57492,26 @@ body.is-mobile .lifeos-period-review-modal .lifeos-period-review-draft-actions >
   letter-spacing: 0.08em;
 }
 
-.lifeos-settings-toolbar-copy h1 {
+.lifeos-settings-toolbar-heading {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+}
+
+.lifeos-settings-toolbar-heading .setting-item-info {
+  min-width: 0;
+  padding: 0;
+}
+
+.lifeos-settings-toolbar-heading .setting-item-control {
+  display: none;
+}
+
+.lifeos-settings-toolbar-heading .setting-item-name {
   margin: 0;
+  color: var(--lifeos-text, var(--text-normal));
   font-size: clamp(20px, 1.65vw, 25px);
+  font-weight: var(--font-semibold);
   line-height: 1.15;
   text-wrap: balance;
 }
@@ -57661,9 +57678,26 @@ body.is-mobile .lifeos-period-review-modal .lifeos-period-review-draft-actions >
   gap: 2px;
 }
 
-.lifeos-settings-stage-copy h2 {
+.lifeos-settings-stage-heading {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+}
+
+.lifeos-settings-stage-heading .setting-item-info {
+  min-width: 0;
+  padding: 0;
+}
+
+.lifeos-settings-stage-heading .setting-item-control {
+  display: none;
+}
+
+.lifeos-settings-stage-heading .setting-item-name {
   margin: 0;
+  color: var(--lifeos-text, var(--text-normal));
   font-size: 16px;
+  font-weight: var(--font-semibold);
   line-height: 1.25;
   text-wrap: balance;
 }
