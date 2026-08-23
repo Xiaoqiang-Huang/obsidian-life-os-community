@@ -4,40 +4,48 @@ import { createCard } from "../components/Card";
 import { createHeroHeader } from "../components/HeroHeader";
 import { createLifeOSShell } from "../components/LifeOSComponent";
 import { PRO_COMPARE_VIEW_TYPE } from "../constants";
+import { LicenseClient } from "../licensing/license-client";
+import { resolveLifeOsPurchaseCatalog, type LifeOsPurchaseCatalog } from "../licensing/payment-catalog";
 import type PersonalLifeSystemPlugin from "../main";
 
-const PLAN_CARDS = [
-  {
-    title: "免费版",
-    price: "免费",
-    icon: "hand",
-    copy: "免费版免费使用，定位为基础手动使用，支持 1 台本地使用，适合不购买时继续记录、查看和整理本地 Markdown 数据。",
-    points: ["免费", "1 台本地使用", "手动记录和查看", "数据导出 / 迁移入口保留"]
-  },
-  {
-    title: "30 天试用",
-    price: "免费一次",
-    icon: "shield",
-    copy: "定位为完整体验 Pro，功能与 Pro 一致；免费一次，设备数最多 3 台，适合先把核心工作流完整试跑一遍。",
-    points: ["功能同 Pro", "免费一次", "设备数最多 3 台", "30 天试用期"]
-  },
-  {
-    title: "月付 Pro",
-    price: "19.9 元 / 30 天",
-    icon: "badge-check",
-    copy: "定位为短期 Pro 使用，设备数最多 3 台，适合阶段性高频、一个月周期和临时多设备授权。",
-    points: ["短期 Pro 使用", "19.9 元 / 30 天", "设备数最多 3 台", "授权码备份与恢复"],
-    pro: true
-  },
-  {
-    title: "买断 Pro",
-    price: "299 元一次买断",
-    icon: "sparkles",
-    copy: "定位为长期 Pro 使用，适合长期用户的主力 Vault；价格 299 元一次买断，设备数最多 5 台。",
-    points: ["长期 Pro 使用", "299 元一次买断", "设备数最多 5 台", "一次买断永久使用"],
-    pro: true
-  }
-];
+function buildPlanCards(catalog: LifeOsPurchaseCatalog) {
+  const monthlyPrice = catalog.monthly?.price ?? "授权中心实时价格";
+  const monthlyDevices = catalog.monthly?.maxDevices ?? "设备额度以授权中心为准";
+  const lifetimePrice = catalog.lifetime?.price ?? "授权中心实时价格";
+  const lifetimeDevices = catalog.lifetime?.maxDevices ?? "设备额度以授权中心为准";
+  return [
+    {
+      title: "免费版",
+      price: "免费",
+      icon: "hand",
+      copy: "免费版免费使用，定位为基础手动使用，支持 1 台本地使用，适合不购买时继续记录、查看和整理本地 Markdown 数据。",
+      points: ["免费", "1 台本地使用", "手动记录和查看", "数据导出 / 迁移入口保留"]
+    },
+    {
+      title: "30 天试用",
+      price: "免费一次",
+      icon: "shield",
+      copy: "定位为完整体验 Pro，功能与 Pro 一致；免费一次，设备数最多 3 台，适合先把核心工作流完整试跑一遍。",
+      points: ["功能同 Pro", "免费一次", "设备数最多 3 台", "30 天试用期"]
+    },
+    {
+      title: "月付 Pro",
+      price: monthlyPrice,
+      icon: "badge-check",
+      copy: `定位为短期 Pro 使用，${monthlyDevices}，适合阶段性高频、一个月周期和临时多设备授权。`,
+      points: ["短期 Pro 使用", monthlyPrice, monthlyDevices, "授权码备份与恢复"],
+      pro: true
+    },
+    {
+      title: "买断 Pro",
+      price: lifetimePrice,
+      icon: "sparkles",
+      copy: `定位为长期 Pro 使用，适合长期用户的主力 Vault；${lifetimePrice}，${lifetimeDevices}。`,
+      points: ["长期 Pro 使用", lifetimePrice, lifetimeDevices, "一次买断永久使用"],
+      pro: true
+    }
+  ];
+}
 
 type ModuleCompareRow = {
   module: string;
@@ -215,11 +223,14 @@ const MODULE_ROWS: ModuleCompareRow[] = [
     free: "支持。无需购买，可进入授权中心领取试用或兑换。",
     trial: "同 Pro 支持授权中心。免费一次，30 天，最多 3 台设备。",
     monthly: "支持。支付宝订单、授权码激活，最多 3 台设备。",
-    lifetime: "支持。299 元一次买断，最多 5 台设备。"
+    lifetime: "支持。支付宝订单、授权码激活，商品金额和设备额度以授权中心同步结果为准。"
   }
 ];
 
 export class ProCompareView extends ItemView {
+  private purchaseCatalog: LifeOsPurchaseCatalog = { monthly: null, lifetime: null };
+  private catalogRequestId = 0;
+
   constructor(leaf: WorkspaceLeaf, private plugin: PersonalLifeSystemPlugin) {
     super(leaf);
   }
@@ -233,6 +244,15 @@ export class ProCompareView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
+    await this.render();
+    void this.refreshPurchaseCatalog();
+  }
+
+  async onClose(): Promise<void> {
+    this.catalogRequestId += 1;
+  }
+
+  private async render(): Promise<void> {
     const container = this.containerEl.children[1];
     container.empty();
     const main = createLifeOSShell(container as HTMLElement, this.plugin, "proCompare");
@@ -241,7 +261,7 @@ export class ProCompareView extends ItemView {
     createHeroHeader(main, {
       kicker: "免费版 / 完整体验 Pro / 短期 Pro 使用 / 长期 Pro 使用",
       title: "按模块和能力看版本差异",
-      description: "免费版免费使用，定位为基础手动使用，支持 1 台本地使用；30 天试用免费一次，定位为完整体验 Pro，功能与 Pro 一致，设备数最多 3 台；月付 Pro 价格 19.9 元 / 30 天，设备数最多 3 台；买断 Pro 价格 299 元一次买断，设备数最多 5 台。当前版本对比中的 Pro 能力继续属于 Pro，未单独列出的新增高级能力也归入 Pro。已购买月付或买断 Pro 的老用户继续保留原有权益，不需要重新购买。",
+      description: `免费版免费使用，定位为基础手动使用，支持 1 台本地使用；30 天试用免费一次，定位为完整体验 Pro，功能与 Pro 一致，设备数最多 3 台；${this.purchaseSummary()}。当前版本对比中的 Pro 能力继续属于 Pro，未单独列出的新增高级能力也归入 Pro。已购买月付或买断 Pro 的老用户继续保留原有权益，不需要重新购买。`,
       icon: "columns-3",
       actions: [
         { label: "打开 Pro 授权", icon: "badge-check", primary: true, onClick: () => void this.plugin.activateProLicense() }
@@ -253,18 +273,41 @@ export class ProCompareView extends ItemView {
     this.renderModuleTable(main);
   }
 
+  private async refreshPurchaseCatalog(): Promise<void> {
+    const requestId = ++this.catalogRequestId;
+    try {
+      const result = await new LicenseClient(this.plugin.settings.licenseApiBaseUrl).getCatalog();
+      const catalog = resolveLifeOsPurchaseCatalog(Array.isArray(result?.products) ? result.products : []);
+      if (requestId !== this.catalogRequestId || (!catalog.monthly && !catalog.lifetime)) return;
+      this.purchaseCatalog = catalog;
+      await this.render();
+    } catch {
+      // Keep the comparison usable with neutral pricing copy when the service is offline.
+    }
+  }
+
+  private purchaseSummary(): string {
+    const monthly = this.purchaseCatalog.monthly
+      ? `月付 Pro ${this.purchaseCatalog.monthly.price}，${this.purchaseCatalog.monthly.maxDevices}`
+      : "月付 Pro 商品和金额以授权中心实时同步为准";
+    const lifetime = this.purchaseCatalog.lifetime
+      ? `买断 Pro ${this.purchaseCatalog.lifetime.price}，${this.purchaseCatalog.lifetime.maxDevices}`
+      : "买断 Pro 商品和金额以授权中心实时同步为准";
+    return `${monthly}；${lifetime}`;
+  }
+
   private renderPolicyNote(parent: HTMLElement): void {
     const note = createCard(parent, "lifeos-pro-policy-note");
     setIcon(note.createSpan({ cls: "lifeos-pro-policy-note-icon" }), "shield-check");
     note.createDiv({
       cls: "lifeos-pro-policy-note-text",
-      text: "价格调整只影响新购订单：月付 Pro 19.9 元 / 30 天，买断 Pro 299 元一次买断。旧版月付和买断授权仍按原 SKU 识别，已激活用户升级后不会掉授权。"
+      text: `价格调整只影响新购订单：${this.purchaseSummary()}。旧版月付和买断授权仍按原 SKU 识别，已激活用户升级后不会掉授权。`
     });
   }
 
   private renderPlanCards(parent: HTMLElement): void {
     const grid = parent.createDiv({ cls: "lifeos-plan-grid lifeos-plan-summary-grid" });
-    for (const plan of PLAN_CARDS) {
+    for (const plan of buildPlanCards(this.purchaseCatalog)) {
       const card = createCard(grid, plan.pro ? "lifeos-plan-card is-pro" : "lifeos-plan-card");
       const header = card.createDiv({ cls: "lifeos-plan-card-header" });
       setIcon(header.createSpan({ cls: "lifeos-plan-card-icon" }), plan.icon);

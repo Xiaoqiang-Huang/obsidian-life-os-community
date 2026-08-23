@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.15 - 2026-08-24
+
+### Fixed
+
+- Fixed new payment orders failing with `Unknown product SKU` when the installed plugin and the authorization service published different Life OS product generations.
+- The Pro authorization page now loads the service catalog before showing purchasable plans and revalidates the selected SKU, amount, duration, and device allowance immediately before order creation.
+- If the service catalog changes while the page is open, Life OS refreshes the displayed plan and asks the user to confirm the new amount instead of silently creating a different order.
+- Payment-service connection and catalog errors now have an explicit status and retry action instead of leaving a purchase button that is guaranteed to fail.
+
+### Changed
+
+- The authorization service is now the single source of truth for purchasable Life OS products. Both deployed legacy catalogs and current catalogs are supported without hard-coded client prices.
+- The version comparison page follows the same live catalog. The built-in guide no longer promises a stale fixed amount and directs users to the synchronized authorization center.
+- Existing pending-order recovery, order polling, activation, entitlement verification, license backups, and purchaser state remain unchanged.
+
+### Validation
+
+- Reproduced the production mismatch, verified the live health and catalog endpoints, and confirmed that the new resolver selects the exact SKUs currently advertised by the service without creating another payment.
+- Added regression coverage for legacy and current catalogs, unrelated-product filtering, invalid catalog data, service URL normalization, just-in-time product revalidation, and removal of hard-coded purchase prices.
+- Passed 545 plugin service/workflow tests, UI class/behavior/overflow guards, Pro purchaser-state compatibility checks, production build, 66 payment-worker tests, and worker type checking.
+
 ## 0.3.14 - 2026-08-23
 
 ### Added
