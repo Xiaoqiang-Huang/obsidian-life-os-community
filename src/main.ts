@@ -12,6 +12,7 @@ import {
   PRO_COMPARE_VIEW_TYPE,
   PRO_LICENSE_VIEW_TYPE,
   REVIEW_VIEW_TYPE,
+  SETTINGS_VIEW_TYPE,
   TASKS_VIEW_TYPE,
   USER_GUIDE_VIEW_TYPE,
 } from "./constants";
@@ -29,6 +30,13 @@ import {
   normalizeExamProfileType,
   normalizeDirectoryLanguage,
   normalizeBrowserCapturePort,
+  normalizeWeixinApprovedSenders,
+  normalizeWeixinConversationRoutes,
+  normalizeWeixinReminderRoutes,
+  normalizeWeixinPendingPairings,
+  normalizeWeixinPermission,
+  normalizeWeixinSenderPolicy,
+  normalizeChatWritebackMode,
   normalizePaddleOcrEndpoint,
   normalizePdfOcrEngine,
   normalizeTaskFormDraft,
@@ -42,7 +50,7 @@ import {
 import { normalizeInstallationId } from "./licensing/installation-id";
 import { hasProAccess, requireProFeature } from "./licensing/entitlement";
 import { verifyLicenseEntitlementToken } from "./licensing/entitlement-token";
-import { normalizeCustomAiSkillCategories, normalizeImportedAiSkillRecords } from "./services/AiSkillService";
+import { normalizeAiSkillOverrides, normalizeCustomAiSkillCategories, normalizeImportedAiSkillRecords } from "./services/AiSkillService";
 import { PersonalLifeSystemSettingTab } from "./settings-tab";
 import {
   ensureFile,
@@ -67,6 +75,7 @@ import { UserGuideView } from "./views/UserGuideView";
 import { AiWorkspaceView } from "./views/AiWorkspaceView";
 import { ProCompareView } from "./views/ProCompareView";
 import { ProLicenseView } from "./views/ProLicenseView";
+import { LifeOSSettingsView } from "./views/SettingsView";
 import { CalendarView } from "./calendar-view";
 import { MemoryView } from "./memory-view";
 import { showXingceStats } from "./exam/xingce-stats";
@@ -94,6 +103,13 @@ import {
   AiWorkspaceBrowserCaptureServer,
   type BrowserCaptureServerStatus
 } from "./services/ai-workspace/BrowserCaptureServer";
+import { WeixinAssistantService } from "./services/weixin/WeixinAssistantService";
+import { evaluateWeixinAccess } from "./services/weixin/WeixinBotLogic";
+import { WeixinReminderService } from "./services/weixin/WeixinReminderService";
+import {
+  WeixinIlinkService,
+  type WeixinConnectionStatus
+} from "./services/weixin/WeixinIlinkService";
 import { DailyNoteService } from "./services/DailyNoteService";
 import { formatMemoryCandidate } from "./services/lifeos-logic";
 import {
@@ -160,7 +176,6 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   private aiEditPopover: AiEditPopoverController | null = null;
   private aiEditPointerDown: { x: number; y: number } | null = null;
   private aiEditSelectionTimer: number | null = null;
-  private aiEditSelectionChangeTimer: number | null = null;
   private pendingAiEditDomSelectionSnapshot: AiEditDomSelectionSnapshot | null = null;
   private readonly aiEditDiagnostics: AiEditRuntimeDiagnostics = {
     captureMouseUp: 0,
@@ -188,6 +203,10 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   private aiWorkspaceSyncRunning = false;
   private autoReviewService: AutoReviewService | null = null;
   private readonly browserCaptureServer = new AiWorkspaceBrowserCaptureServer();
+  private weixinIlinkService: WeixinIlinkService | null = null;
+  private weixinAssistantService: WeixinAssistantService | null = null;
+  private weixinReminderDeliveryRunning = false;
+  private weixinDailyDigestRunning = false;
   private readonly lifeOsViewTypes = [
     CHAT_VIEW_TYPE,
     DASHBOARD_VIEW_TYPE,
@@ -201,7 +220,8 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     PRO_COMPARE_VIEW_TYPE,
     PRO_LICENSE_VIEW_TYPE,
     CALENDAR_VIEW_TYPE,
-    AI_WORKSPACE_VIEW_TYPE
+    AI_WORKSPACE_VIEW_TYPE,
+    SETTINGS_VIEW_TYPE
   ];
 
   async onload(): Promise<void> {
@@ -234,6 +254,8 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       console.error("[Life OS] Failed to initialize base structure during plugin load", error);
     }
     await this.refreshBrowserCaptureBridge();
+    await this.refreshWeixinConnection();
+    void this.deliverWeixinReminders();
 
     this.addSettingTab(new PersonalLifeSystemSettingTab(this.app, this));
     this.aiEditPopover = new AiEditPopoverController(this.app, this);
@@ -254,6 +276,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.registerView(AI_WORKSPACE_VIEW_TYPE, (leaf) => new AiWorkspaceView(leaf, this));
     this.registerView(PRO_COMPARE_VIEW_TYPE, (leaf) => new ProCompareView(leaf, this));
     this.registerView(PRO_LICENSE_VIEW_TYPE, (leaf) => new ProLicenseView(leaf, this));
+    this.registerView(SETTINGS_VIEW_TYPE, (leaf) => new LifeOSSettingsView(leaf, this));
     this.registerView(
       CALENDAR_VIEW_TYPE,
       (leaf) => new CalendarView(leaf, this)
@@ -301,6 +324,12 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       id: "open-user-guide",
       name: "打开使用手册",
       callback: () => void this.activateUserGuide()
+    });
+
+    this.addCommand({
+      id: "open-settings-center",
+      name: "打开 Life OS 设置中心",
+      callback: () => void this.activateSettings()
     });
 
     this.addCommand({
@@ -569,6 +598,12 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.registerInterval(window.setInterval(() => {
       void this.runAutoReview("timer");
     }, 60_000));
+    this.registerInterval(window.setInterval(() => {
+      void this.deliverWeixinReminders();
+    }, 30_000));
+    this.registerInterval(window.setInterval(() => {
+      if (new Date().getHours() === 0) void this.runWeixinDailyDigest("timer");
+    }, 60_000));
   }
 
   onunload(): void {
@@ -582,16 +617,17 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       window.clearTimeout(this.aiEditSelectionTimer);
       this.aiEditSelectionTimer = null;
     }
-    if (this.aiEditSelectionChangeTimer) {
-      window.clearTimeout(this.aiEditSelectionChangeTimer);
-      this.aiEditSelectionChangeTimer = null;
-    }
     this.pendingAiEditDomSelectionSnapshot = null;
     this.aiEditPopover?.close();
     this.aiEditPopover = null;
     this.stopLiquidGlassRuntime();
     this.autoReviewService = null;
     void this.browserCaptureServer.stop();
+    void this.weixinIlinkService?.stop();
+    this.weixinIlinkService = null;
+    this.weixinAssistantService = null;
+    this.weixinReminderDeliveryRunning = false;
+    this.weixinDailyDigestRunning = false;
   }
 
   // ═══════════════════════════════════════════════════
@@ -610,7 +646,16 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     const needsBrowserCaptureTokenSave = typeof storedData.browserCaptureToken !== "string"
       || storedData.browserCaptureToken.trim().length < 24;
     const needsBrowserCaptureSetupMigration = Number(storedData.browserCaptureSetupVersion || 0) < 1;
+    const legacyBotData = storedData as Record<string, unknown>;
+    const hasLegacyOpenClawSettings = Object.keys(legacyBotData).some((key) => key.startsWith("openClaw"));
+    const storedWeixinSetupVersion = Number(legacyBotData.weixinBotSetupVersion || 0);
+    const needsWeixinSetupMigration = storedWeixinSetupVersion < 3 || hasLegacyOpenClawSettings;
     const storedImportedAiSkills = (storedData as Record<string, unknown>).importedAiSkills;
+    const storedAiSkillOverrides = (storedData as Record<string, unknown>).aiSkillOverrides;
+    const storedChatWritebackMode = (storedData as Record<string, unknown>).chatWritebackMode;
+    const needsChatWritebackModeMigration = storedChatWritebackMode !== "off"
+      && storedChatWritebackMode !== "confirm"
+      && storedChatWritebackMode !== "explicit-auto";
     this.settings = Object.assign({}, DEFAULT_SETTINGS, storedData);
     this.settings.themeStyle = normalizeThemeStyle(this.settings.themeStyle);
     this.settings.uiFramework = normalizeUiFrameworkSettings(
@@ -622,6 +667,12 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.settings.lastTaskDraft = normalizeTaskFormDraft((storedData as Record<string, unknown>).lastTaskDraft);
     this.settings.customAiSkillCategories = normalizeCustomAiSkillCategories((storedData as Record<string, unknown>).customAiSkillCategories);
     this.settings.importedAiSkills = normalizeImportedAiSkillRecords(storedImportedAiSkills);
+    this.settings.aiSkillOverrides = normalizeAiSkillOverrides(storedAiSkillOverrides);
+    this.settings.chatWritebackMode = normalizeChatWritebackMode(
+      storedChatWritebackMode,
+      storedData.autoApplyChatToDaily === true
+    );
+    this.settings.autoApplyChatToDaily = this.settings.chatWritebackMode !== "off";
     this.settings.browserCaptureEnabled = needsBrowserCaptureSetupMigration
       ? true
       : storedData.browserCaptureEnabled !== false;
@@ -635,8 +686,48 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.settings.browserCaptureToken = needsBrowserCaptureTokenSave
       ? createBrowserCaptureToken()
       : String(storedData.browserCaptureToken).trim();
+    this.settings.weixinBotEnabled = legacyBotData.weixinBotEnabled === true;
+    this.settings.weixinBotSetupVersion = 3;
+    this.settings.weixinSenderPolicy = normalizeWeixinSenderPolicy(
+      legacyBotData.weixinSenderPolicy ?? legacyBotData.openClawSenderPolicy
+    );
+    const storedWeixinPermission = legacyBotData.weixinPermissionMode ?? legacyBotData.openClawPermissionMode;
+    this.settings.weixinPermissionMode = storedWeixinSetupVersion < 2
+      && (storedWeixinPermission === undefined || storedWeixinPermission === "read-only")
+      ? "confirm"
+      : normalizeWeixinPermission(storedWeixinPermission);
+    this.settings.weixinCaptureToDailyEnabled = legacyBotData.weixinCaptureToDailyEnabled !== false;
+    this.settings.weixinDailyDigestEnabled = legacyBotData.weixinDailyDigestEnabled !== false;
+    this.settings.weixinDailyDigestCatchUp = legacyBotData.weixinDailyDigestCatchUp !== false;
+    this.settings.weixinDefaultProjectId = String(
+      legacyBotData.weixinDefaultProjectId ?? legacyBotData.openClawDefaultProjectId ?? ""
+    ).trim();
+    this.settings.weixinApprovedSenders = normalizeWeixinApprovedSenders(
+      legacyBotData.weixinApprovedSenders ?? legacyBotData.openClawApprovedSenders
+    );
+    const legacyAllowedGroups = legacyBotData.weixinAllowedGroups ?? legacyBotData.openClawAllowedGroups;
+    this.settings.weixinAllowedGroups = Array.from(new Set(
+      Array.isArray(legacyAllowedGroups)
+        ? legacyAllowedGroups
+          .map((item) => String(item || "").trim())
+          .filter((item) => item && !item.toLowerCase().startsWith("qqbot:"))
+        : []
+    )).slice(0, 500);
+    this.settings.weixinPendingPairings = normalizeWeixinPendingPairings(
+      legacyBotData.weixinPendingPairings ?? legacyBotData.openClawPendingPairings
+    );
+    this.settings.weixinConversationRoutes = normalizeWeixinConversationRoutes(
+      legacyBotData.weixinConversationRoutes ?? legacyBotData.openClawConversationRoutes
+    );
+    this.settings.weixinReminderRoutes = normalizeWeixinReminderRoutes(legacyBotData.weixinReminderRoutes);
+    if (hasLegacyOpenClawSettings) {
+      const writableSettings = this.settings as unknown as Record<string, unknown>;
+      Object.keys(writableSettings).filter((key) => key.startsWith("openClaw")).forEach((key) => delete writableSettings[key]);
+    }
     const needsImportedAiSkillMigration = Array.isArray(storedImportedAiSkills)
       && this.settings.importedAiSkills.length !== storedImportedAiSkills.length;
+    const needsAiSkillOverrideMigration = Array.isArray(storedAiSkillOverrides)
+      && this.settings.aiSkillOverrides.length !== storedAiSkillOverrides.length;
     this.settings.licenseInstallationId = normalizeInstallationId(this.settings.licenseInstallationId);
     this.settings.licenseApiBaseUrl = this.settings.licenseApiBaseUrl?.trim() || DEFAULT_SETTINGS.licenseApiBaseUrl;
     this.settings.licenseEmail = this.settings.licenseEmail ?? "";
@@ -661,7 +752,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       setStoredAiApiKey(this.settings, this.settings.aiProvider, this.settings.aiApiKey);
     }
     setStoredAiProviderConfig(this.settings, this.settings.aiProvider, getCurrentAiProviderConfig(this.settings));
-    if (needsInitialLicenseSave || needsImportedAiSkillMigration || needsBrowserCaptureTokenSave || needsBrowserCaptureSetupMigration) {
+    if (needsInitialLicenseSave || needsImportedAiSkillMigration || needsAiSkillOverrideMigration || needsBrowserCaptureTokenSave || needsBrowserCaptureSetupMigration || needsWeixinSetupMigration || needsChatWritebackModeMigration) {
       await this.saveSettings();
     }
   }
@@ -734,6 +825,173 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
         );
       }
     });
+  }
+
+  getWeixinConnectionStatus(): WeixinConnectionStatus {
+    return this.getWeixinIlinkService().getStatus();
+  }
+
+  subscribeWeixinConnectionStatus(listener: (status: WeixinConnectionStatus) => void): () => void {
+    return this.getWeixinIlinkService().subscribe(listener);
+  }
+
+  async refreshWeixinConnection(): Promise<WeixinConnectionStatus> {
+    await this.weixinIlinkService?.stop();
+    this.weixinAssistantService = this.createWeixinAssistantService();
+    this.weixinIlinkService = new WeixinIlinkService(this.app, {
+      pluginId: this.manifest.id,
+      isEnabled: () => this.settings.weixinBotEnabled,
+      canHydrateMedia: (request) => evaluateWeixinAccess({
+        senderPolicy: this.settings.weixinSenderPolicy,
+        approvedSenders: this.settings.weixinApprovedSenders,
+        allowedGroups: this.settings.weixinAllowedGroups
+      }, request).allowed,
+      canAnalyzeImages: () => this.settings.enableVisionFileAnalysis === true && Boolean(this.settings.visionAiModel?.trim()),
+      handleMessage: (request) => this.getWeixinAssistantService().handleMessage(request)
+    });
+    return this.weixinIlinkService.initialize();
+  }
+
+  async startWeixinLogin(): Promise<WeixinConnectionStatus> {
+    if (!this.settings.weixinBotEnabled) {
+      this.settings.weixinBotEnabled = true;
+      await this.saveSettings();
+    }
+    return this.getWeixinIlinkService().startLogin();
+  }
+
+  submitWeixinVerificationCode(code: string): void {
+    this.getWeixinIlinkService().submitVerificationCode(code);
+  }
+
+  async disconnectWeixin(accountId = ""): Promise<void> {
+    this.weixinAssistantService?.clearPendingImages(accountId);
+    await this.getWeixinIlinkService().disconnect(accountId);
+  }
+
+  private async deliverWeixinReminders(): Promise<void> {
+    if (this.weixinReminderDeliveryRunning || !this.settings.weixinBotEnabled) return;
+    this.weixinReminderDeliveryRunning = true;
+    const service = new WeixinReminderService(this.app, this.fileSystem());
+    try {
+      const due = await service.claimDue();
+      for (const reminder of due) {
+        const route = this.settings.weixinReminderRoutes.find((item) => item.ref === reminder.routeRef);
+        try {
+          if (!route || route.conversationId.startsWith("group:")) {
+            throw new Error("提醒的微信私聊路由已不存在。");
+          }
+          const allowed = evaluateWeixinAccess({
+            senderPolicy: this.settings.weixinSenderPolicy,
+            approvedSenders: this.settings.weixinApprovedSenders,
+            allowedGroups: this.settings.weixinAllowedGroups
+          }, {
+            version: 1,
+            channel: "weixin",
+            messageId: reminder.clientId,
+            accountId: route.accountId,
+            conversationId: route.conversationId,
+            threadId: route.threadId,
+            senderId: route.senderId,
+            senderName: route.senderName,
+            isGroup: false,
+            wasMentioned: false,
+            content: "",
+            timestamp: new Date().toISOString(),
+            media: []
+          }).allowed;
+          if (!allowed) throw new Error("该微信账号已被取消授权，提醒暂不发送。");
+          await this.getWeixinIlinkService().sendProactiveText(
+            route.accountId,
+            route.senderId,
+            route.conversationId,
+            `Life OS 提醒\n${reminder.content}\n计划时间：${new Date(reminder.dueAt).toLocaleString("zh-CN", { hour12: false })}\n编号：${reminder.id}`,
+            reminder.clientId
+          );
+          await service.markDelivered(reminder.id);
+        } catch (error) {
+          console.warn(`[Life OS] Weixin reminder ${reminder.id} delivery failed`, error);
+          await service.markFailed(reminder.id, error);
+        }
+      }
+    } catch (error) {
+      console.error("[Life OS] Weixin reminder scheduler failed", error);
+    } finally {
+      this.weixinReminderDeliveryRunning = false;
+    }
+  }
+
+  private async runWeixinDailyDigest(trigger: "startup" | "midnight" | "timer"): Promise<void> {
+    if (
+      this.weixinDailyDigestRunning
+      || !this.settings.weixinBotEnabled
+      || !this.settings.weixinDailyDigestEnabled
+      || (trigger === "startup" && !this.settings.weixinDailyDigestCatchUp)
+      || (trigger === "timer" && new Date().getHours() !== 0)
+    ) return;
+    this.weixinDailyDigestRunning = true;
+    const date = this.getRelativeDate(-1);
+    try {
+      const result = await this.getWeixinAssistantService().runAutomaticDailyDigest(date);
+      if (result.failedRoutes > 0) {
+        console.warn(`[Life OS] Weixin daily digest ${date}: ${result.failedRoutes} route(s) will retry.`);
+      } else if (result.status === "delivered") {
+        console.log(`[Life OS] Weixin daily digest ${date} delivered to ${result.deliveredRoutes} route(s).`);
+      }
+    } catch (error) {
+      console.error(`[Life OS] Weixin daily digest ${date} failed`, error);
+    } finally {
+      this.weixinDailyDigestRunning = false;
+    }
+  }
+
+  async listWeixinProjects(): Promise<Array<{ id: string; name: string }>> {
+    return (await this.createProjectService().loadProjects()).map((project) => ({
+      id: project.id,
+      name: project.name
+    }));
+  }
+
+  async approveWeixinPairing(code: string): Promise<boolean> {
+    return Boolean(await this.getWeixinAssistantService().approvePairing(code));
+  }
+
+  async rejectWeixinPairing(code: string): Promise<boolean> {
+    return this.getWeixinAssistantService().rejectPairing(code);
+  }
+
+  async revokeWeixinSender(key: string): Promise<boolean> {
+    return this.getWeixinAssistantService().revokeSender(key);
+  }
+
+  private createWeixinAssistantService(): WeixinAssistantService {
+    return new WeixinAssistantService(this.app, this.settings, this.ai, {
+      saveSettings: () => this.saveSettings(),
+      sendProactiveText: (accountId, senderId, conversationId, text, clientId) => this.getWeixinIlinkService()
+        .sendProactiveText(accountId, senderId, conversationId, text, clientId)
+    });
+  }
+
+  private getWeixinAssistantService(): WeixinAssistantService {
+    if (!this.weixinAssistantService) this.weixinAssistantService = this.createWeixinAssistantService();
+    return this.weixinAssistantService;
+  }
+
+  private getWeixinIlinkService(): WeixinIlinkService {
+    if (!this.weixinIlinkService) {
+      this.weixinIlinkService = new WeixinIlinkService(this.app, {
+        pluginId: this.manifest.id,
+        isEnabled: () => this.settings.weixinBotEnabled,
+        canHydrateMedia: (request) => evaluateWeixinAccess({
+          senderPolicy: this.settings.weixinSenderPolicy,
+          approvedSenders: this.settings.weixinApprovedSenders,
+          allowedGroups: this.settings.weixinAllowedGroups
+        }, request).allowed,
+        canAnalyzeImages: () => this.settings.enableVisionFileAnalysis === true && Boolean(this.settings.visionAiModel?.trim()),
+        handleMessage: (request) => this.getWeixinAssistantService().handleMessage(request)
+      });
+    }
+    return this.weixinIlinkService;
   }
 
   private createProjectService(): ProjectService {
@@ -1695,6 +1953,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.dailyMaintenancePromise = (async () => {
       await this.ensureBaseStructure();
       const yesterday = this.getRelativeDate(-1);
+      await this.runWeixinDailyDigest("startup");
       await this.archiveDailyNoteIfNeeded(yesterday, today);
       await this.checkAndGeneratePeriodicSummaries();
       this.dailyMaintenanceRunDate = today;
@@ -1708,6 +1967,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   private async runMidnightDailyMaintenance(): Promise<void> {
     const yesterday = this.getRelativeDate(-1);
     const today = formatDate();
+    await this.runWeixinDailyDigest("midnight");
     await this.archiveDailyNoteIfNeeded(yesterday, today);
     await this.checkAndGeneratePeriodicSummaries();
     this.dailyMaintenanceRunDate = today;
@@ -2078,10 +2338,15 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     const id = makeId("interview");
     const fileName = sanitizeFileName(`${date}-${data.category || `${examLabel}练习`}-${id.slice(-4)}.md`);
     const filePath = this.path("Exam", "Interview", year, month, fileName);
+    const scoresFrontmatter = data.scores && Object.keys(data.scores).length > 0
+      ? JSON.stringify(data.scores)
+      : "";
+    const totalScoreFrontmatter = typeof data.totalScore === "number" ? String(data.totalScore) : "";
+    const nextDrillFrontmatter = data.nextDrill ? JSON.stringify(data.nextDrill) : "";
     const thinkingModelSection = normalizeExamProfileType(this.settings.examProfileType) === "civil-service"
       ? `\n## 软工拆题复盘\n\n${getCivilServiceInterviewThinkingModelPrompt()}\n\n### 本题复盘\n\n- 输入问题（现实问题/政策背景/群众需求）：\n- 处理实操（运行机制/资源约束/长效运营）：\n- 输出闭环（群众获得什么/基层留下什么/风险如何降低）：\n`
       : "";
-    const content = `---\ntype: interview-practice\nid: ${id}\ncreated: ${date}\ncategory: ${data.category}\nscore:\ntags:\n  - ${examLabel}\n  - 备考\n---\n\n# ${data.category || `${examLabel}练习`}\n\n## 题目\n\n${data.question}\n\n## 我的回答\n\n${data.answer}\n${thinkingModelSection}\n## AI 评价\n\n${data.evaluation || ""}\n\n## 下次练习\n\n- [ ]\n`;
+    const content = `---\ntype: interview-practice\nid: ${id}\ncreated: ${date}\ncategory: ${data.category}\nscore: ${totalScoreFrontmatter}\nscores: ${scoresFrontmatter}\ntotalScore: ${totalScoreFrontmatter}\nnextDrill: ${nextDrillFrontmatter}\ntags:\n  - ${examLabel}\n  - 备考\n---\n\n# ${data.category || `${examLabel}练习`}\n\n## 题目\n\n${data.question}\n\n## 我的回答\n\n${data.answer}\n${thinkingModelSection}\n## AI 评价\n\n${data.evaluation || ""}\n\n## 下次练习\n\n${data.nextDrill ? `- [ ] ${data.nextDrill}` : "- [ ]"}\n`;
     const file = await ensureFile(this.app, filePath, content);
     new Notice(`${examLabel}练习记录已创建。`);
     return file;
@@ -2204,13 +2469,10 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     };
     document.addEventListener("mousedown", capturePointerDown, true);
     document.addEventListener("mouseup", captureMouseUp, true);
-    window.addEventListener("mouseup", captureMouseUp, true);
     this.register(() => {
       document.removeEventListener("mousedown", capturePointerDown, true);
       document.removeEventListener("mouseup", captureMouseUp, true);
-      window.removeEventListener("mouseup", captureMouseUp, true);
     });
-    this.registerDomEvent(document, "mouseup", (event) => this.handleAiEditMouseUp(event, "bubble"));
     this.registerDomEvent(document, "selectionchange", () => this.handleAiEditSelectionChange());
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
       this.aiEditPopover?.clearSelectionHighlight();
@@ -2329,11 +2591,6 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       const selectionText = window.getSelection()?.toString() ?? "";
       this.recordAiEditDiagnostic("selectionchange", this.currentSelectionElement(), selectionText, "received empty/collapsed selection");
     }
-    if (this.aiEditSelectionChangeTimer) window.clearTimeout(this.aiEditSelectionChangeTimer);
-    this.aiEditSelectionChangeTimer = window.setTimeout(() => {
-      this.aiEditSelectionChangeTimer = null;
-      void this.openCurrentDomSelectionInAiEditSidebar(snapshot ?? this.pendingAiEditDomSelectionSnapshot);
-    }, 120);
   }
 
   private async openCurrentDomSelectionInAiEditSidebar(snapshot?: AiEditDomSelectionSnapshot | null): Promise<void> {
@@ -2759,6 +3016,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   private shouldIgnoreAiEditPopoverTarget(target: HTMLElement): boolean {
     return Boolean(target.closest([
       ".lifeos-ai-edit-popover",
+      ".lifeos-chat-bubble",
       ".modal-container",
       ".menu",
       ".suggestion-container",
@@ -2959,6 +3217,12 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   async activateUserGuide(): Promise<void> {
     const leaf = this.getLifeOsLeaf();
     await leaf.setViewState({ type: USER_GUIDE_VIEW_TYPE, active: true });
+    this.app.workspace.setActiveLeaf(leaf, { focus: true });
+  }
+
+  async activateSettings(): Promise<void> {
+    const leaf = this.getLifeOsLeaf();
+    await leaf.setViewState({ type: SETTINGS_VIEW_TYPE, active: true });
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 

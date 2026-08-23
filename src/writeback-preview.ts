@@ -65,6 +65,8 @@ class WritebackPreviewModal extends Modal {
     textarea: HTMLTextAreaElement;
   }> = [];
   private hasResolved = false;
+  private isConfirming = false;
+  private confirmButtonEl: HTMLButtonElement | null = null;
 
   constructor(
     app: App,
@@ -89,7 +91,7 @@ class WritebackPreviewModal extends Modal {
     }
 
     createButton(footer, "取消", () => this.finish([]), { ghost: true });
-    createButton(footer, this.options.confirmText ?? "确认写入", () => void this.confirm(), {
+    this.confirmButtonEl = createButton(footer, this.options.confirmText ?? "确认写入", () => void this.confirm(), {
       primary: true,
       icon: "check"
     });
@@ -125,6 +127,7 @@ class WritebackPreviewModal extends Modal {
   }
 
   private async confirm(): Promise<void> {
+    if (this.isConfirming) return;
     const selected = this.rows
       .filter((row) => row.checkbox.checked)
       .map((row) => ({
@@ -139,8 +142,17 @@ class WritebackPreviewModal extends Modal {
       return;
     }
 
-    await this.options.onConfirm(selected);
-    this.finish(selected);
+    this.isConfirming = true;
+    if (this.confirmButtonEl) this.confirmButtonEl.disabled = true;
+    try {
+      await this.options.onConfirm(selected);
+      this.finish(selected);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`写入失败：${message}`, 7000);
+      this.isConfirming = false;
+      if (this.confirmButtonEl) this.confirmButtonEl.disabled = false;
+    }
   }
 
   private finish(items: WritebackItem[]): void {

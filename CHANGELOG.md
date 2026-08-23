@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.3.12 - 2026-08-23
+
+### Added
+
+- Added a plugin-native Weixin remote workbench with QR pairing, multiple isolated accounts, image understanding, per-message Skill routing, natural-language authorization, proactive replies, reminders, and remote access to diary, task, review, knowledge, link-collection, and daily-summary workflows. It connects directly to Weixin iLink and does not require a separate OpenClaw installation.
+- Added controlled web grounding to the AI assistant. Users can choose automatic, search, URL-reading, or offline behavior, and every retrieved result remains independently inspectable and citable.
+- Added local Skill file import plus compact Skill management: name on import, rename, edit, categorize, select, hide/restore bundled Skills, and remove imported Skills.
+- Added a standalone Life OS settings center with a compact overview and module navigation instead of rendering the full configuration stack inside Obsidian's native settings modal.
+
+### Changed
+
+- Reorganized the AI assistant composer into one compact control row. Multi-option controls now use dropdowns, file attachment sits next to the send action, Chinese IME Enter is protected, and messages remain selectable and copyable.
+- Replaced hidden chain-of-thought expectations with an observable execution trace that reports retrieval, tool, generation, and writeback stages without exposing private model reasoning.
+- Made selection-based AI editing opt-in: selecting text no longer starts analysis automatically, and the user chooses whether to answer, explain, or edit.
+- Expanded shared Markdown rendering so dynamic assistant and product text consistently supports tables, callouts, wiki links, code, and common LaTeX delimiters.
+- Weixin conversations can contribute authorized natural-language input to the daily journal while preserving handwritten diary text and replacing only Life OS-managed summary blocks.
+
+### Fixed
+
+- Stabilized Weixin connectivity with upstream presence start/stop reconciliation, periodic presence refresh, bounded request timeouts, fast long-poll renewal, exponential reconnect, and idempotent outbound retries.
+- AI reply generation no longer blocks the next Weixin `getupdates` request, preventing long responses from making the bot appear offline.
+- Normal `UND_ERR_HEADERS_TIMEOUT` long-poll boundaries no longer enter the previous 30-second outage window.
+- Fixed the AI assistant blank row that could appear while streaming, compact-toolbar overflow, settings-card misalignment, and several narrow-window layout regressions.
+- Plugin and delivery upgrades continue to preserve both `data.json` and `weixin-state.json`; release packages never include purchaser data or saved Weixin credentials.
+
+### Validation
+
+- Passed 540 service and workflow tests, UI class/behavior/overflow guards, writeback and Pro-compatibility checks, a production build, isolated Obsidian runtime smoke tests, and upgrade-state preservation tests.
+
 ## 0.3.11 - 2026-08-12
 
 ### Fixed

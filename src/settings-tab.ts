@@ -1,14 +1,15 @@
 ﻿import { App, Notice, PluginSettingTab, setIcon } from "obsidian";
-import PersonalLifeSystemPlugin from "./main";
+import type PersonalLifeSystemPlugin from "./main";
 import { Setting } from "obsidian";
-import type { AiProviderType, AiReasoningEffort, AssistantStyle, AssistantVerbosity, ChatContextMode, ChatMode, ChatSendBehavior, DirectoryLanguage, DisplayLanguage, ExamProfileType, HeatmapRange, LlmWikiCompileDepth, LlmWikiLongMaterialMode, LlmWikiSensitiveDefault, PdfOcrEngine, ThemeStyle } from "./settings";
-import { analyzeAiConnectionTestModels, DEFAULT_SETTINGS, EXAM_PROFILE_OPTIONS, getAiProviderPreset, getExamChatModeLabel, getExamProfileLabel, getStoredAiApiKey, getStoredAiProviderConfig, getThemeStyleClasses, normalizeAiApiKeyInput, normalizeBrowserCapturePort, normalizeThemeStyle, setStoredAiApiKey, setStoredAiProviderConfig, THEME_STYLES, validateAiProviderConfig } from "./settings";
+import type { AiProviderType, AiReasoningEffort, AssistantStyle, AssistantVerbosity, ChatContextMode, ChatMode, ChatSendBehavior, ChatWritebackMode, DirectoryLanguage, DisplayLanguage, ExamProfileType, HeatmapRange, LlmWikiCompileDepth, LlmWikiLongMaterialMode, LlmWikiSensitiveDefault, PdfOcrEngine, ThemeStyle, WeixinBotPermission, WeixinSenderPolicy } from "./settings";
+import { analyzeAiConnectionTestModels, DEFAULT_SETTINGS, EXAM_PROFILE_OPTIONS, getAiProviderPreset, getExamChatModeLabel, getExamProfileLabel, getStoredAiApiKey, getStoredAiProviderConfig, getThemeStyleClasses, normalizeAiApiKeyInput, normalizeBrowserCapturePort, normalizeChatWritebackMode, normalizeThemeStyle, setStoredAiApiKey, setStoredAiProviderConfig, THEME_STYLES, validateAiProviderConfig } from "./settings";
 import { requireProFeature, resolveLicenseStatus } from "./licensing/entitlement";
 import { createImportedAiSkills, getAiSkillCategories, getAiSkills, getAiSkillsByCategory, normalizeAiSkillIds } from "./services/AiSkillService";
 import { getUiThemeFamilies, getUiThemeMeta, getUiThemesByFamily } from "./ui/theme";
 import type { UiThemeDensity, UiThemeFamily, UiThemeMaterial, UiThemeMeta } from "./ui/types";
 import { installLifeOSResponsiveShell } from "./utils/responsive-shell";
 import { normalizeAutoReviewTime } from "./services/AutoReviewService";
+import type { WeixinConnectionStatus } from "./services/weixin/WeixinIlinkService";
 
 const PROVIDERS: Array<[AiProviderType, string]> = [
   ["openai", "OpenAI 官方"],
@@ -21,6 +22,58 @@ const PROVIDERS: Array<[AiProviderType, string]> = [
   ["doubao", "Doubao"],
   ["glm", "GLM"],
   ["ollama", "Ollama"]
+];
+
+type SettingsSectionId =
+  | "overview"
+  | "theme"
+  | "basics"
+  | "ai"
+  | "review"
+  | "chat"
+  | "safety"
+  | "browser"
+  | "weixin"
+  | "pro"
+  | "wiki"
+  | "experience"
+  | "heatmap";
+
+interface SettingsSectionDefinition {
+  id: Exclude<SettingsSectionId, "overview">;
+  title: string;
+  shortTitle: string;
+  description: string;
+  icon: string;
+  group: "core" | "connections" | "data" | "more";
+}
+
+const SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
+  { id: "theme", title: "主题风格", shortTitle: "主题外观", description: "颜色、材质、密度与主题画廊", icon: "palette", group: "core" },
+  { id: "ai", title: "AI 模型", shortTitle: "AI 模型", description: "供应商、模型与接口配置", icon: "bot", group: "core" },
+  { id: "chat", title: "Chat / AI 助手", shortTitle: "AI 助手", description: "Skill、上下文、回复与写入偏好", icon: "message-circle", group: "core" },
+  { id: "review", title: "自动复盘草稿", shortTitle: "自动复盘", description: "生成时间、补生成与运行条件", icon: "calendar-clock", group: "core" },
+  { id: "weixin", title: "微信连接", shortTitle: "微信连接", description: "扫码账号、权限与远程工作台", icon: "message-circle", group: "connections" },
+  { id: "browser", title: "网页 AI 会话保存", shortTitle: "网页会话", description: "浏览器扩展、本地桥与连接令牌", icon: "globe-2", group: "connections" },
+  { id: "basics", title: "基础信息", shortTitle: "目录与名称", description: "数据目录、语言和系统名称", icon: "folder-cog", group: "data" },
+  { id: "safety", title: "数据安全", shortTitle: "数据安全", description: "本地保存、写回与记忆边界", icon: "shield-check", group: "data" },
+  { id: "wiki", title: "LLM Wiki", shortTitle: "LLM Wiki", description: "资料整理、引用与 Chat 上下文", icon: "library", group: "more" },
+  { id: "experience", title: "产品体验", shortTitle: "产品体验", description: "自动分析、备考与使用偏好", icon: "sparkles", group: "more" },
+  { id: "heatmap", title: "成长热力图", shortTitle: "成长热力图", description: "统计范围、语言与数据来源", icon: "calendar-range", group: "more" },
+  { id: "pro", title: "Pro 授权", shortTitle: "Pro 授权", description: "授权状态、服务与管理入口", icon: "badge-check", group: "more" }
+];
+
+const SETTINGS_SECTION_CLASSES: Record<string, string> = Object.fromEntries(
+  SETTINGS_SECTIONS.map((section) => [section.title, `lifeos-settings-section-${section.id}`])
+);
+
+const SETTINGS_SECTION_BY_TITLE = new Map(SETTINGS_SECTIONS.map((section) => [section.title, section]));
+
+const SETTINGS_GROUP_LABELS: Array<{ id: SettingsSectionDefinition["group"]; label: string }> = [
+  { id: "core", label: "核心配置" },
+  { id: "connections", label: "连接与同步" },
+  { id: "data", label: "数据与目录" },
+  { id: "more", label: "扩展能力" }
 ];
 
 interface SettingsDraft {
@@ -42,32 +95,71 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
   private draft!: SettingsDraft;
   private dirty = false;
   private aiProviderStatusEl: HTMLElement | null = null;
+  private weixinStatusUnsubscribe: (() => void) | null = null;
+  private activeSettingsSection: SettingsSectionId = "overview";
+  private settingsNavEl: HTMLElement | null = null;
+  private settingsOverviewEl: HTMLElement | null = null;
+  private settingsStageTitleEl: HTMLElement | null = null;
+  private settingsStageDescriptionEl: HTMLElement | null = null;
+  private settingsPanelEl: HTMLElement | null = null;
 
-  constructor(app: App, private plugin: PersonalLifeSystemPlugin) {
+  constructor(
+    app: App,
+    private plugin: PersonalLifeSystemPlugin,
+    private mode: "launcher" | "full" = "launcher"
+  ) {
     super(app, plugin);
     this.resetDraft();
   }
 
   display(): void {
     const { containerEl } = this;
+    this.weixinStatusUnsubscribe?.();
+    this.weixinStatusUnsubscribe = null;
     containerEl.empty();
     containerEl.addClass("lifeos-settings");
+    containerEl.toggleClass("lifeos-settings-launcher", this.mode === "launcher");
+    containerEl.toggleClass("lifeos-settings-full", this.mode === "full");
     installLifeOSResponsiveShell(containerEl);
     containerEl.removeClass(...THEME_STYLES.map((style) => `lifeos-theme-${style}`));
     for (const cls of getThemeStyleClasses(this.plugin.settings.themeStyle ?? "minimal-warm")) {
       containerEl.addClass(cls);
     }
 
-    const header = containerEl.createDiv({ cls: "lifeos-settings-hero" });
-    header.createDiv({ cls: "lifeos-kicker", text: "Life OS Settings" });
-    new Setting(header).setName("设置中心").setHeading();
-    header.createEl("p", { text: "管理本地数据、AI 模型、Chat 人格 Skill、写入确认和复盘热力图。" });
+    if (this.mode === "launcher") {
+      this.renderLauncher();
+      return;
+    }
+
+    const header = containerEl.createDiv({ cls: "lifeos-settings-hero lifeos-settings-toolbar" });
+    const headerCopy = header.createDiv({ cls: "lifeos-settings-toolbar-copy" });
+    headerCopy.createDiv({ cls: "lifeos-kicker", text: "Life OS Settings" });
+    headerCopy.createEl("h1", { text: "设置中心" });
+    headerCopy.createEl("p", { text: "常用配置集中在概览，详细设置按模块切换，不再堆成一张长页面。" });
     const actions = header.createDiv({ cls: "lifeos-settings-actions" });
     this.button(actions, "测试连接", () => void this.testConnection(), true);
     this.button(actions, this.dirty ? "保存设置（有未保存更改）" : "保存设置", () => void this.saveAll(), false, this.dirty ? "lifeos-button-primary" : "");
     this.button(actions, "恢复默认", () => void this.restoreDefaults(), false, "lifeos-button-danger");
 
-    const grid = containerEl.createDiv({ cls: "lifeos-settings-grid" });
+    const workspace = containerEl.createDiv({ cls: "lifeos-settings-workspace" });
+    this.settingsNavEl = workspace.createEl("nav", { cls: "lifeos-settings-nav", attr: { "aria-label": "设置模块" } });
+    this.renderSettingsNavigation(this.settingsNavEl);
+
+    const stage = workspace.createDiv({ cls: "lifeos-settings-stage" });
+    const stageHeader = stage.createDiv({ cls: "lifeos-settings-stage-header" });
+    const stageCopy = stageHeader.createDiv({ cls: "lifeos-settings-stage-copy" });
+    this.settingsStageTitleEl = stageCopy.createEl("h2");
+    this.settingsStageDescriptionEl = stageCopy.createEl("p");
+    const stageHint = stageHeader.createSpan({ cls: "lifeos-settings-stage-hint" });
+    setIcon(stageHint.createSpan({ cls: "lifeos-settings-stage-hint-icon" }), "shield-check");
+    stageHint.createSpan({ text: "切换模块不会丢失未保存输入" });
+
+    this.settingsPanelEl = stage.createDiv({ cls: "lifeos-settings-panel" });
+    this.settingsOverviewEl = this.settingsPanelEl.createDiv({ cls: "lifeos-settings-overview" });
+    this.settingsOverviewEl.dataset.settingsSection = "overview";
+    this.renderSettingsOverview(this.settingsOverviewEl);
+
+    const grid = this.settingsPanelEl.createDiv({ cls: "lifeos-settings-grid" });
     this.renderThemePreferences(grid);
     this.renderBasics(grid);
     this.renderAi(grid);
@@ -75,10 +167,295 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     this.renderChatAi(grid);
     this.renderSafety(grid);
     this.renderBrowserCapture(grid);
+    this.renderWeixinBot(grid);
     this.renderProLicense(grid);
     this.renderLlmWiki(grid);
     this.renderExperience(grid);
     this.renderHeatmap(grid);
+    this.activateSettingsSection(this.activeSettingsSection, false);
+  }
+
+  private renderLauncher(): void {
+    const hero = this.containerEl.createDiv({ cls: "lifeos-settings-launcher-card" });
+    const icon = hero.createSpan({ cls: "lifeos-settings-launcher-icon" });
+    setIcon(icon, "settings-2");
+    const copy = hero.createDiv({ cls: "lifeos-settings-launcher-copy" });
+    copy.createDiv({ cls: "lifeos-kicker", text: "Life OS Settings" });
+    new Setting(copy).setName("设置已迁入 Life OS 设置中心").setHeading();
+    copy.createEl("p", {
+      text: "主题、AI 模型、Skill、微信连接、数据安全、自动复盘和其他全部设置，都在独立页面中统一管理。"
+    });
+    const facts = copy.createDiv({ cls: "lifeos-settings-launcher-facts" });
+    facts.createSpan({ text: "完整页面" });
+    facts.createSpan({ text: "支持侧边栏直达" });
+    facts.createSpan({ text: "设置不会丢失" });
+    const button = copy.createEl("button", {
+      cls: "lifeos-button lifeos-button-primary lifeos-settings-launcher-button",
+      attr: { type: "button" }
+    });
+    setIcon(button.createSpan(), "external-link");
+    button.createSpan({ text: "打开 Life OS 设置中心" });
+    button.onclick = () => {
+      const settingsHost = this.app as unknown as { setting?: { close?: () => void } };
+      settingsHost.setting?.close?.();
+      void this.plugin.activateSettings();
+    };
+  }
+
+  hide(): void {
+    this.weixinStatusUnsubscribe?.();
+    this.weixinStatusUnsubscribe = null;
+  }
+
+  private renderSettingsNavigation(parent: HTMLElement): void {
+    const overview = parent.createDiv({ cls: "lifeos-settings-nav-overview" });
+    this.settingsNavButton(overview, "overview", "常用配置", "一页完成高频设置", "layout-dashboard");
+
+    for (const group of SETTINGS_GROUP_LABELS) {
+      const block = parent.createDiv({ cls: "lifeos-settings-nav-group" });
+      block.createDiv({ cls: "lifeos-settings-nav-group-label", text: group.label });
+      const list = block.createDiv({ cls: "lifeos-settings-nav-list" });
+      for (const section of SETTINGS_SECTIONS.filter((item) => item.group === group.id)) {
+        this.settingsNavButton(list, section.id, section.shortTitle, section.description, section.icon);
+      }
+    }
+  }
+
+  private settingsNavButton(parent: HTMLElement, id: SettingsSectionId, title: string, description: string, icon: string): void {
+    const button = parent.createEl("button", {
+      cls: "lifeos-settings-nav-button",
+      attr: { type: "button", "data-settings-target": id, "aria-pressed": "false", title: description }
+    });
+    const iconEl = button.createSpan({ cls: "lifeos-settings-nav-icon" });
+    setIcon(iconEl, icon);
+    const copy = button.createSpan({ cls: "lifeos-settings-nav-copy" });
+    copy.createSpan({ cls: "lifeos-settings-nav-title", text: title });
+    copy.createSpan({ cls: "lifeos-settings-nav-description", text: description });
+    button.onclick = () => this.activateSettingsSection(id, true);
+  }
+
+  private renderSettingsOverview(parent: HTMLElement): void {
+    const grid = parent.createDiv({ cls: "lifeos-settings-overview-grid" });
+
+    const appearance = this.settingsOverviewCard(grid, "外观与名称", "主题与产品显示名称", "palette", "theme");
+    this.settingsOverviewSelect<ThemeStyle>(
+      appearance,
+      "主题",
+      this.plugin.settings.themeStyle ?? "minimal-warm",
+      THEME_STYLES.map((value): [ThemeStyle, string] => [value, this.themeStyleLabel(value)]),
+      async (value) => {
+        this.plugin.settings.themeStyle = value;
+        await this.saveImmediate(this.themeStyleNotice(value));
+        this.display();
+      }
+    );
+    this.settingsOverviewInput(appearance, "系统名称", this.draft.systemName, "Life OS", (value) => this.setDraft("systemName", value || "Life OS"));
+
+    const ai = this.settingsOverviewCard(grid, "AI 模型", "供应商、模型与连接状态", "bot", "ai");
+    this.settingsOverviewSelect<AiProviderType>(ai, "供应商", this.draft.aiProvider, PROVIDERS, async (value) => {
+      this.applyProvider(value);
+      this.display();
+    });
+    this.settingsOverviewInput(ai, "模型", this.draft.aiModel, "输入模型名称", (value) => this.setDraft("aiModel", value));
+
+    const chat = this.settingsOverviewCard(grid, "AI 助手", "默认对话和上下文方式", "message-circle", "chat");
+    this.settingsOverviewSelect<ChatMode>(
+      chat,
+      "对话模式",
+      this.plugin.settings.defaultChatMode,
+      [["chat", "日常对话"], ["exam", getExamChatModeLabel(this.plugin.settings)], ["diary", "日记复盘"], ["review", "复盘总结"]],
+      async (value) => {
+        this.plugin.settings.defaultChatMode = value;
+        await this.saveImmediate("默认 Chat 模式已保存。");
+        this.display();
+      }
+    );
+    this.settingsOverviewSelect<ChatContextMode>(
+      chat,
+      "上下文",
+      this.plugin.settings.defaultChatContextMode ?? "smart",
+      [["smart", "智能上下文"], ["semantic", "语义增强"], ["global", "全局分析"]],
+      async (value) => {
+        this.plugin.settings.defaultChatContextMode = value;
+        await this.saveImmediate("默认上下文模式已保存。");
+        this.display();
+      }
+    );
+
+    const automation = this.settingsOverviewCard(grid, "写入与自动化", "写入权限和每日复盘", "wand-sparkles", "review");
+    this.settingsOverviewSelect<ChatWritebackMode>(
+      automation,
+      "记入方式",
+      this.plugin.settings.chatWritebackMode ?? (this.plugin.settings.autoApplyChatToDaily ? "confirm" : "off"),
+      [["off", "不写入"], ["confirm", "预览确认"], ["explicit-auto", "明确目标时自动写入"]],
+      async (value) => {
+        this.plugin.settings.chatWritebackMode = value;
+        this.plugin.settings.autoApplyChatToDaily = value !== "off";
+        await this.saveImmediate("默认记入方式已保存。");
+        this.display();
+      }
+    );
+    this.settingsOverviewToggle(automation, "自动复盘", this.plugin.settings.autoReviewEnabled === true, async (value) => {
+      this.plugin.settings.autoReviewEnabled = value;
+      await this.saveImmediate(value ? "自动复盘已开启，只会生成待确认草稿。" : "自动复盘已关闭。");
+      this.display();
+    });
+
+    const connections = this.settingsOverviewCard(grid, "连接状态", "网页会话和微信工作台", "radio-tower", "weixin");
+    this.settingsOverviewToggle(connections, "网页保存桥", this.plugin.settings.browserCaptureEnabled, async (value) => {
+      this.plugin.settings.browserCaptureEnabled = value;
+      await this.plugin.saveSettings();
+      const status = await this.plugin.refreshBrowserCaptureBridge();
+      new Notice(value ? status.message : "网页 AI 本地保存桥已关闭。", 5000);
+      this.display();
+    });
+    this.settingsOverviewToggle(connections, "微信连接", this.plugin.settings.weixinBotEnabled, async (value) => {
+      this.plugin.settings.weixinBotEnabled = value;
+      await this.plugin.saveSettings();
+      const status = await this.plugin.refreshWeixinConnection();
+      new Notice(value ? status.message : "微信消息接收已暂停。", 5000);
+      this.display();
+    });
+
+    const data = this.settingsOverviewCard(grid, "数据与目录", "Vault 目录和文件树语言", "folder-cog", "basics");
+    this.settingsOverviewInput(data, "数据目录", this.draft.rootFolder, "PersonalLifeSystem", (value) => this.setDraft("rootFolder", value || "PersonalLifeSystem"));
+    this.settingsOverviewSelect<DirectoryLanguage>(
+      data,
+      "目录语言",
+      this.plugin.settings.directoryLanguage ?? "en",
+      [["en", "English"], ["zh", "中文"]],
+      async (value) => {
+        this.plugin.settings.directoryLanguage = value;
+        await this.plugin.saveSettings();
+        await this.plugin.ensureBaseStructure();
+        new Notice(value === "zh" ? "目录语言已切换为中文。" : "Folder language switched to English.");
+        this.display();
+      }
+    );
+  }
+
+  private settingsOverviewCard(
+    parent: HTMLElement,
+    title: string,
+    description: string,
+    icon: string,
+    target: SettingsSectionId
+  ): HTMLElement {
+    const card = parent.createDiv({ cls: "lifeos-settings-overview-card" });
+    const head = card.createDiv({ cls: "lifeos-settings-overview-card-head" });
+    const iconEl = head.createSpan({ cls: "lifeos-settings-overview-card-icon" });
+    setIcon(iconEl, icon);
+    const copy = head.createDiv({ cls: "lifeos-settings-overview-card-copy" });
+    copy.createEl("strong", { text: title });
+    copy.createSpan({ text: description });
+    const open = head.createEl("button", { cls: "lifeos-settings-overview-open", attr: { type: "button", title: `打开${title}详细设置`, "aria-label": `打开${title}详细设置` } });
+    setIcon(open, "arrow-up-right");
+    open.onclick = () => this.activateSettingsSection(target, true);
+    return card;
+  }
+
+  private settingsOverviewField(parent: HTMLElement, label: string): HTMLElement {
+    const field = parent.createDiv({ cls: "lifeos-settings-overview-field" });
+    field.createSpan({ cls: "lifeos-settings-overview-field-label", text: label });
+    return field;
+  }
+
+  private settingsOverviewInput(
+    parent: HTMLElement,
+    label: string,
+    value: string,
+    placeholder: string,
+    onChange: (value: string) => void
+  ): HTMLInputElement {
+    const field = this.settingsOverviewField(parent, label);
+    const input = field.createEl("input", { cls: "lifeos-input", attr: { type: "text", placeholder, "aria-label": label } });
+    input.value = value;
+    input.oninput = () => {
+      onChange(input.value);
+      this.syncOverviewDraftFields();
+    };
+    return input;
+  }
+
+  private settingsOverviewSelect<T extends string>(
+    parent: HTMLElement,
+    label: string,
+    value: T,
+    options: Array<[T, string]>,
+    onChange: (value: T) => Promise<void>
+  ): HTMLSelectElement {
+    const field = this.settingsOverviewField(parent, label);
+    const select = field.createEl("select", { cls: "lifeos-input", attr: { "aria-label": label } });
+    for (const [optionValue, optionLabel] of options) select.createEl("option", { value: optionValue, text: optionLabel });
+    select.value = value;
+    select.onchange = () => void onChange(select.value as T);
+    return select;
+  }
+
+  private settingsOverviewToggle(
+    parent: HTMLElement,
+    label: string,
+    value: boolean,
+    onChange: (value: boolean) => Promise<void>
+  ): void {
+    const field = this.settingsOverviewField(parent, label);
+    const control = field.createEl("label", { cls: "lifeos-settings-overview-toggle" });
+    const input = control.createEl("input", { attr: { type: "checkbox", "aria-label": label } });
+    input.checked = value;
+    const status = control.createSpan({ text: value ? "开启" : "关闭" });
+    input.onchange = () => {
+      status.setText(input.checked ? "开启" : "关闭");
+      void onChange(input.checked);
+    };
+  }
+
+  private syncOverviewDraftFields(): void {
+    const sync = (label: string, value: string): void => {
+      this.containerEl.querySelectorAll<HTMLElement>(".lifeos-settings-card .lifeos-setting-row").forEach((row) => {
+        if (row.querySelector<HTMLElement>(".lifeos-setting-label")?.textContent?.trim() !== label) return;
+        const control = row.querySelector<HTMLInputElement>("input:not([type='checkbox'])");
+        if (control && control.value !== value) control.value = value;
+      });
+    };
+    sync("数据目录", this.draft.rootFolder);
+    sync("系统名称", this.draft.systemName);
+    sync("Model", this.draft.aiModel);
+  }
+
+  private activateSettingsSection(id: SettingsSectionId, moveFocus: boolean): void {
+    const target = id === "overview" || SETTINGS_SECTIONS.some((section) => section.id === id) ? id : "overview";
+    this.activeSettingsSection = target;
+    this.settingsNavEl?.querySelectorAll<HTMLButtonElement>(".lifeos-settings-nav-button").forEach((button) => {
+      const active = button.dataset.settingsTarget === target;
+      button.toggleClass("is-active", active);
+      button.setAttr("aria-pressed", active ? "true" : "false");
+      if (active) button.setAttr("aria-current", "page");
+      else button.removeAttribute("aria-current");
+    });
+
+    const definition = SETTINGS_SECTIONS.find((section) => section.id === target);
+    this.settingsStageTitleEl?.setText(definition?.title ?? "常用配置");
+    this.settingsStageDescriptionEl?.setText(definition?.description ?? "高频配置集中展示，修改后可立即使用。");
+
+    const overviewActive = target === "overview";
+    this.settingsOverviewEl?.toggleClass("is-settings-section-hidden", !overviewActive);
+    const grid = this.settingsPanelEl?.querySelector<HTMLElement>(".lifeos-settings-grid") ?? null;
+    grid?.toggleClass("is-settings-section-hidden", overviewActive);
+    grid?.querySelectorAll<HTMLElement>(".lifeos-settings-card[data-settings-section]").forEach((card) => {
+      const active = card.dataset.settingsSection === target;
+      card.toggleClass("is-settings-section-hidden", !active);
+      card.setAttr("aria-hidden", active ? "false" : "true");
+      if (active) card.scrollTop = 0;
+    });
+    if (this.settingsPanelEl) this.settingsPanelEl.scrollTop = 0;
+
+    if (moveFocus) {
+      const activeSurface = overviewActive
+        ? this.settingsOverviewEl
+        : grid?.querySelector<HTMLElement>(`.lifeos-settings-card[data-settings-section="${target}"]`) ?? null;
+      activeSurface?.setAttr("tabindex", "-1");
+      requestAnimationFrame(() => activeSurface?.focus({ preventScroll: true }));
+    }
   }
 
   private renderThemePreferences(parent: HTMLElement): void {
@@ -200,17 +577,17 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
   private renderChatAi(parent: HTMLElement): void {
     const card = this.section(parent, "Chat / AI 助手", "选择默认名人 Skill 组合、回复偏好和发送方式。仅内置精选公开方法论；不含在世中国公众人物、刚去世中国人物、万能角色生成器和猎奇 Skill。", "message-circle");
     const importedSkills = createImportedAiSkills(this.plugin.settings.importedAiSkills);
-    const selectedIds = normalizeAiSkillIds(this.plugin.settings.defaultAiSkillIds, this.plugin.settings.defaultAiSkillId, importedSkills);
+    const selectedIds = normalizeAiSkillIds(this.plugin.settings.defaultAiSkillIds, this.plugin.settings.defaultAiSkillId, importedSkills, this.plugin.settings.aiSkillOverrides);
     this.plugin.settings.defaultAiSkillIds = selectedIds;
     this.plugin.settings.defaultAiSkillId = selectedIds[0] ?? "lifeos-general";
 
     const skillBlock = card.createDiv({ cls: "lifeos-setting-row lifeos-setting-row-vertical" });
     skillBlock.createDiv({ cls: "lifeos-setting-label", text: "默认名人 Skill（可多选）" });
-    skillBlock.createDiv({ cls: "lifeos-setting-description", text: `当前组合：${getAiSkills(selectedIds, importedSkills).map((skill) => skill.name).join(" + ")}` });
+    skillBlock.createDiv({ cls: "lifeos-setting-description", text: `当前组合：${getAiSkills(selectedIds, importedSkills, this.plugin.settings.aiSkillOverrides).map((skill) => skill.name).join(" + ")}。重命名、分类和删除请在 AI 助手的 Skill 管理中完成。` });
     const skillDetails = skillBlock.createEl("details", { cls: "lifeos-settings-skill-details" });
     skillDetails.createEl("summary", { text: "展开选择名人 Skill" });
     for (const category of getAiSkillCategories(this.plugin.settings.customAiSkillCategories)) {
-      const skills = getAiSkillsByCategory(category.id, importedSkills);
+      const skills = getAiSkillsByCategory(category.id, importedSkills, this.plugin.settings.aiSkillOverrides);
       if (skills.length === 0) continue;
       const categoryBlock = skillDetails.createEl("details", { cls: "lifeos-settings-skill-category" });
       if (category.id === "system" || selectedIds.some((id) => skills.some((skill) => skill.id === id))) categoryBlock.open = true;
@@ -226,10 +603,10 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
         label.createSpan({ cls: "lifeos-settings-skill-name", text: item.name });
         label.createSpan({ cls: "lifeos-settings-skill-desc", text: item.description });
         checkbox.onchange = async () => {
-          const next = new Set(normalizeAiSkillIds(this.plugin.settings.defaultAiSkillIds, this.plugin.settings.defaultAiSkillId, importedSkills));
+          const next = new Set(normalizeAiSkillIds(this.plugin.settings.defaultAiSkillIds, this.plugin.settings.defaultAiSkillId, importedSkills, this.plugin.settings.aiSkillOverrides));
           if (checkbox.checked) next.add(item.id);
           else next.delete(item.id);
-          this.plugin.settings.defaultAiSkillIds = normalizeAiSkillIds(Array.from(next), undefined, importedSkills);
+          this.plugin.settings.defaultAiSkillIds = normalizeAiSkillIds(Array.from(next), undefined, importedSkills, this.plugin.settings.aiSkillOverrides);
           this.plugin.settings.defaultAiSkillId = this.plugin.settings.defaultAiSkillIds[0] ?? "lifeos-general";
           await this.saveImmediate("默认名人 Skill 组合已保存。");
           this.display();
@@ -262,10 +639,18 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       this.plugin.settings.chatDefaultAiReply = value;
       await this.saveImmediate("默认 AI 回复设置已保存。");
     });
-    this.toggle(card, "默认开启记入", "开启后，AI 整理结果会先进入预览，确认后才写入日记、知识库或记忆。", this.plugin.settings.autoApplyChatToDaily, async (value) => {
-      this.plugin.settings.autoApplyChatToDaily = value;
-      await this.saveImmediate("默认记入设置已保存。");
-    });
+    this.select<ChatWritebackMode>(
+      card,
+      "默认记入方式",
+      "不写入最稳妥；确认模式会先预览；自动模式仅在你明确指定日记、知识库、项目文档、记忆或目标文档时写入，含糊请求仍会询问。",
+      this.plugin.settings.chatWritebackMode ?? (this.plugin.settings.autoApplyChatToDaily ? "confirm" : "off"),
+      [["off", "不写入"], ["confirm", "预览确认后写入"], ["explicit-auto", "明确指定目标时自动写入"]],
+      async (value) => {
+        this.plugin.settings.chatWritebackMode = value;
+        this.plugin.settings.autoApplyChatToDaily = value !== "off";
+        await this.saveImmediate("默认记入方式已保存。");
+      }
+    );
     this.toggle(card, "启用图片视觉分析", "开启后，AI 助手可把图片附件发送给支持视觉的模型；未开启时图片只作为附件记录，不做识别。", this.plugin.settings.enableVisionFileAnalysis === true, async (value) => {
       this.plugin.settings.enableVisionFileAnalysis = value;
       await this.saveImmediate("图片视觉分析设置已保存。");
@@ -345,9 +730,21 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
   }
 
   private renderSafety(parent: HTMLElement): void {
-    const card = this.section(parent, "数据安全", "这些能力是 Life OS 的默认写入确认和数据保护提示，因此以状态展示。", "shield-check");
+    const card = this.section(parent, "数据安全", "这里展示当前写入边界和长期数据保护状态。", "shield-check");
     this.info(card, "本地保存", `已启用：所有内容都保存在你的 Vault：${this.plugin.getRoot()}`);
-    this.info(card, "AI 写回确认", "已启用：AI 内容会先进入预览，确认后才写入日记、知识库或记忆。" );
+    const writebackMode = normalizeChatWritebackMode(
+      this.plugin.settings.chatWritebackMode,
+      this.plugin.settings.autoApplyChatToDaily === true
+    );
+    this.info(
+      card,
+      "AI 写回权限",
+      writebackMode === "explicit-auto"
+        ? "当前：明确指定目标时自动写入；含糊请求、未选项目和不确定路径仍会停止或进入预览。"
+        : writebackMode === "confirm"
+          ? "当前：所有 Chat 写入先预览，确认后才落盘。"
+          : "当前：Chat 只问答，不写入 Vault。"
+    );
     this.info(card, "长期记忆需确认", "已启用：候选记忆必须人工确认后才进入正式分类记忆。" );
   }
 
@@ -410,6 +807,339 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       new Notice("连接令牌已更换，请重新粘贴到浏览器扩展。", 7000);
       this.display();
     })());
+  }
+
+  private renderWeixinBot(parent: HTMLElement): void {
+    const card = this.section(
+      parent,
+      "微信连接",
+      "Life OS 内置微信 iLink Bot 连接层：直接扫码，不需要安装 OpenClaw，也不需要运行额外 Gateway。",
+      "message-circle"
+    );
+    card.addClass("lifeos-weixin-card");
+
+    this.toggle(
+      card,
+      "启用微信连接",
+      "启用后由桌面 Obsidian 同时接收所有已连接微信 Bot 的消息；关闭时停止轮询，但保留各账号的本地登录。",
+      this.plugin.settings.weixinBotEnabled,
+      async (value) => {
+        this.plugin.settings.weixinBotEnabled = value;
+        await this.plugin.saveSettings();
+        const next = await this.plugin.refreshWeixinConnection();
+        new Notice(value ? next.message : "微信消息接收已暂停。", 5000);
+        this.display();
+      }
+    );
+
+    const visionReady = this.plugin.settings.enableVisionFileAnalysis === true
+      && Boolean(this.plugin.settings.visionAiModel?.trim());
+    const visionHint = card.createDiv({ cls: `lifeos-weixin-vision-hint${visionReady ? " is-ready" : " is-warning"}` });
+    setIcon(visionHint.createSpan({ cls: "lifeos-weixin-vision-icon" }), visionReady ? "scan-eye" : "image-off");
+    visionHint.createSpan({
+      text: visionReady
+        ? `图片识别已启用：${this.plugin.settings.visionAiModel.trim()}`
+        : "图片识别尚未启用：请先在“AI 模型”中开启图片视觉分析并填写视觉模型。"
+    });
+
+    const connectionPanel = card.createDiv({ cls: "lifeos-weixin-connection" });
+    const renderConnection = (status: WeixinConnectionStatus): void => {
+      if (!connectionPanel.isConnected) return;
+      connectionPanel.empty();
+      const head = connectionPanel.createDiv({ cls: "lifeos-weixin-connection-head" });
+      const copy = head.createDiv({ cls: "lifeos-weixin-connection-copy" });
+      copy.createDiv({ cls: "lifeos-setting-label", text: "微信扫码连接" });
+      copy.createDiv({ cls: "lifeos-setting-description", text: status.message });
+      const badge = head.createSpan({ cls: `lifeos-weixin-status lifeos-weixin-status-${status.phase}`, text: this.weixinStatusLabel(status) });
+      badge.setAttr("aria-live", "polite");
+
+      if (status.qrDataUrl) {
+        const qrWrap = connectionPanel.createDiv({ cls: "lifeos-weixin-qr-wrap" });
+        const qr = qrWrap.createEl("img", {
+          cls: "lifeos-weixin-qr",
+          attr: { src: status.qrDataUrl, alt: "微信登录二维码" }
+        });
+        qr.setAttr("draggable", "false");
+        const qrCopy = qrWrap.createDiv({ cls: "lifeos-weixin-qr-copy" });
+        qrCopy.createEl("strong", { text: status.phase === "scanned" ? "已扫码，请在手机确认" : "使用手机微信扫码" });
+        qrCopy.createEl("p", { text: "二维码只用于创建微信 Bot 身份，不会读取你的个人聊天记录。" });
+        if (status.qrExpiresAt > 0) {
+          qrCopy.createEl("span", { text: `有效至 ${new Date(status.qrExpiresAt).toLocaleTimeString("zh-CN")}` });
+        }
+      }
+
+      if (status.phase === "verification-required") {
+        const verify = connectionPanel.createDiv({ cls: "lifeos-weixin-verify" });
+        const input = verify.createEl("input", {
+          cls: "lifeos-input",
+          attr: { type: "text", inputmode: "numeric", autocomplete: "one-time-code", placeholder: "输入微信显示的验证码", "aria-label": "微信验证码" }
+        });
+        this.button(verify, "提交验证码", () => {
+          try {
+            this.plugin.submitWeixinVerificationCode(input.value);
+            input.value = "";
+          } catch (error) {
+            new Notice(error instanceof Error ? error.message : String(error), 5000);
+          }
+        }, true);
+      }
+
+      const actions = connectionPanel.createDiv({ cls: "lifeos-settings-actions lifeos-weixin-actions" });
+      const loginInProgress = ["requesting-qr", "waiting-scan", "scanned", "verification-required"].includes(status.phase);
+      if (!loginInProgress) {
+        this.button(
+          actions,
+          status.accountCount > 0 ? "添加微信账号" : (status.phase === "expired" || status.phase === "error" ? "重新生成二维码" : "生成二维码"),
+          () => void this.startWeixinLogin(),
+          true
+        );
+        if (status.accountCount > 1) {
+          this.button(actions, "退出全部账号", () => void (async () => {
+            if (!window.confirm(`确认移除全部 ${status.accountCount} 个微信 Bot？本地登录令牌会被删除。`)) return;
+            await this.plugin.disconnectWeixin();
+            new Notice("全部微信连接已退出，本地令牌已删除。", 5000);
+          })(), false, "lifeos-button-danger");
+        }
+      } else if (status.phase === "requesting-qr") {
+        const waiting = actions.createEl("button", { cls: "lifeos-button", text: "正在生成…", attr: { type: "button", disabled: "true" } });
+        waiting.setAttr("aria-busy", "true");
+      }
+
+      if (status.accounts.length > 0) {
+        const accountSection = connectionPanel.createDiv({ cls: "lifeos-weixin-account-section" });
+        const accountHead = accountSection.createDiv({ cls: "lifeos-weixin-account-head" });
+        accountHead.createEl("strong", { text: `已保存账号（${status.accounts.length}）` });
+        accountHead.createSpan({ text: "每个账号独立保存会话、游标和回复上下文" });
+        const accountList = accountSection.createDiv({ cls: "lifeos-weixin-account-list" });
+        status.accounts.forEach((account, index) => {
+          const item = accountList.createDiv({ cls: "lifeos-weixin-account-item" });
+          const accountCopy = item.createDiv({ cls: "lifeos-weixin-account-copy" });
+          const title = accountCopy.createDiv({ cls: "lifeos-weixin-account-title" });
+          title.createEl("strong", { text: `微信 Bot ${index + 1}` });
+          title.createSpan({ cls: `lifeos-weixin-status lifeos-weixin-status-${account.phase}`, text: account.connected ? "运行中" : this.weixinAccountStatusLabel(account.phase) });
+          accountCopy.createSpan({ text: `Bot ${this.shortConnectionId(account.accountId)} · 微信 ${this.shortConnectionId(account.userId || "未知")}` });
+          const recent = [
+            account.lastInboundAt ? `收 ${new Date(account.lastInboundAt).toLocaleTimeString("zh-CN")}` : "",
+            account.lastReplyAt ? `发 ${new Date(account.lastReplyAt).toLocaleTimeString("zh-CN")}` : ""
+          ].filter(Boolean).join(" · ");
+          accountCopy.createSpan({ text: recent || account.message });
+          const accountActions = item.createDiv({ cls: "lifeos-weixin-account-actions" });
+          this.button(accountActions, "移除", () => void (async () => {
+            if (!window.confirm(`只移除微信 Bot ${index + 1}？其他微信账号会继续运行。`)) return;
+            await this.plugin.disconnectWeixin(account.accountId);
+            new Notice("该微信 Bot 已移除。", 5000);
+          })(), false, "lifeos-button-danger");
+          if (account.lastError) {
+            const error = accountCopy.createEl("details", { cls: "lifeos-weixin-error" });
+            error.createEl("summary", { text: "查看账号错误" });
+            error.createEl("code", { text: account.lastError });
+          }
+        });
+      }
+
+      if (status.accountId || status.lastPollAt || status.lastInboundAt || status.lastReplyAt) {
+        const facts = connectionPanel.createDiv({ cls: "lifeos-weixin-facts" });
+        if (status.accountCount) facts.createSpan({ text: `${status.accountCount} 个微信 Bot` });
+        if (status.lastPollAt) facts.createSpan({ text: `最近检查 ${new Date(status.lastPollAt).toLocaleTimeString("zh-CN")}` });
+        if (status.lastInboundAt) facts.createSpan({ text: `收到消息 ${new Date(status.lastInboundAt).toLocaleTimeString("zh-CN")}` });
+        if (status.lastReplyAt) facts.createSpan({ text: `发送回复 ${new Date(status.lastReplyAt).toLocaleTimeString("zh-CN")}` });
+      }
+      if (status.lastError) {
+        const error = connectionPanel.createEl("details", { cls: "lifeos-weixin-error" });
+        error.createEl("summary", { text: "查看最近错误" });
+        error.createEl("code", { text: status.lastError });
+      }
+    };
+    renderConnection(this.plugin.getWeixinConnectionStatus());
+    this.weixinStatusUnsubscribe = this.plugin.subscribeWeixinConnectionStatus(renderConnection);
+
+    this.select<WeixinSenderPolicy>(
+      card,
+      "私聊访问策略",
+      "推荐“配对确认”：陌生微信账号先收到一次性配对码，经你批准后才可使用 Life OS。",
+      this.plugin.settings.weixinSenderPolicy,
+      [["pairing", "配对确认（推荐）"], ["allowlist", "仅允许列表"], ["open", "所有私聊账号"]],
+      async (value) => {
+        this.plugin.settings.weixinSenderPolicy = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    this.select<WeixinBotPermission>(
+      card,
+      "远程写入权限",
+      "推荐使用自然语言授权：明确要求会直接执行，AI 推断出的写入会先用自然语言向你确认。群聊始终受到额外限制。",
+      this.plugin.settings.weixinPermissionMode,
+      [["confirm", "自然语言授权（推荐）"], ["explicit-auto", "明确意图直接执行"], ["read-only", "只读，不允许写入"]],
+      async (value) => {
+        this.plugin.settings.weixinPermissionMode = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    this.toggle(
+      card,
+      "微信对话进入今日日记",
+      "将已授权私聊中的普通用户输入自动追加到当日日记，作为日记与复盘证据。AI 回复不会被当成已完成事实；待办、收藏等结构化操作不会重复写入。只读模式下不写入。",
+      this.plugin.settings.weixinCaptureToDailyEnabled,
+      async (value) => {
+        this.plugin.settings.weixinCaptureToDailyEnabled = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    this.toggle(
+      card,
+      "每日 00:00 整理并发送日终总结",
+      "在次日 00:00 汇总刚结束一天的微信输入、日记正文、任务、打卡和已确认项目事实，更新日记中的托管区块，并主动发送给所有仍获授权且曾私聊过的微信会话。",
+      this.plugin.settings.weixinDailyDigestEnabled,
+      async (value) => {
+        this.plugin.settings.weixinDailyDigestEnabled = value;
+        await this.plugin.saveSettings();
+      }
+    );
+    this.toggle(
+      card,
+      "启动后补发错过的日终总结",
+      "如果 00:00 时 Obsidian 未运行，下次启动后补做前一天总结。发送采用幂等记录，不会因重启重复推送。",
+      this.plugin.settings.weixinDailyDigestCatchUp,
+      async (value) => {
+        this.plugin.settings.weixinDailyDigestCatchUp = value;
+        await this.plugin.saveSettings();
+      }
+    );
+
+    const projectSelect = this.select<string>(
+      card,
+      "默认项目",
+      "尚未在微信中指定项目时读取该项目；也可以保持未指定，并在对话中用自然语言切换。",
+      this.plugin.settings.weixinDefaultProjectId,
+      [["", "未指定项目"]],
+      async (value) => {
+        this.plugin.settings.weixinDefaultProjectId = value;
+        await this.plugin.saveSettings();
+      },
+      "lifeos-weixin-project-select"
+    );
+    void this.plugin.listWeixinProjects().then((projects) => {
+      if (!projectSelect.isConnected) return;
+      projects.forEach((project) => projectSelect.createEl("option", { value: project.id, text: project.name }));
+      projectSelect.value = this.plugin.settings.weixinDefaultProjectId;
+    }).catch((error) => console.warn("[Life OS] Failed to load Weixin projects", error));
+
+    this.renderWeixinPairings(card);
+    this.renderWeixinApprovedSenders(card);
+
+    const advanced = card.createEl("details", { cls: "lifeos-weixin-advanced" });
+    advanced.createEl("summary", { text: "高级访问控制与使用说明" });
+    const groupsRow = this.row(
+      advanced,
+      "允许的群聊",
+      "微信 iLink Bot 目前以私聊最稳定，普通微信群可能不可用。若收到群聊拒绝提示，可按提示每行加入一个完整会话标识。"
+    );
+    const groups = groupsRow.createEl("textarea", {
+      cls: "lifeos-input lifeos-weixin-groups",
+      attr: { rows: "3", placeholder: "weixin:BOT_ID:group:GROUP_ID" }
+    });
+    groups.value = this.plugin.settings.weixinAllowedGroups.join("\n");
+    groups.onblur = async () => {
+      this.plugin.settings.weixinAllowedGroups = Array.from(new Set(
+        groups.value.split(/[\n,]+/u).map((item) => item.trim()).filter((item) => item.startsWith("weixin:"))
+      )).slice(0, 500);
+      await this.plugin.saveSettings();
+    };
+    const guide = advanced.createEl("ol", { cls: "lifeos-weixin-guide" });
+    [
+      "点击“生成二维码”，用手机微信扫码并在手机端确认；连接后可继续点“添加微信账号”。无需安装 OpenClaw。",
+      "用微信向新创建的 Bot 发送消息；首次私聊默认返回配对码，在本页批准。",
+      "在上方选择默认项目。每个微信会话会独立保存上下文，不会混入其他微信账号的对话。",
+      "先在“AI 模型”中启用图片视觉分析并填写视觉模型。微信无法同时发送图片和文字时，先发最多 4 张图片，再发问题；图片只在内存中等待 15 分钟。",
+      "直接说“用花生十三回答……”“小P，帮我解这题”或“陈怀安分析这份资料”，即可临时调用已安装 Skill；同名系列会结合题目自动选择具体模块，不改变电脑端选择。",
+      "直接说“联网查一下……”即可搜索网页；粘贴链接可读取正文，明确说“把这个链接存入知识库”时会抓取可读内容后保存，而不是只存网址。",
+      "微信对话就是 Life OS 的一个完整输入端：普通对话可进入当日日记证据；也可用自然语言记日记、管理待办、生成复盘或总结、收藏网页、存入知识库并设置提醒。",
+      "直接说“根据今天的微信对话生成今日日记”可随时整理；启用日终总结后，次日 00:00 自动更新日记并发回微信。AI 只整理证据，不会把自己的回复冒充为你的完成事实。",
+      "桌面 Obsidian 必须保持运行；关闭插件或电脑后，实时回复、到期提醒和 00:00 推送都会暂停。启用补发后，下次启动会自动补做前一天总结。"
+    ].forEach((text) => guide.createEl("li", { text }));
+    advanced.createEl("p", { text: "兼容命令（非必需）：仍保留 /lifeos 与 /skill 供调试和精确控制；日常使用直接说自然语言即可。" });
+    advanced.createEl("p", { cls: "lifeos-setting-description", text: `各账号登录令牌仅保存在当前 Vault 的插件目录，不写入 Markdown；提醒和日终推送只使用不透明路由引用。目前保存了 ${this.plugin.settings.weixinReminderRoutes.length} 条私聊投递路由。微信回复会自动把 LaTeX 公式降级为普通算式。` });
+  }
+
+  private async startWeixinLogin(): Promise<void> {
+    try {
+      await this.plugin.startWeixinLogin();
+    } catch (error) {
+      new Notice(`微信二维码生成失败：${error instanceof Error ? error.message : String(error)}`, 7000);
+    }
+  }
+
+  private renderWeixinPairings(parent: HTMLElement): void {
+    const section = parent.createDiv({ cls: "lifeos-weixin-access-section" });
+    section.createDiv({ cls: "lifeos-setting-label", text: `待确认配对（${this.plugin.settings.weixinPendingPairings.length}）` });
+    if (this.plugin.settings.weixinPendingPairings.length === 0) {
+      section.createDiv({ cls: "lifeos-setting-description", text: "暂无。陌生微信账号发送第一条消息后，会在这里出现。" });
+      return;
+    }
+    const list = section.createDiv({ cls: "lifeos-weixin-access-list" });
+    this.plugin.settings.weixinPendingPairings.forEach((pairing) => {
+      const row = list.createDiv({ cls: "lifeos-weixin-access-item" });
+      const copy = row.createDiv({ cls: "lifeos-weixin-access-copy" });
+      copy.createEl("strong", { text: ["微信", pairing.senderName || pairing.senderId].filter(Boolean).join(" · ") });
+      copy.createSpan({ text: `配对码 ${pairing.code} · ${new Date(pairing.expiresAt).toLocaleTimeString("zh-CN")} 过期` });
+      const actions = row.createDiv({ cls: "lifeos-weixin-access-actions" });
+      this.button(actions, "批准", () => void (async () => {
+        const ok = await this.plugin.approveWeixinPairing(pairing.code);
+        new Notice(ok ? "已批准该微信账号。" : "配对码已过期，请让对方重新发送消息。", 5000);
+        this.display();
+      })(), true);
+      this.button(actions, "拒绝", () => void (async () => {
+        await this.plugin.rejectWeixinPairing(pairing.code);
+        this.display();
+      })());
+    });
+  }
+
+  private renderWeixinApprovedSenders(parent: HTMLElement): void {
+    const section = parent.createDiv({ cls: "lifeos-weixin-access-section" });
+    section.createDiv({ cls: "lifeos-setting-label", text: `已授权微信账号（${this.plugin.settings.weixinApprovedSenders.length}）` });
+    if (this.plugin.settings.weixinApprovedSenders.length === 0) {
+      section.createDiv({ cls: "lifeos-setting-description", text: "暂无已授权账号。" });
+      return;
+    }
+    const list = section.createDiv({ cls: "lifeos-weixin-access-list" });
+    this.plugin.settings.weixinApprovedSenders.forEach((sender) => {
+      const row = list.createDiv({ cls: "lifeos-weixin-access-item" });
+      const copy = row.createDiv({ cls: "lifeos-weixin-access-copy" });
+      copy.createEl("strong", { text: `微信 · ${sender.label || sender.senderId}` });
+      copy.createSpan({ text: sender.key });
+      this.button(row, "撤销", () => void (async () => {
+        if (!window.confirm(`撤销 ${sender.label || sender.senderId} 的 Life OS 访问权限？`)) return;
+        await this.plugin.revokeWeixinSender(sender.key);
+        this.display();
+      })(), false, "lifeos-button-danger");
+    });
+  }
+
+  private weixinStatusLabel(status: WeixinConnectionStatus): string {
+    if (status.phase === "connected") return "已连接";
+    if (status.phase === "requesting-qr") return "生成中";
+    if (status.phase === "waiting-scan") return "待扫码";
+    if (status.phase === "scanned") return "待确认";
+    if (status.phase === "verification-required") return "需验证码";
+    if (status.phase === "reconnecting") return "重连中";
+    if (status.phase === "expired") return "已失效";
+    if (status.phase === "error") return "连接异常";
+    if (status.phase === "unavailable") return "桌面端可用";
+    return "未连接";
+  }
+
+  private weixinAccountStatusLabel(phase: WeixinConnectionStatus["accounts"][number]["phase"]): string {
+    if (phase === "reconnecting") return "重连中";
+    if (phase === "expired") return "已失效";
+    if (phase === "error") return "异常";
+    if (phase === "connected") return "运行中";
+    return "已暂停";
+  }
+
+  private shortConnectionId(value: string): string {
+    const source = value.trim();
+    return source.length > 16 ? `${source.slice(0, 6)}…${source.slice(-6)}` : source;
   }
 
   private renderProLicense(parent: HTMLElement): void {
@@ -520,7 +1250,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     const details = parent.createEl("details", {
       cls: "lifeos-setting-row lifeos-setting-row-vertical lifeos-theme-swatch-row lifeos-theme-swatch-details lifeos-theme-gallery-details"
     });
-    details.open = true;
+    details.open = false;
     const summary = details.createEl("summary", { cls: "lifeos-theme-swatch-summary" });
     const copy = summary.createSpan({ cls: "lifeos-theme-swatch-summary-copy" });
     copy.createSpan({ cls: "lifeos-setting-label", text: "主题画廊" });
@@ -865,6 +1595,9 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     });
     Object.assign(this.plugin.settings, draft);
     await this.plugin.saveSettings();
+    // The Weixin assistant owns a FileSystemService created from the configured
+    // Life OS root. Recreate it so root/language changes take effect now.
+    await this.plugin.refreshWeixinConnection();
     this.dirty = false;
     this.plugin.applyTheme();
     new Notice("Life OS 设置已保存。");
@@ -886,21 +1619,25 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       licenseLastPaymentSnapshot: this.plugin.settings.licenseLastPaymentSnapshot,
       licenseLastCheckedAt: this.plugin.settings.licenseLastCheckedAt
     };
-    const preservedBrowserCapture = {
-      browserCaptureToken: this.plugin.settings.browserCaptureToken
-    };
+    const preservedBrowserCapture = { browserCaptureToken: this.plugin.settings.browserCaptureToken };
     this.plugin.settings = {
       ...DEFAULT_SETTINGS,
       ...preservedLicense,
       ...preservedBrowserCapture,
       aiApiKeys: { ...DEFAULT_SETTINGS.aiApiKeys },
       aiProviderConfigs: { ...DEFAULT_SETTINGS.aiProviderConfigs },
-      reportTopics: [...DEFAULT_SETTINGS.reportTopics]
+      reportTopics: [...DEFAULT_SETTINGS.reportTopics],
+      weixinApprovedSenders: [],
+      weixinAllowedGroups: [],
+      weixinPendingPairings: [],
+      weixinConversationRoutes: [],
+      weixinReminderRoutes: []
     };
     await this.plugin.saveSettings();
     this.resetDraft();
     this.plugin.applyTheme();
     await this.plugin.refreshBrowserCaptureBridge();
+    await this.plugin.refreshWeixinConnection();
     new Notice("已恢复默认设置。");
     this.display();
   }
@@ -965,6 +1702,10 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
 
   private section(parent: HTMLElement, title: string, description: string, icon: string): HTMLElement {
     const card = parent.createDiv({ cls: "lifeos-settings-card" });
+    const sectionClass = SETTINGS_SECTION_CLASSES[title];
+    if (sectionClass) card.addClass(sectionClass);
+    const definition = SETTINGS_SECTION_BY_TITLE.get(title);
+    if (definition) card.dataset.settingsSection = definition.id;
     const head = card.createDiv({ cls: "lifeos-settings-card-header" });
     const iconEl = head.createSpan({ cls: "lifeos-settings-card-icon" });
     setIcon(iconEl, icon);

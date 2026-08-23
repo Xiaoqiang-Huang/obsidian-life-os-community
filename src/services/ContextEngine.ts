@@ -22,7 +22,9 @@ import type {
   ContextEngineResult,
   ContextEvidence,
   ContextSection,
-  ContextSource
+  ContextSource,
+  WebSearchMode,
+  WebSearchProviderResult
 } from "./context-engine/types";
 
 const DEFAULT_CONTEXT_CHARS = 56000;
@@ -85,7 +87,7 @@ export class ContextEngine {
       this.summaries.getSections({ mode, date: input.date, inventory: scopedInventory }),
       this.currentNoteSections(scopedInventory),
       this.urlSections(input.userMessage, input.fetchUrl),
-      this.webSearchSections(input.userMessage, input.searchWeb),
+      this.webSearchSections(input.webSearchQuery ?? input.userMessage, input.searchWeb, input.webSearchMode),
       shouldIncludeProjectOverview ? this.projectTaskSections(inventory, input.projectScopeId) : Promise.resolve([]),
       this.projectDocumentSections(inventory, input.projectScopeId, input.userMessage),
       this.coreContextSections(scopedInventory, input.date),
@@ -561,12 +563,57 @@ export class ContextEngine {
     return sections;
   }
 
-  private async webSearchSections(userMessage: string, searchWeb?: (query: string) => Promise<string>): Promise<ContextSection[]> {
-    const query = getWebSearchQuery(userMessage);
+  private async webSearchSections(
+    userMessage: string,
+    searchWeb?: (query: string) => Promise<WebSearchProviderResult>,
+    mode: WebSearchMode = "auto"
+  ): Promise<ContextSection[]> {
+    const query = getWebSearchQuery(userMessage, { mode });
     if (!query || !searchWeb) return [];
 
     try {
-      const content = this.cleanExcerpt(await searchWeb(query), WEB_SEARCH_CONTEXT_CHARS);
+      const grounding = await searchWeb(query);
+      if (typeof grounding !== "string") {
+        if (grounding.results.length === 0) {
+          const warning = grounding.warnings.join("；") || "Web search returned no readable results.";
+          return [{
+            title: `Web Search: ${query}`,
+            content: warning,
+            priority: 25,
+            kind: "diagnostic"
+          }];
+        }
+
+        return grounding.results.map((result, index) => {
+          const details = [
+            `检索查询：${result.query}`,
+            `检索时间：${grounding.searchedAt}`,
+            `网页标题：${result.title}`,
+            `网页地址：${result.url}`,
+            result.snippet ? `搜索摘要：${result.snippet}` : "",
+            result.content ? `网页正文摘录：\n${result.content}` : "网页正文未展开，仅使用搜索摘要。",
+            index === 0 && grounding.warnings.length > 0 ? `检索说明：${grounding.warnings.join("；")}` : ""
+          ].filter(Boolean).join("\n");
+          const content = this.cleanExcerpt(details, Math.max(1400, Math.floor(WEB_SEARCH_CONTEXT_CHARS / Math.min(4, grounding.results.length))));
+          return {
+            title: `Web Search: ${query} · ${result.title}`,
+            content,
+            priority: 76 - index,
+            source: result.url,
+            sourceInfo: {
+              path: result.url,
+              title: result.title,
+              type: "url" as const,
+              excerpt: (result.snippet || result.content || result.source).slice(0, 240),
+              updatedAt: Date.parse(grounding.searchedAt) || undefined,
+              trust: result.fetched ? 0.78 : 0.62
+            },
+            kind: "evidence" as const
+          };
+        });
+      }
+
+      const content = this.cleanExcerpt(grounding, WEB_SEARCH_CONTEXT_CHARS);
       return [{
         title: `Web Search: ${query}`,
         content: content || "Web search returned no readable results.",
@@ -585,13 +632,7 @@ export class ContextEngine {
         title: `Web Search: ${query}`,
         content: `Unable to search the web for this query: ${message}`,
         priority: 25,
-        source: query,
-        sourceInfo: {
-          path: `web-search:${query}`,
-          title: query,
-          type: "url",
-          excerpt: `Unable to search the web for this query: ${message}`.slice(0, 240)
-        }
+        kind: "diagnostic"
       }];
     }
   }

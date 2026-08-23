@@ -65,4 +65,9 @@ export interface InterviewPracticeData {
   question: string;
   answer: string;
   evaluation?: string;
+  scores?: Record<string, number>;
+  totalScore?: number;
+  objectiveAssessment?: string;
+  encouragement?: string;
+  nextDrill?: string;
 }

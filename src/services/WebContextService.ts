@@ -17,10 +17,28 @@ export interface WebSearchItem {
   snippet: string;
 }
 
+export type WebSearchMode = "auto" | "always" | "off";
+
+export interface WebSearchGroundingItem extends WebSearchItem {
+  query: string;
+  content: string;
+  fetched: boolean;
+}
+
+export interface WebSearchGrounding {
+  query: string;
+  queries: string[];
+  results: WebSearchGroundingItem[];
+  searchedAt: string;
+  warnings: string[];
+}
+
 export interface WebSearchOptions {
   maxResults?: number;
   fetchTopPages?: number;
   maxPageChars?: number;
+  maxQueries?: number;
+  now?: Date;
 }
 
 const DEFAULT_HEADERS: Record<string, string> = {
@@ -33,6 +51,9 @@ const URL_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_PAGE_CHARS = 6_000;
 const WEB_SEARCH_INTENT_RE = /(联网|网页|网上|上网|搜索|搜一下|帮我搜|查一下|查网页|百度|必应|谷歌|google|bing|search web|web search|look up|online|internet)/i;
 const WEB_SEARCH_CLEAN_RE = /(联网|网页|网上|上网|搜索|搜一下|帮我搜|查一下|查网页|百度|必应|谷歌|google|bing|search web|web search|look up|online|internet)/gi;
+const WEB_SEARCH_RECENCY_RE = /(最新|当前|现在|近期|最近|截至|今日|本周|本月|今年|刚刚|实时|现任|版本|价格|汇率|天气|赛程|比分|政策|法规|标准|发布|更新|新闻|latest|current|today|recent|real[ -]?time|release|version|price|weather|news)/i;
+const WEB_SEARCH_EXTERNAL_TOPIC_RE = /([A-Za-z][A-Za-z0-9._+/#-]{1,}|官网|官方|文档|产品|公司|组织|人物|政策|法规|法律|标准|版本|价格|汇率|天气|赛程|比分|新闻|论文|研究|市场|行业|API|SDK|GitHub|Obsidian|Node(?:\.js)?|Python|React)/i;
+const INTERNAL_RETRIEVAL_LINE_RE = /^(检索意图|当前项目|目标文档|本轮导入文件|项目范围|ContextMode|ContextEngine)\s*[：:].*$/gimu;
 const URL_RE = /https?:\/\/[^\s\]\)"'<>]+/g;
 
 export function extractWebUrls(message: string): string[] {
@@ -40,9 +61,27 @@ export function extractWebUrls(message: string): string[] {
   return Array.from(new Set(urls.map(stripTrailingUrlPunctuation).filter(Boolean)));
 }
 
-export function getWebSearchQuery(message: string): string | null {
-  const withoutUrls = message.replace(URL_RE, " ").replace(/\s+/g, " ").trim();
-  if (!WEB_SEARCH_INTENT_RE.test(withoutUrls)) return null;
+export function normalizeWebSearchMode(value: unknown): WebSearchMode {
+  return value === "always" || value === "off" ? value : "auto";
+}
+
+export function shouldSearchWeb(message: string, mode: WebSearchMode = "auto"): boolean {
+  const normalizedMode = normalizeWebSearchMode(mode);
+  if (normalizedMode === "off") return false;
+  const prompt = sanitizeSearchPrompt(message);
+  if (prompt.length < 2) return false;
+  if (normalizedMode === "always") return true;
+  if (WEB_SEARCH_INTENT_RE.test(prompt)) return true;
+  return WEB_SEARCH_RECENCY_RE.test(prompt) && WEB_SEARCH_EXTERNAL_TOPIC_RE.test(prompt);
+}
+
+export function getWebSearchQuery(
+  message: string,
+  options: { mode?: WebSearchMode; force?: boolean } = {}
+): string | null {
+  const mode = options.force ? "always" : normalizeWebSearchMode(options.mode);
+  const withoutUrls = sanitizeSearchPrompt(message);
+  if (!shouldSearchWeb(withoutUrls, mode)) return null;
   const query = withoutUrls
     .replace(WEB_SEARCH_CLEAN_RE, " ")
     .replace(/^(请|帮我|麻烦|能不能|可以)?\s*(一下|一下子)?/u, " ")
@@ -50,6 +89,28 @@ export function getWebSearchQuery(message: string): string | null {
     .replace(/\s+/g, " ")
     .trim();
   return query.length >= 2 ? query.slice(0, 120) : null;
+}
+
+export function planWebSearchQueries(
+  message: string,
+  options: { mode?: WebSearchMode; maxQueries?: number; now?: Date } = {}
+): string[] {
+  const mode = normalizeWebSearchMode(options.mode ?? "always");
+  const base = getWebSearchQuery(message, { mode });
+  if (!base) return [];
+  const maxQueries = Math.max(1, Math.min(options.maxQueries ?? 2, 3));
+  const candidates = [base];
+  const year = (options.now ?? new Date()).getUTCFullYear();
+
+  if (maxQueries > 1 && /(?:API|SDK|文档|版本|发布|更新|release|version|documentation|docs)/i.test(base)) {
+    candidates.push(`${base} 官方文档`);
+  } else if (maxQueries > 1 && WEB_SEARCH_RECENCY_RE.test(base) && !/\b20\d{2}\b/.test(base)) {
+    candidates.push(`${base} ${year}`);
+  } else if (maxQueries > 1 && /(?:对比|比较|区别|差异|\bvs\.?\b| versus )/i.test(base)) {
+    candidates.push(`${base} 官方来源`);
+  }
+
+  return uniqueStrings(candidates.map(normalizeSearchQuery)).slice(0, maxQueries);
 }
 
 export async function fetchReadableUrl(
@@ -77,41 +138,154 @@ export async function searchWebAsMarkdown(
   request: WebContextRequest,
   options: WebSearchOptions = {}
 ): Promise<string> {
-  const cleanQuery = query.replace(/\s+/g, " ").trim().slice(0, 120);
-  if (!cleanQuery) return "Web search skipped: empty query.";
+  return formatWebSearchGroundingMarkdown(await searchWebGrounding(query, request, options));
+}
+
+export async function searchWebGrounding(
+  query: string,
+  request: WebContextRequest,
+  options: WebSearchOptions = {}
+): Promise<WebSearchGrounding> {
+  const cleanQuery = normalizeSearchQuery(query);
+  const now = options.now ?? new Date();
+  const empty: WebSearchGrounding = {
+    query: cleanQuery,
+    queries: [],
+    results: [],
+    searchedAt: now.toISOString(),
+    warnings: cleanQuery ? [] : ["Web search skipped: empty query."]
+  };
+  if (!cleanQuery) return empty;
 
   const maxResults = Math.max(1, Math.min(options.maxResults ?? 5, 8));
   const fetchTopPages = Math.max(0, Math.min(options.fetchTopPages ?? 2, 3));
   const maxPageChars = Math.max(800, Math.min(options.maxPageChars ?? DEFAULT_MAX_PAGE_CHARS, 12_000));
-  const results = await searchWebResults(cleanQuery, request, maxResults);
-  if (results.length === 0) {
-    return `Web search query: ${cleanQuery}\nNo readable search results were returned.`;
-  }
+  const queries = planWebSearchQueries(cleanQuery, {
+    mode: "always",
+    maxQueries: options.maxQueries ?? 2,
+    now
+  });
+  const warnings: string[] = [];
+  const batches = await Promise.all(queries.map(async (plannedQuery) => {
+    const items = await searchWebResults(plannedQuery, request, maxResults);
+    if (items.length === 0) warnings.push(`No readable search results were returned for: ${plannedQuery}`);
+    return items.map((item) => ({ ...item, query: plannedQuery }));
+  }));
+  const ranked = rankSearchItems(dedupeGroundingItems(batches.flat())).slice(0, maxResults);
 
-  const lines = [
-    `Web search query: ${cleanQuery}`,
-    "",
-    "Search results:",
-    ...results.map((item, index) => `${index + 1}. ${item.title}\n   ${item.url}\n   ${item.snippet || item.source}`)
-  ];
-
-  const pageSnapshots: string[] = [];
-  for (const item of results.slice(0, fetchTopPages)) {
+  const fetchedPages = await Promise.all(ranked.slice(0, fetchTopPages).map(async (item) => {
     try {
-      const pageText = await fetchReadableUrl(item.url, request, maxPageChars);
-      if (pageText.trim()) {
-        pageSnapshots.push(`### ${item.title}\n${pageText}`);
-      }
+      return { url: item.url, content: await fetchReadableUrl(item.url, request, maxPageChars), warning: "" };
     } catch (error) {
-      pageSnapshots.push(`### ${item.title}\nSource: ${item.url}\nUnable to read this result page: ${errorMessage(error)}`);
+      return {
+        url: item.url,
+        content: "",
+        warning: `Unable to read ${item.url}: ${errorMessage(error)}`
+      };
     }
+  }));
+  const fetchedByUrl = new Map(fetchedPages.map((item) => [item.url, item]));
+  for (const page of fetchedPages) {
+    if (page.warning) warnings.push(page.warning);
   }
 
-  if (pageSnapshots.length > 0) {
-    lines.push("", "Result page snapshots:", pageSnapshots.join("\n\n"));
-  }
+  return {
+    query: cleanQuery,
+    queries,
+    searchedAt: now.toISOString(),
+    warnings: uniqueStrings(warnings),
+    results: ranked.map((item) => {
+      const page = fetchedByUrl.get(item.url);
+      return {
+        ...item,
+        content: page?.content ?? "",
+        fetched: Boolean(page?.content.trim())
+      };
+    })
+  };
+}
 
+export function formatWebSearchGroundingMarkdown(grounding: WebSearchGrounding): string {
+  if (!grounding.query) return grounding.warnings[0] ?? "Web search skipped: empty query.";
+  if (grounding.results.length === 0) {
+    return [`Web search query: ${grounding.query}`, ...grounding.warnings].join("\n");
+  }
+  const lines = [
+    `Web search query: ${grounding.query}`,
+    grounding.queries.length > 1 ? `Executed queries: ${grounding.queries.join(" | ")}` : "",
+    `Searched at: ${grounding.searchedAt}`,
+    "",
+    "Search results:"
+  ].filter(Boolean);
+  for (const [index, item] of grounding.results.entries()) {
+    lines.push(`${index + 1}. ${item.title}\n   ${item.url}\n   ${item.snippet || item.source}`);
+    if (item.content) lines.push(`\n### ${item.title}\n${item.content}`);
+  }
+  if (grounding.warnings.length > 0) lines.push("", `Warnings: ${grounding.warnings.join(" | ")}`);
   return lines.join("\n").trim();
+}
+
+function sanitizeSearchPrompt(message: string): string {
+  return String(message || "")
+    .replace(INTERNAL_RETRIEVAL_LINE_RE, " ")
+    .replace(URL_RE, " ")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeSearchQuery(query: string): string {
+  return String(query || "")
+    .replace(INTERNAL_RETRIEVAL_LINE_RE, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+}
+
+function dedupeGroundingItems<T extends WebSearchItem & { query: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const item of items) {
+    const key = canonicalUrl(item.url);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+function rankSearchItems<T extends WebSearchItem>(items: T[]): T[] {
+  return items
+    .map((item, index) => ({ item, index, score: sourceQualityScore(item) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map(({ item }) => item);
+}
+
+function sourceQualityScore(item: WebSearchItem): number {
+  let score = 0;
+  try {
+    const hostname = new URL(item.url).hostname.toLowerCase();
+    if (/\.(gov|edu)(\.[a-z]{2})?$/.test(hostname) || /\.gov\.cn$/.test(hostname)) score += 5;
+    if (/^(docs?|developer|developers|support|help)\./.test(hostname)) score += 3;
+    if (/github\.com$/.test(hostname)) score += 2;
+  } catch {
+    return score;
+  }
+  if (/(官方|official|documentation|developer docs|reference)/i.test(`${item.title} ${item.snippet}`)) score += 3;
+  if (item.snippet.trim().length >= 40) score += 1;
+  return score;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const normalized = value.trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(normalized);
+  }
+  return result;
 }
 
 async function searchWebResults(query: string, request: WebContextRequest, maxResults: number): Promise<WebSearchItem[]> {

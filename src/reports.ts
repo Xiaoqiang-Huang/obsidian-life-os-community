@@ -1,4 +1,4 @@
-import { Component, MarkdownRenderer, Modal, Notice, TFile, type App, type TAbstractFile } from "obsidian";
+import { Component, Modal, Notice, TFile, type App, type TAbstractFile } from "obsidian";
 import type { IPlugin } from "./plugin-api";
 import { buildSystemPrompt } from "./ai";
 import { getExamChatModeLabel, getExamProfileLabel } from "./settings";
@@ -7,6 +7,7 @@ import { listExamFiles, parseFrontmatter } from "./exam/data";
 import { markLifeOsLeaf } from "./lifeos-shell";
 import { requireProFeature } from "./licensing/entitlement";
 import { applyWritebackItems, openWritebackPreview, type WritebackItem } from "./writeback-preview";
+import { renderMarkdownDisplay } from "./utils/markdown-render";
 
 // ── 报告生成器 ──
 
@@ -410,11 +411,12 @@ class EmotionTrackingModal extends Modal {
     const analysisSection = contentEl.createDiv({ cls: "pls-section" });
     analysisSection.createEl("h3", { text: "AI 分析" });
     const body = analysisSection.createDiv();
-    void MarkdownRenderer.renderMarkdown(
-      this.analysis,
+    void renderMarkdownDisplay(
+      this.app,
+      this.mdComponent,
       body,
-      this.entries[0]?.file.path ?? "",
-      this.mdComponent
+      this.analysis,
+      this.entries[0]?.file.path ?? ""
     );
   }
 
@@ -700,7 +702,7 @@ class DiarySearchModal extends Modal {
     // Fallback: display as markdown
     resultsEl.empty();
     if (response.ok && response.text) {
-      void MarkdownRenderer.renderMarkdown(response.text, resultsEl, "", this.mdComponent);
+      void renderMarkdownDisplay(this.app, this.mdComponent, resultsEl, response.text);
     } else {
       resultsEl.createEl("p", { text: "搜索失败，请重试。" });
     }
@@ -721,7 +723,13 @@ class DiarySearchModal extends Modal {
     for (const result of results.slice(0, 20)) {
       const card = resultsEl.createDiv({ cls: "pls-card" });
       card.createEl("strong", { text: `${result.date} [${result.relevance}]` });
-      card.createEl("p", { text: result.answer, cls: "pls-muted" });
+      renderMarkdownDisplay(
+        this.app,
+        this.mdComponent,
+        card.createDiv({ cls: "pls-muted" }),
+        result.answer,
+        result.file?.path ?? ""
+      );
       if (result.file) {
         card.createEl("button", { text: "打开日记" }).onclick = () => {
           void this.app.workspace.getLeaf(false).openFile(result.file!);

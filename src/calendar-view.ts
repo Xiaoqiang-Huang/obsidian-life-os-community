@@ -1,8 +1,9 @@
-import { App, Component, ItemView, MarkdownRenderer, Modal, Notice, TFile, WorkspaceLeaf } from "obsidian";
+import { App, Component, ItemView, Modal, Notice, TFile, WorkspaceLeaf } from "obsidian";
 import { CALENDAR_VIEW_TYPE } from "./constants";
 import type { IPlugin } from "./plugin-api";
 import { formatDate } from "./utils";
 import { createLifeOsShell } from "./lifeos-shell";
+import { renderMarkdownDisplay } from "./utils/markdown-render";
 
 interface DayData {
   diary: boolean;
@@ -244,7 +245,7 @@ class DayDetailModal extends Modal {
       if (markdown) {
         const section = contentEl.createDiv({ cls: "pls-calendar-detail-section" });
         const contentArea = section.createDiv({ cls: "pls-calendar-detail-content" });
-        await MarkdownRenderer.render(this.app, markdown, contentArea, diaryFile.path, comp);
+        await renderMarkdownDisplay(this.app, comp, contentArea, markdown, diaryFile.path);
       }
     } else if (!this.data || (!this.data.diary && !this.data.checkin && this.data.tasks === 0 && this.data.studyTasks === 0)) {
       contentEl.createEl("p", { text: "当日无记录", cls: "pls-muted" });
@@ -258,7 +259,7 @@ class DayDetailModal extends Modal {
         const section = contentEl.createDiv({ cls: "pls-calendar-detail-section" });
         section.createEl("h3", { text: "📅 学习打卡" });
         const checkinArea = section.createDiv({ cls: "pls-calendar-detail-content" });
-        await MarkdownRenderer.render(this.app, markdown, checkinArea, checkinFile.path, comp);
+        await renderMarkdownDisplay(this.app, comp, checkinArea, markdown, checkinFile.path);
       }
     }
   }

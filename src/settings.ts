@@ -1,5 +1,5 @@
 import type { LicenseStateSnapshot } from "./licensing/license-types";
-import type { AiSkillCustomCategory, ImportedAiSkillRecord } from "./services/AiSkillService";
+import type { AiSkillCustomCategory, AiSkillOverride, ImportedAiSkillRecord } from "./services/AiSkillService";
 
 export type AiProviderType =
   | "auto"
@@ -72,10 +72,53 @@ export type AssistantStyle =
 export type AssistantVerbosity = "brief" | "normal" | "detailed";
 export type ChatMode = "chat" | "diary" | "review" | "exam";
 export type ChatContextMode = "smart" | "semantic" | "global";
+export type WebSearchMode = "auto" | "always" | "off";
 export type ChatSendBehavior = "enterToSend" | "modEnterToSend";
+export type ChatWritebackMode = "off" | "confirm" | "explicit-auto";
+export type WeixinBotPermission = "read-only" | "confirm" | "explicit-auto";
+export type WeixinSenderPolicy = "pairing" | "allowlist" | "open";
+
+export interface WeixinApprovedSender {
+  key: string;
+  accountId: string;
+  senderId: string;
+  label: string;
+  approvedAt: string;
+}
+
+export interface WeixinPairingRecord {
+  code: string;
+  accountId: string;
+  senderId: string;
+  senderName: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface WeixinConversationRoute {
+  conversationKey: string;
+  projectId: string;
+  updatedAt: string;
+}
+
+export interface WeixinReminderRoute {
+  ref: string;
+  accountId: string;
+  conversationId: string;
+  threadId: string;
+  senderId: string;
+  senderName: string;
+  updatedAt: string;
+}
 export type AiReasoningEffort = "default" | "low" | "medium" | "high" | "max";
 export type PdfOcrEngine = "auto" | "tesseract" | "paddle";
 export type ThemePreset = "cool" | "dark-tech" | "wabi" | "pastel";
+
+export function normalizeChatWritebackMode(value: unknown, legacyAutoApply = false): ChatWritebackMode {
+  if (value === "confirm" || value === "explicit-auto" || value === "off") return value;
+  return legacyAutoApply ? "confirm" : "off";
+}
+
 export const THEME_STYLES = [
   "minimal-warm",
   "soft-saas",
@@ -486,15 +529,19 @@ export interface PersonalLifeSystemSettings {
   assistantCustomPrompt: string;
   defaultChatMode: ChatMode;
   defaultChatContextMode: ChatContextMode;
+  defaultWebSearchMode: WebSearchMode;
   defaultAiSkillIds: string[];
   inlineAiSkillIds: string[];
   importedAiSkills: ImportedAiSkillRecord[];
   customAiSkillCategories: AiSkillCustomCategory[];
+  aiSkillOverrides: AiSkillOverride[];
   /** @deprecated use defaultAiSkillIds */
   defaultAiSkillId: string;
   lastTaskDraft: TaskFormDraft | null;
   chatSendBehavior: ChatSendBehavior;
   chatDefaultAiReply: boolean;
+  chatWritebackMode: ChatWritebackMode;
+  /** @deprecated use chatWritebackMode */
   autoApplyChatToDaily: boolean;
   autoReviewEnabled: boolean;
   autoReviewTime: string;
@@ -510,6 +557,19 @@ export interface PersonalLifeSystemSettings {
   browserCaptureSetupVersion: number;
   browserCapturePort: number;
   browserCaptureToken: string;
+  weixinBotEnabled: boolean;
+  weixinBotSetupVersion: number;
+  weixinSenderPolicy: WeixinSenderPolicy;
+  weixinPermissionMode: WeixinBotPermission;
+  weixinCaptureToDailyEnabled: boolean;
+  weixinDailyDigestEnabled: boolean;
+  weixinDailyDigestCatchUp: boolean;
+  weixinDefaultProjectId: string;
+  weixinApprovedSenders: WeixinApprovedSender[];
+  weixinAllowedGroups: string[];
+  weixinPendingPairings: WeixinPairingRecord[];
+  weixinConversationRoutes: WeixinConversationRoute[];
+  weixinReminderRoutes: WeixinReminderRoute[];
   licenseApiBaseUrl: string;
   licenseInstallationId: string;
   licenseEmail: string;
@@ -530,6 +590,112 @@ export function normalizeThemeStyle(value: string | undefined | null): ThemeStyl
 export function normalizeBrowserCapturePort(value: unknown): number {
   const port = Math.floor(Number(value));
   return Number.isFinite(port) && port >= 1024 && port <= 65535 ? port : 27183;
+}
+
+export function normalizeWeixinSenderPolicy(value: unknown): WeixinSenderPolicy {
+  return value === "allowlist" || value === "open" || value === "pairing" ? value : "pairing";
+}
+
+export function normalizeWeixinPermission(value: unknown): WeixinBotPermission {
+  return value === "confirm" || value === "explicit-auto" || value === "read-only" ? value : "confirm";
+}
+
+function legacyBotChannel(value: unknown): "qqbot" | "weixin" {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "weixin" || normalized === "wechat" || normalized === "openclaw-weixin"
+    ? "weixin"
+    : "qqbot";
+}
+
+export function normalizeWeixinApprovedSenders(value: unknown): WeixinApprovedSender[] {
+  if (!Array.isArray(value)) return [];
+  const result = new Map<string, WeixinApprovedSender>();
+  value.forEach((item) => {
+    if (!item || typeof item !== "object") return;
+    const record = item as Record<string, unknown>;
+    if (record.channel !== undefined && legacyBotChannel(record.channel) !== "weixin") return;
+    const accountId = String(record.accountId || "").trim().slice(0, 240);
+    const senderId = String(record.senderId || "").trim().slice(0, 240);
+    const explicitKey = String(record.key || "").trim().slice(0, 500);
+    if (explicitKey.toLowerCase().startsWith("qqbot:")) return;
+    const key = explicitKey || (senderId ? ["weixin", accountId || "default", senderId].join(":") : "");
+    if (!key || !senderId) return;
+    result.set(key, {
+      key,
+      accountId,
+      senderId,
+      label: String(record.label || "").trim().slice(0, 120),
+      approvedAt: String(record.approvedAt || "").trim() || new Date().toISOString()
+    });
+  });
+  return Array.from(result.values()).slice(0, 500);
+}
+
+export function normalizeWeixinPendingPairings(value: unknown): WeixinPairingRecord[] {
+  if (!Array.isArray(value)) return [];
+  const now = Date.now();
+  return value.flatMap((item): WeixinPairingRecord[] => {
+    if (!item || typeof item !== "object") return [];
+    const record = item as Record<string, unknown>;
+    if (record.channel !== undefined && legacyBotChannel(record.channel) !== "weixin") return [];
+    const code = String(record.code || "").trim().toUpperCase().slice(0, 20);
+    const accountId = String(record.accountId || "").trim().slice(0, 240);
+    const senderId = String(record.senderId || "").trim().slice(0, 240);
+    const expiresAt = String(record.expiresAt || "").trim();
+    const expiresAtMs = Date.parse(expiresAt);
+    if (!code || !senderId || !Number.isFinite(expiresAtMs) || expiresAtMs <= now) return [];
+    return [{
+      code,
+      accountId,
+      senderId,
+      senderName: String(record.senderName || "").trim().slice(0, 120),
+      createdAt: String(record.createdAt || "").trim() || new Date().toISOString(),
+      expiresAt
+    }];
+  }).slice(0, 200);
+}
+
+export function normalizeWeixinConversationRoutes(value: unknown): WeixinConversationRoute[] {
+  if (!Array.isArray(value)) return [];
+  const result = new Map<string, WeixinConversationRoute>();
+  value.forEach((item) => {
+    if (!item || typeof item !== "object") return;
+    const record = item as Record<string, unknown>;
+    const conversationKey = String(record.conversationKey || "").trim().slice(0, 500);
+    if (conversationKey.toLowerCase().startsWith("qqbot:")) return;
+    const projectId = String(record.projectId || "").trim().slice(0, 240);
+    if (!conversationKey || !projectId) return;
+    result.set(conversationKey, {
+      conversationKey,
+      projectId,
+      updatedAt: String(record.updatedAt || "").trim() || new Date().toISOString()
+    });
+  });
+  return Array.from(result.values()).slice(0, 1000);
+}
+
+export function normalizeWeixinReminderRoutes(value: unknown): WeixinReminderRoute[] {
+  if (!Array.isArray(value)) return [];
+  const result = new Map<string, WeixinReminderRoute>();
+  value.forEach((item) => {
+    if (!item || typeof item !== "object") return;
+    const record = item as Record<string, unknown>;
+    const ref = String(record.ref || "").trim().slice(0, 80);
+    const accountId = String(record.accountId || "").trim().slice(0, 240);
+    const conversationId = String(record.conversationId || "").trim().slice(0, 300);
+    const senderId = String(record.senderId || "").trim().slice(0, 240);
+    if (!/^WXR-[0-9a-f]{16}$/iu.test(ref) || !conversationId || !senderId) return;
+    result.set(ref, {
+      ref: ref.toUpperCase(),
+      accountId,
+      conversationId,
+      threadId: String(record.threadId || "").trim().slice(0, 240),
+      senderId,
+      senderName: String(record.senderName || "").trim().slice(0, 120),
+      updatedAt: String(record.updatedAt || "").trim() || new Date().toISOString()
+    });
+  });
+  return Array.from(result.values()).slice(-1000);
 }
 
 export function normalizePdfOcrEngine(value: unknown): PdfOcrEngine {
@@ -1001,14 +1167,17 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   assistantCustomPrompt: "",
   defaultChatMode: "chat",
   defaultChatContextMode: "smart",
+  defaultWebSearchMode: "auto",
   defaultAiSkillIds: ["lifeos-general"],
   inlineAiSkillIds: ["lifeos-general"],
   importedAiSkills: [],
   customAiSkillCategories: [],
+  aiSkillOverrides: [],
   defaultAiSkillId: "lifeos-general",
   lastTaskDraft: null,
   chatSendBehavior: "enterToSend",
   chatDefaultAiReply: true,
+  chatWritebackMode: "off",
   autoApplyChatToDaily: false,
   autoReviewEnabled: false,
   autoReviewTime: "22:30",
@@ -1023,6 +1192,19 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   browserCaptureSetupVersion: 1,
   browserCapturePort: 27183,
   browserCaptureToken: "",
+  weixinBotEnabled: false,
+  weixinBotSetupVersion: 3,
+  weixinSenderPolicy: "pairing",
+  weixinPermissionMode: "confirm",
+  weixinCaptureToDailyEnabled: true,
+  weixinDailyDigestEnabled: true,
+  weixinDailyDigestCatchUp: true,
+  weixinDefaultProjectId: "",
+  weixinApprovedSenders: [],
+  weixinAllowedGroups: [],
+  weixinPendingPairings: [],
+  weixinConversationRoutes: [],
+  weixinReminderRoutes: [],
   licenseApiBaseUrl: "https://license.lifeoskit.com",
   licenseInstallationId: "",
   licenseEmail: "",

@@ -614,7 +614,14 @@ export class PeriodReviewService {
 
 function cleanDailyContent(content: string): string {
   const withoutFrontmatter = content.replace(/^---[\s\S]*?---\s*/m, "");
-  const withoutGeneratedArchive = withoutFrontmatter.replace(/<!-- pls-daily-archive:start -->[\s\S]*?<!-- pls-daily-archive:end -->/g, "");
+  const withoutGeneratedArchive = withoutFrontmatter
+    .replace(/<!-- lifeos-weixin-daily-inputs:start -->([\s\S]*?)<!-- lifeos-weixin-daily-inputs:end -->/g, (_block, body: string) => body
+      .split(/\r?\n/u)
+      .filter((line) => /^\s*-\s+\S/u.test(line))
+      .join("\n"))
+    .replace(/<!--\s*lifeos-weixin-input:[^>]+-->/giu, "")
+    .replace(/<!-- pls-daily-archive:start -->[\s\S]*?<!-- pls-daily-archive:end -->/g, "")
+    .replace(/<!-- lifeos-weixin-daily-digest:start -->[\s\S]*?<!-- lifeos-weixin-daily-digest:end -->/g, "");
   const lines = withoutGeneratedArchive.split(/\r?\n/);
   const cleaned = lines.filter((line) => {
     const trimmed = line.trim();

@@ -129,6 +129,7 @@ export class AiEditPopoverController {
   private streamRenderTimer: number | null = null;
   private streamStartedAt = 0;
   private generating = false;
+  private selectionPromptPending = false;
 
   constructor(
     private app: App,
@@ -161,12 +162,14 @@ export class AiEditPopoverController {
     this.editInstructions = [];
     this.editPreviewSnapshots = [];
     this.activeGenerationKind = null;
+    this.selectionPromptPending = target.kind === "selection" || target.kind === "readonly-selection";
     this.clearStreamRenderTimer();
     this.importedAiSkills = createImportedAiSkills(this.plugin.settings.importedAiSkills);
     this.selectedSkillIds = normalizeAiSkillIds(
       this.plugin.settings.inlineAiSkillIds,
       undefined,
-      this.importedAiSkills
+      this.importedAiSkills,
+      this.plugin.settings.aiSkillOverrides
     );
 
     const popoverParent = shouldOpenInPanel ? this.panelContainerEl! : document.body;
@@ -182,13 +185,6 @@ export class AiEditPopoverController {
     this.registerDismissHandlers();
     if (target.kind !== "selection" && target.kind !== "readonly-selection") {
       window.setTimeout(() => this.commandInput?.focus(), 30);
-    }
-    if (target.kind === "selection" || target.kind === "readonly-selection") {
-      window.setTimeout(() => {
-        if (this.target === target && this.popoverEl && !this.generating) {
-          void this.generateAnswer("balanced", true);
-        }
-      }, 160);
     }
   }
 
@@ -221,6 +217,7 @@ export class AiEditPopoverController {
     this.editInstructions = [];
     this.editPreviewSnapshots = [];
     this.pendingTarget = null;
+    this.selectionPromptPending = false;
     if (!options.preservePanelPreference) {
       this.stickyPanel = false;
       this.panelContainerEl = null;
@@ -232,6 +229,7 @@ export class AiEditPopoverController {
 
   private setActiveTab(tab: "answer" | "edit"): void {
     if (this.activeTab === tab || this.generating || !this.target || !this.popoverEl) return;
+    this.selectionPromptPending = false;
     this.activeTab = tab;
     const container = this.popoverEl.parentElement ?? (this.isMountedInPanel() ? this.panelContainerEl : document.body) ?? document.body;
     this.popoverEl.remove();
@@ -379,6 +377,13 @@ export class AiEditPopoverController {
     this.generateButton = null;
     this.applyButton = null;
     this.dockButton = null;
+    if (
+      this.selectionPromptPending
+      && (target.kind === "selection" || target.kind === "readonly-selection")
+    ) {
+      this.renderSelectionPrompt(popoverParent, target, shouldOpenInPanel);
+      return;
+    }
     const popover = popoverParent.createDiv({ cls: "lifeos-ai-edit-popover" });
     popover.toggleClass("is-panel", Boolean(shouldOpenInPanel));
     popover.setAttr("role", "dialog");
@@ -426,7 +431,7 @@ export class AiEditPopoverController {
     this.renderSelectionHistory(body);
     if (this.activeTab === "answer") {
       this.previewEl = body.createDiv({ cls: "lifeos-ai-edit-preview is-empty is-answer" });
-      this.previewEl.setText("正在分析选中内容...");
+      this.previewEl.setText("尚未调用 AI。输入问题后点击“回答 / 解释”，或直接点击按钮使用默认问题。");
     }
     this.renderSkillSelector(body);
     if (this.activeTab === "answer") {
@@ -436,7 +441,7 @@ export class AiEditPopoverController {
       cls: "lifeos-ai-edit-command",
       attr: {
         placeholder: this.activeTab === "answer"
-          ? "继续追问，或换一个角度解释当前内容..."
+          ? "输入你想围绕选区提问的内容；留空时将解释选中内容..."
           : target.kind === "canvas"
             ? "例如：整理布局、补充一个下一步区域、把路线改成横向流程..."
             : "输入改写指令，例如：润色这段、翻译成英文、精简到 100 字..."
@@ -517,6 +522,62 @@ export class AiEditPopoverController {
       });
       this.applyButton.onclick = () => void this.applyPreview();
     }
+  }
+
+  private renderSelectionPrompt(
+    parent: HTMLElement,
+    target: Extract<AiEditTarget, { kind: "selection" | "readonly-selection" }>,
+    shouldOpenInPanel: boolean
+  ): void {
+    const popover = parent.createDiv({ cls: "lifeos-ai-edit-popover is-selection-prompt" });
+    popover.toggleClass("is-panel", shouldOpenInPanel);
+    popover.setAttr("role", "toolbar");
+    popover.setAttr("aria-label", "选区操作");
+    this.popoverEl = popover;
+
+    const header = popover.createDiv({ cls: "lifeos-ai-edit-selection-prompt-header" });
+    const icon = header.createSpan({ cls: "lifeos-ai-edit-popover-icon" });
+    setIcon(icon, "sparkles");
+    const copy = header.createDiv({ cls: "lifeos-ai-edit-selection-prompt-copy" });
+    copy.createEl("strong", { text: "是否使用 AI？" });
+    copy.createSpan({ text: `已选中 ${target.text.trim().length} 个字符，尚未调用 AI。` });
+    const closeButton = header.createEl("button", {
+      cls: "lifeos-ai-edit-popover-close",
+      attr: { type: "button", "aria-label": "关闭选区操作" }
+    });
+    setIcon(closeButton, "x");
+    closeButton.onclick = () => this.close();
+
+    const actions = popover.createDiv({ cls: "lifeos-ai-edit-selection-prompt-actions" });
+    const editButton = actions.createEl("button", {
+      cls: "lifeos-ai-edit-action lifeos-ai-edit-action-primary",
+      text: "AI 修改",
+      attr: { type: "button" }
+    });
+    editButton.onclick = () => this.expandSelectionPrompt("edit");
+    const answerButton = actions.createEl("button", {
+      cls: "lifeos-ai-edit-action lifeos-ai-edit-action-ghost",
+      text: "围绕选区提问",
+      attr: { type: "button" }
+    });
+    answerButton.onclick = () => this.expandSelectionPrompt("answer");
+    popover.createSpan({
+      cls: "lifeos-ai-edit-selection-prompt-hint",
+      text: "复制、手动编辑或调整结构时可直接忽略，不会自动分析。"
+    });
+  }
+
+  private expandSelectionPrompt(tab: "answer" | "edit"): void {
+    if (!this.target || !this.popoverEl || this.generating) return;
+    const container = this.popoverEl.parentElement
+      ?? (this.isMountedInPanel() ? this.panelContainerEl : document.body)
+      ?? document.body;
+    this.selectionPromptPending = false;
+    this.activeTab = tab;
+    this.popoverEl.remove();
+    this.renderCurrentPopover(container);
+    this.placePopover();
+    window.setTimeout(() => this.commandInput?.focus(), 30);
   }
 
   private async generatePreview(): Promise<void> {
@@ -1234,13 +1295,14 @@ export class AiEditPopoverController {
       this.selectedSkillIds,
       this.plugin.settings.defaultAiSkillId,
       this.importedAiSkills,
-      this.plugin.settings.customAiSkillCategories
+      this.plugin.settings.customAiSkillCategories,
+      this.plugin.settings.aiSkillOverrides
     );
     return typeof maxChars === "number" ? limitPromptText(prompt, maxChars) : prompt;
   }
 
   private inlineEditSkillModeInstruction(target: AiEditTarget): string {
-    const selectedSkills = getAiSkills(this.selectedSkillIds, this.importedAiSkills);
+    const selectedSkills = getAiSkills(this.selectedSkillIds, this.importedAiSkills, this.plugin.settings.aiSkillOverrides);
     const names = selectedSkills.map((skill) => skill.name).join(" + ");
     const outputRule = target.kind === "canvas"
       ? "最终输出只能是完整 Obsidian Canvas JSON，不要解释，不要按 Skill 分段，不要添加 Markdown 代码围栏。"
@@ -1258,7 +1320,7 @@ export class AiEditPopoverController {
     const existing = this.skillPickerEl;
     if (existing) existing.remove();
 
-    const selectedSkills = getAiSkills(this.selectedSkillIds, this.importedAiSkills);
+    const selectedSkills = getAiSkills(this.selectedSkillIds, this.importedAiSkills, this.plugin.settings.aiSkillOverrides);
     const skillCategories = getAiSkillCategories(this.plugin.settings.customAiSkillCategories);
     const panel = parent.createEl("details", { cls: "lifeos-ai-edit-skill-panel" });
     this.skillPickerEl = panel;
@@ -1280,7 +1342,7 @@ export class AiEditPopoverController {
     });
 
     for (const category of skillCategories) {
-      const skills = getAiSkillsByCategory(category.id, this.importedAiSkills);
+      const skills = getAiSkillsByCategory(category.id, this.importedAiSkills, this.plugin.settings.aiSkillOverrides);
       if (skills.length === 0) continue;
       const group = groups.createDiv({ cls: "lifeos-ai-edit-skill-category" });
       const head = group.createDiv({ cls: "lifeos-ai-edit-skill-category-head" });
@@ -1302,7 +1364,7 @@ export class AiEditPopoverController {
     const next = new Set(this.selectedSkillIds);
     if (next.has(id)) next.delete(id);
     else next.add(id);
-    this.selectedSkillIds = normalizeAiSkillIds(Array.from(next), undefined, this.importedAiSkills);
+    this.selectedSkillIds = normalizeAiSkillIds(Array.from(next), undefined, this.importedAiSkills, this.plugin.settings.aiSkillOverrides);
     this.plugin.settings.inlineAiSkillIds = this.selectedSkillIds;
     void this.plugin.saveSettings();
     if (this.skillPickerEl?.parentElement) this.renderSkillSelector(this.skillPickerEl.parentElement);
@@ -1311,7 +1373,9 @@ export class AiEditPopoverController {
     if (this.activeTab === "answer" && this.target && !this.generating) {
       this.answerHistory = [];
       this.currentAnswerQuestion = "";
-      window.setTimeout(() => void this.generateAnswer(this.answerDepth, true), 60);
+      this.previewText = "";
+      this.previewEl?.addClass("is-empty");
+      this.previewEl?.setText("Skill 已更新，尚未调用 AI。点击“回答 / 解释”后再分析。");
     }
   }
 

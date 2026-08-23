@@ -2,7 +2,7 @@ import { Modal, Notice, TFile, type App } from "obsidian";
 import type { IPlugin } from "../plugin-api";
 import { buildSystemPrompt } from "../ai";
 import { requireProFeature } from "../licensing/entitlement";
-import { getCivilServiceInterviewThinkingModelPrompt } from "../settings";
+import { getCivilServiceInterviewThinkingModelPrompt, getExamProfileLabel, normalizeExamProfileType } from "../settings";
 import { formatDate } from "../utils";
 import { listExamFiles, parseFrontmatter } from "./data";
 
@@ -18,6 +18,14 @@ const EVALUATION_DIMENSIONS: Record<string, string> = {
   "求职动机与拟任职位匹配性": "报考动机、价值观、经历能力是否与岗位要求匹配。",
   "举止仪表": "现场状态是否稳重自然，仪态、语速、礼貌是否符合面试场景。",
   "专业能力": "是否体现岗位所需专业知识、业务理解和解决实际问题的能力。"
+};
+
+const GENERIC_INTERVIEW_DIMENSIONS: Record<string, string> = {
+  "内容贴合度": "是否准确回应题目要求，能否结合目标考试、材料信息或个人经历展开。",
+  "逻辑结构": "回答是否有清晰层次，能否先给判断，再展开依据、例子和结论。",
+  "表达清晰度": "语言是否简洁、准确、连贯，重点是否突出。",
+  "证据与案例": "是否使用真实经历、材料依据、项目细节或学习数据支撑观点。",
+  "改进方向": "是否能指出下一步可执行的复盘、补强或训练动作。"
 };
 
 // ── 题型指导（对齐 diary_web interview_standards.py）──
@@ -112,7 +120,7 @@ export const CATEGORY_GUIDANCE: Record<string, CategoryGuidance> = {
     timeLimitSeconds: 180,
     pitfalls: ["专业术语堆砌", "不结合岗位", "只讲技术不讲治理", "风险意识不足"],
     drill: "用公务员语境解释一个技术问题：是什么、为什么、怎么办。",
-    knowledgeTips: `专业专项题考察岗位所需专业知识和解决实际问题的能力。要点：用公务员语境解释技术问题，体现风险意识、权限边界、安全保密意识，结合岗位职责说明实务处理方案。`
+    knowledgeTips: `专业专项题考察岗位所需专业知识和解决实际问题的能力。要点：用当前备考语境解释专业问题，体现风险意识、权限边界、安全保密意识，结合目标要求说明实务处理方案。`
   }
 };
 
@@ -141,13 +149,40 @@ export async function evaluateAnswer(
 ): Promise<ScoreResult | null> {
   if (!requireProFeature(plugin, "aiExamCoach")) return null;
   const guidance = getCategoryGuidance(category);
-  const dimText = Object.entries(EVALUATION_DIMENSIONS)
+  const isCivilServiceProfile = normalizeExamProfileType(plugin.settings.examProfileType) === "civil-service";
+  const examLabel = getExamProfileLabel(plugin.settings);
+  const dimensions = isCivilServiceProfile ? EVALUATION_DIMENSIONS : GENERIC_INTERVIEW_DIMENSIONS;
+  const dimText = Object.entries(dimensions)
     .map(([name, desc]) => `- ${name}：${desc}`)
     .join("\n");
 
-  const measured = guidance.measuredElements.join("、");
-  const framework = guidance.answerFramework.join(" → ");
-  const pitfalls = guidance.pitfalls.join("、");
+  const measured = isCivilServiceProfile
+    ? guidance.measuredElements.join("、")
+    : "内容贴合度、逻辑结构、表达清晰度、证据与案例、改进方向";
+  const framework = isCivilServiceProfile
+    ? guidance.answerFramework.join(" → ")
+    : "明确题意 → 提炼要点 → 结合证据或经历 → 给出下一步";
+  const pitfalls = isCivilServiceProfile
+    ? guidance.pitfalls.join("、")
+    : "脱离题目、泛泛而谈、缺少例子、没有下一步行动";
+  const knowledgeTips = isCivilServiceProfile
+    ? guidance.knowledgeTips
+    : `${examLabel}场景下，优先评价回答是否贴合题目、是否有清晰结构、是否使用真实材料或经历支撑，并给出下一步可执行训练。`;
+  const evaluatorIntro = isCivilServiceProfile
+    ? "你是公务员结构化面试考官。请对以下面试回答进行结构化评分。"
+    : `你是${examLabel}备考面试/口述表达训练教练。请对以下练习回答进行结构化评分，不要套用公务员结构化面试身份。`;
+  const dimensionsIntro = isCivilServiceProfile
+    ? `公务员面试常见测评要素如下，请优先评价"本题重点测评要素"，并保留"言语表达能力"（每项1-10分）：`
+    : `${examLabel}练习常见测评要素如下，请优先评价"本题重点测评要素"，并保留"表达清晰度"（每项1-10分）：`;
+  const civilServiceThinkingModel = isCivilServiceProfile
+    ? `
+
+**软工拆题模型**:
+${getCivilServiceInterviewThinkingModelPrompt()}
+
+请额外判断考生是否按“输入问题-处理实操-输出闭环”拆题：输入端是否说明现实矛盾和政策背景，处理端是否讲清运转机制，输出端是否落到群众、基层和长期治理结果。
+`
+    : "";
 
   const response = await plugin.ai.complete({
     responseFormat: "json",
@@ -155,7 +190,7 @@ export async function evaluateAnswer(
       { role: "system", content: buildSystemPrompt(plugin.settings) },
       {
         role: "user",
-        content: `你是公务员结构化面试考官。请对以下面试回答进行结构化评分。
+        content: `${evaluatorIntro}
 
 **题型**: ${guidance.name}
 **本题重点测评要素**: ${measured}
@@ -163,14 +198,9 @@ export async function evaluateAnswer(
 **常见失分点**: ${pitfalls}
 
 **参考知识**:
-${guidance.knowledgeTips}
+${knowledgeTips}${civilServiceThinkingModel}
 
-**软工拆题模型**:
-${getCivilServiceInterviewThinkingModelPrompt()}
-
-请额外判断考生是否按“输入问题-处理实操-输出闭环”拆题：输入端是否说明现实矛盾和政策背景，处理端是否讲清运转机制，输出端是否落到群众、基层和长期治理结果。
-
-公务员面试常见测评要素如下，请优先评价"本题重点测评要素"，并保留"言语表达能力"（每项1-10分）：
+${dimensionsIntro}
 ${dimText}
 
 **题目**: ${question}
@@ -361,7 +391,7 @@ export const IMPROVEMENT_TIPS: Record<string, string[]> = {
   "自我情绪控制": ["练习深呼吸冷静技巧", "限制作答时间训练抗压", "准备应对质疑的过渡话术"],
   "求职动机与拟任职位匹配性": ["深入研究目标岗位职责", "整理个人经历与岗位的匹配点", "表达服务意识和长期承诺"],
   "举止仪表": ["对着镜子练习仪态", "控制语速和手势", "录音回听检查语调和停顿"],
-  "专业能力": ["用公务员语境解释技术问题", "关注岗位相关的政策法规", "练习\"是什么-为什么-怎么办\"表达"]
+  "专业能力": ["用当前备考语境解释专业问题", "关注目标方向相关的规则要求", "练习\"是什么-为什么-怎么办\"表达"]
 };
 
 export function analyzeWeaknesses(records: EvalRecord[]): {

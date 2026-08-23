@@ -1,5 +1,9 @@
+import type { WebSearchGrounding } from "../WebContextService";
+
 export type ContextEngineMode = "local" | "vector" | "graph";
 export type ChatContextMode = "smart" | "semantic" | "global";
+export type WebSearchMode = "auto" | "always" | "off";
+export type WebSearchProviderResult = string | WebSearchGrounding;
 
 export interface ContextEngineBuildInput {
   userMessage: string;
@@ -9,7 +13,9 @@ export interface ContextEngineBuildInput {
   maxChars?: number;
   projectScopeId?: string;
   fetchUrl?: (url: string) => Promise<string>;
-  searchWeb?: (query: string) => Promise<string>;
+  searchWeb?: (query: string) => Promise<WebSearchProviderResult>;
+  webSearchMode?: WebSearchMode;
+  webSearchQuery?: string;
   /** AI is optional for query planning; local hybrid retrieval never depends on it. */
   useAiPlanner?: boolean;
 }
