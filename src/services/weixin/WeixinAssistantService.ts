@@ -15,7 +15,9 @@ import {
   getAvailableAiSkills,
   type AiSkill
 } from "../AiSkillService";
-import { ChatContextService } from "../ChatContextService";
+import { ChatContextService, type ChatContextBundle } from "../ChatContextService";
+import { redactWorkspaceSecrets } from "../ai-workspace/logic";
+import { CitationVerifierService } from "../context-engine/CitationVerifierService";
 import { DailyNoteService } from "../DailyNoteService";
 import { FileSystemService } from "../FileSystemService";
 import { parseChatMarkdown, serializeChatMarkdown } from "../lifeos-logic";
@@ -40,8 +42,22 @@ import {
   simpleLlmWikiHash,
   slugifyLlmWikiTitle
 } from "../llm-wiki-logic";
-import { redactWorkspaceSecrets } from "../ai-workspace/logic";
 import { WeixinReminderService } from "./WeixinReminderService";
+import { WeixinConversationStateService } from "./WeixinConversationStateService";
+import { WeixinInboundQueueService, type WeixinRecoveredMessage } from "./WeixinInboundQueueService";
+import {
+  allWeixinEvidenceUnavailable,
+  buildWeixinStandaloneQuery,
+  extractWeixinUserConstraints,
+  isWeixinContextDependentFollowUp,
+  isWeixinLinkSaveIntent,
+  isWeixinProjectRelevantQuery,
+  parseWeixinLinkDestination,
+  resolveWeixinConversationSkillIds,
+  resolveWeixinLinkFollowUp,
+  shouldReuseWeixinImages,
+  unselectedWeixinSkillMentions
+} from "./WeixinConversationLogic";
 import {
   WeixinDailyJournalService,
   weixinLocalDate,
@@ -128,9 +144,11 @@ export interface WeixinAutomaticDailyDigestResult {
 const PAIRING_TTL_MS = 15 * 60 * 1000;
 const WRITEBACK_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_HISTORY_MESSAGES = 8;
-const MAX_HISTORY_CHARS = 14_000;
+const MAX_HISTORY_CHARS = 8_000;
 const PENDING_IMAGE_TTL_MS = 15 * 60 * 1000;
 const MAX_PENDING_IMAGES = 4;
+const MAX_WEIXIN_CONTEXT_CHARS = 20_000;
+const VISION_MODEL_PATTERN = /(?:^|[._/-])(?:vision|vl|image|multimodal|ocr)(?:$|[._/-])/iu;
 
 interface WeixinSemanticRoute {
   action: WeixinLifeOSAction | null;
@@ -138,12 +156,24 @@ interface WeixinSemanticRoute {
   query: string;
 }
 
+interface WeixinAnswerReview {
+  supported: boolean;
+  unsupportedClaims: string[];
+  methodAdherent: boolean;
+  constraintsRespected: boolean;
+  qualityIssues: string[];
+}
+
 export class WeixinAssistantService {
   private readonly fs: FileSystemService;
   private readonly projects: ProjectService;
   private readonly reminders: WeixinReminderService;
   private readonly dailyJournal: WeixinDailyJournalService;
+  private readonly conversationState: WeixinConversationStateService;
+  private readonly inboundQueue: WeixinInboundQueueService;
   private readonly pendingImages = new WeixinPendingImageStore(MAX_PENDING_IMAGES, PENDING_IMAGE_TTL_MS);
+  private readonly messageLocks = new Map<string, Promise<WeixinAssistantResponse>>();
+  private textModelCache: { key: string; model?: string } | null = null;
 
   constructor(
     private app: App,
@@ -155,6 +185,8 @@ export class WeixinAssistantService {
     this.projects = new ProjectService(app, this.fs);
     this.reminders = new WeixinReminderService(app, this.fs);
     this.dailyJournal = new WeixinDailyJournalService(app, this.fs, settings);
+    this.conversationState = new WeixinConversationStateService(app, this.fs);
+    this.inboundQueue = new WeixinInboundQueueService(app, this.fs);
   }
 
   async handleMessage(request: WeixinInboundRequest): Promise<WeixinAssistantResponse> {
@@ -179,10 +211,69 @@ export class WeixinAssistantService {
       }
       return { reply: "此账号不在 Life OS 允许列表中。请由 Vault 所有者在设置里授权。" };
     }
+    const key = [request.accountId || "default", request.messageId].join("\u001f");
+    const active = this.messageLocks.get(key);
+    if (active) return active;
+    const operation = this.handleDurableMessage(request);
+    this.messageLocks.set(key, operation);
+    try {
+      return await operation;
+    } finally {
+      if (this.messageLocks.get(key) === operation) this.messageLocks.delete(key);
+    }
+  }
+
+  async stageInboundMessage(request: WeixinInboundRequest): Promise<WeixinInboundRequest> {
+    const access = evaluateWeixinAccess({
+      senderPolicy: this.settings.weixinSenderPolicy,
+      approvedSenders: this.settings.weixinApprovedSenders,
+      allowedGroups: this.settings.weixinAllowedGroups
+    }, request);
+    if (!access.allowed) return request;
+    const durableRequest = await this.conversationState.prepareInbound(request);
+    await this.inboundQueue.stage(durableRequest);
+    return durableRequest;
+  }
+
+  private async handleDurableMessage(request: WeixinInboundRequest): Promise<WeixinAssistantResponse> {
+    const durableRequest = await this.stageInboundMessage(request);
+    const staged = await this.inboundQueue.stage(durableRequest);
+    if ((staged.status === "responded" || staged.status === "delivered") && staged.response) {
+      return staged.response;
+    }
+    await this.inboundQueue.markProcessing(durableRequest);
+    try {
+      const response = await this.processAuthorizedMessage(durableRequest);
+      await this.inboundQueue.markResponded(durableRequest, response);
+      return response;
+    } catch (error) {
+      await this.inboundQueue.markDeliveryFailed(durableRequest, error).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async markMessageDelivered(request: WeixinInboundRequest): Promise<void> {
+    await this.inboundQueue.markDelivered(request);
+  }
+
+  async markMessageDeliveryFailed(request: WeixinInboundRequest, error: unknown): Promise<void> {
+    await this.inboundQueue.markDeliveryFailed(request, error);
+  }
+
+  async recoverPendingMessages(accountId = ""): Promise<WeixinRecoveredMessage[]> {
+    const recovered: WeixinRecoveredMessage[] = [];
+    for (const entry of await this.inboundQueue.recover(accountId)) {
+      const hydrated = await this.conversationState.hydratePersistedMedia(entry.request);
+      const response = entry.response || await this.handleMessage(hydrated);
+      recovered.push({ request: hydrated, response });
+    }
+    return recovered;
+  }
+
+  private async processAuthorizedMessage(request: WeixinInboundRequest): Promise<WeixinAssistantResponse> {
     // Persist only traffic that has passed the Life OS access policy. Pairing
     // probes and rejected group traffic must not become hidden Vault content.
     const proactiveRouteRef = request.isGroup ? "" : await this.ensureReminderRoute(request);
-    await this.stageInbound(request);
     try {
       await this.dailyJournal.captureInput(request, proactiveRouteRef);
     } catch (error) {
@@ -203,7 +294,7 @@ export class WeixinAssistantService {
         reply: [
           `已收到 ${receivedImages} 张图片，当前共暂存 ${count} 张。`,
           "请继续发送一段文字说明要做什么；下一条消息会自动带上这些图片。",
-          "如果不想继续处理，直接说“取消图片”即可。图片 15 分钟后自动失效。"
+          "如果不想继续处理，直接说“取消图片”即可。图片会作为当前会话附件保存，之后仍可说“用另一种方法解前面那道题”。"
         ].join("\n")
       };
     }
@@ -235,12 +326,20 @@ export class WeixinAssistantService {
       return this.handleCommand(request, earlyCommand.name, earlyCommand.args);
     }
     if (earlyCommand?.name === "new") this.clearPendingImagesForRequest(request);
-    const effectiveRequest = weixinCommandKeepsPendingImages(request.content)
+    let effectiveRequest = weixinCommandKeepsPendingImages(request.content)
       ? request
       : this.consumePendingImages(request);
+    const history = await this.loadConversation(effectiveRequest);
+    const durableState = await this.conversationState.load(effectiveRequest);
 
     const availableSkills = this.availableSkills();
     let skillInvocation = parseWeixinSkillInvocation(effectiveRequest.content, availableSkills);
+    if (
+      getWeixinImageContentParts(effectiveRequest.media).length === 0
+      && shouldReuseWeixinImages(effectiveRequest.content, Boolean(skillInvocation))
+    ) {
+      effectiveRequest = await this.conversationState.hydrateRecentImages(effectiveRequest);
+    }
     if (skillInvocation?.error === "ambiguous") {
       skillInvocation = await this.resolveAmbiguousSkillInvocation(effectiveRequest, skillInvocation, availableSkills);
     }
@@ -262,7 +361,27 @@ export class WeixinAssistantService {
       return { reply: `已识别 Skill：${skill?.name || skillInvocation.keyword}。请继续写问题，例如：“用${skill?.name || skillInvocation.keyword}的方法解释这个概念”。` };
     }
 
-    const action = parseWeixinLifeOSAction(effectiveRequest.content);
+    let action = parseWeixinLifeOSAction(effectiveRequest.content);
+    const linkFollowUp = resolveWeixinLinkFollowUp(
+      effectiveRequest.content,
+      history,
+      durableState.pendingOperation?.kind === "link-save" ? durableState.pendingOperation : null
+    );
+    if (!action && linkFollowUp) {
+      action = { kind: "link-save", ...linkFollowUp, source: "natural" };
+      await this.conversationState.clearPendingOperation(effectiveRequest);
+    } else if (action?.kind === "link-save") {
+      action = { ...action, collection: action.collection || parseWeixinLinkDestination(effectiveRequest.content) || undefined };
+      await this.conversationState.clearPendingOperation(effectiveRequest);
+    } else if (!action && isWeixinLinkSaveIntent(effectiveRequest.content)) {
+      await this.conversationState.setPendingOperation(effectiveRequest, {
+        kind: "link-save",
+        url: "",
+        title: "",
+        collection: parseWeixinLinkDestination(effectiveRequest.content)
+      });
+      return { reply: "我知道你想收藏一个链接，但当前消息和最近对话里都没有可用网址。请把链接发给我；下一条会自动接续这次收藏，不用重复说明。" };
+    }
     if (action) {
       const result = await this.handleLifeOSAction(effectiveRequest, action);
       result.conversationPath = await this.recordOperationalConversation(effectiveRequest, result.reply);
@@ -280,29 +399,44 @@ export class WeixinAssistantService {
       result.conversationPath = await this.recordOperationalConversation(effectiveRequest, result.reply);
       return result;
     }
+    if (
+      semanticRoute?.skillIds.length
+      && getWeixinImageContentParts(effectiveRequest.media).length === 0
+      && shouldReuseWeixinImages(effectiveRequest.content, true)
+    ) {
+      effectiveRequest = await this.conversationState.hydrateRecentImages(effectiveRequest);
+    }
 
     const project = await this.resolveProject(effectiveRequest);
-    const history = await this.loadConversation(effectiveRequest);
     const remoteUserContent = this.remoteUserContent(effectiveRequest);
-    const currentRequest = skillInvocation?.query || semanticRoute?.query || effectiveRequest.content;
-    const selectedSkillIds = skillInvocation?.skillIds || semanticRoute?.skillIds;
-    const forceWebSearch = shouldSearchWeb(currentRequest, "auto");
+    const rawRequest = skillInvocation?.query || semanticRoute?.query || effectiveRequest.content;
+    const currentRequest = await this.rewriteStandaloneQuery(rawRequest, history, durableState.lastStandaloneQuery);
+    const selectedSkillIds = resolveWeixinConversationSkillIds(
+      skillInvocation?.skillIds || semanticRoute?.skillIds,
+      durableState.lastSkillIds,
+      availableSkills.map((skill) => skill.id),
+      rawRequest
+    );
+    if (selectedSkillIds.length) await this.conversationState.rememberSkills(effectiveRequest, selectedSkillIds);
+    await this.conversationState.rememberStandaloneQuery(effectiveRequest, currentRequest);
+    const forceWebSearch = shouldSearchWeb(effectiveRequest.content, "auto") || shouldSearchWeb(currentRequest, "auto");
+    const scopedProject = project && isWeixinProjectRelevantQuery(currentRequest, project.name) ? project : null;
     const context = await new ChatContextService(this.app, this.settings, this.ai).buildContextBundle({
       userMessage: [currentRequest, formatWeixinMediaContext(effectiveRequest.media)].filter(Boolean).join("\n\n"),
-      contextMode: this.settings.defaultChatContextMode,
-      maxChars: 48_000,
-      projectScopeId: project?.id || undefined,
+      contextMode: "smart",
+      maxChars: MAX_WEIXIN_CONTEXT_CHARS,
+      projectScopeId: scopedProject?.id || undefined,
       includeQuestionInPrompt: false,
       includeStatusCards: false,
-      useAiPlanner: this.settings.defaultChatContextMode === "global",
+      useAiPlanner: false,
       fetchUrl: (url) => this.fetchUrlText(url),
       searchWeb: (query) => this.searchWebText(query),
       webSearchMode: forceWebSearch ? "always" : this.settings.defaultWebSearchMode,
-      webSearchQuery: currentRequest
+      webSearchQuery: this.webSearchQuery(currentRequest)
     });
     const aiMessages = this.buildAiMessages(
       effectiveRequest,
-      project,
+      scopedProject,
       history,
       context.promptContext,
       context.sources.length > 0,
@@ -319,7 +453,7 @@ export class WeixinAssistantService {
       messages: aiMessages,
       model: hasVisionImage
         ? this.settings.visionAiModel.trim() || undefined
-        : undefined,
+        : await this.resolveWeixinTextModel(),
       reasoningEffort: this.settings.aiReasoningEffort,
       temperature: 0.35
     });
@@ -329,6 +463,15 @@ export class WeixinAssistantService {
 
     const parsed = extractWeixinWritebackEnvelope(response.text);
     let visibleReply = parsed.visibleText || "处理完成。";
+    visibleReply = await this.guardWeixinReply(
+      visibleReply,
+      currentRequest,
+      history,
+      context,
+      selectedSkillIds,
+      availableSkills,
+      forceWebSearch
+    );
     let writebackStatus = "none";
     if (parsed.envelope) {
       const handled = await this.handleWriteback(effectiveRequest, project, parsed.envelope);
@@ -481,15 +624,17 @@ export class WeixinAssistantService {
   ): Promise<WeixinAssistantResponse> {
     if (name === "image-status") {
       const batch = this.pendingImages.inspect(request);
-      if (!batch) {
+      const durable = await this.conversationState.load(request);
+      const count = Math.max(batch?.count || 0, durable.recentImages.length);
+      if (count === 0) {
         return { reply: "当前没有等待配对的图片。先发送图片，再发送问题即可。" };
       }
-      const minutes = Math.max(1, Math.ceil((batch.expiresAt - Date.now()) / 60_000));
-      return { reply: `当前暂存 ${batch.count} 张图片，约 ${minutes} 分钟后失效。下一条普通文字会自动与图片一起处理。` };
+      return { reply: `当前会话保存了 ${count} 张最近图片。下一条说明用途的文字会自动带上图片；之后说“用小P解前面那道题”也能继续引用。` };
     }
     if (name === "cancel-image") {
       const removed = this.pendingImages.clearRequest(request);
-      return { reply: removed ? "已清除当前会话暂存的图片。" : "当前没有等待配对的图片。" };
+      const durableRemoved = await this.conversationState.clearImages(request);
+      return { reply: removed || durableRemoved ? "已清除当前会话保存的图片上下文。" : "当前没有等待配对的图片。" };
     }
     if (name === "help") {
       return { reply: [
@@ -504,7 +649,7 @@ export class WeixinAssistantService {
         "- “小P，帮我解这道题”或“用花生十三回答”",
         "需要核对的写入会直接询问你，回复“确认”或“取消”即可，不必输入命令。",
         "图片可先单独发送，再发一句文字说明用途；Life OS 会自动合并处理。",
-        "微信里临时点名的 Skill 只影响本条消息，不会改变电脑端已经选择的 Skill。",
+        "微信里点名的 Skill 会在当前会话的相关追问中沿用，但不会改变电脑端已经选择的 Skill；切换话题后自动回到中性方法。",
         "已授权私聊中的普通用户输入会进入当日日记证据；启用日终总结后，Life OS 会在次日 00:00 整理刚结束的一天并主动发回微信。"
       ].join("\n") };
     }
@@ -562,6 +707,7 @@ export class WeixinAssistantService {
     }
     if (name === "new") {
       this.clearPendingImagesForRequest(request);
+      await this.conversationState.clearImages(request);
       const archivedPath = await this.archiveConversation(request);
       return {
         reply: archivedPath
@@ -689,7 +835,9 @@ export class WeixinAssistantService {
       const response = await this.ai.complete({
         reasoningEffort: "low",
         temperature: 0,
-        model: imageParts.length > 0 ? this.settings.visionAiModel.trim() || undefined : undefined,
+        model: imageParts.length > 0
+          ? this.settings.visionAiModel.trim() || undefined
+          : await this.resolveWeixinTextModel(),
         messages: [
           {
             role: "system",
@@ -730,6 +878,281 @@ export class WeixinAssistantService {
       || /(?:哪个|合适|适合).{0,12}(?:skill|技能|方法论)/iu.test(text);
   }
 
+  private async rewriteStandaloneQuery(
+    content: string,
+    history: ChatMessage[],
+    lastStandaloneQuery: string
+  ): Promise<string> {
+    const fallback = buildWeixinStandaloneQuery(content, history, lastStandaloneQuery);
+    if (!isWeixinContextDependentFollowUp(content) || !this.ai.isConfigured()) return fallback || content;
+    const recent: AiMessage[] = this.compactHistory(history).slice(-6).map((item): AiMessage => ({
+      role: item.role === "ai" ? "assistant" : "user",
+      content: item.content.slice(0, 1_500)
+    }));
+    try {
+      const response = await this.ai.complete({
+        model: await this.resolveWeixinTextModel(),
+        reasoningEffort: "low",
+        temperature: 0,
+        messages: [
+          {
+            role: "system",
+            content: [
+              "你是检索查询改写器，不回答问题。",
+              "结合最近对话，把当前追问改写成可以脱离历史独立理解的完整问题。",
+              "“去官网查一下”必须保留上一轮主题，并明确优先官方来源；不得把搜索词改成‘去官网’或‘去’。",
+              "只输出 JSON：{\"query\":\"\"}"
+            ].join("\n")
+          },
+          ...recent,
+          { role: "user", content: `当前追问：${content}\n确定性兜底：${fallback}` }
+        ]
+      });
+      const match = response.ok ? response.text?.match(/\{[\s\S]*\}/u) : null;
+      if (!match) return fallback || content;
+      const parsed = JSON.parse(match[0]) as Record<string, unknown>;
+      const query = String(parsed.query || "").trim().slice(0, 12_000);
+      return query && !isWeixinContextDependentFollowUp(query) ? query : fallback || content;
+    } catch {
+      return fallback || content;
+    }
+  }
+
+  private webSearchQuery(query: string): string {
+    return query
+      .replace(/\n+用户追问：[\s\S]*$/u, "")
+      .replace(/\n+请检索并核对官方网站的最新信息[\s\S]*$/u, " 官方网站 最新信息")
+      .replace(/\s+/gu, " ")
+      .trim()
+      .slice(0, 1_000);
+  }
+
+  private async guardWeixinReply(
+    answer: string,
+    request: string,
+    history: ChatMessage[],
+    context: ChatContextBundle,
+    selectedSkillIds: string[],
+    skills: AiSkill[],
+    forceWebSearch: boolean
+  ): Promise<string> {
+    const urlSources = context.sources.filter((source) => source.type === "url");
+    const urlEvidence = urlSources.map((source) => source.excerpt || "").filter(Boolean);
+    if (forceWebSearch && (urlSources.length === 0 || allWeixinEvidenceUnavailable(urlEvidence))) {
+      return "这次没有成功取得可核对的官方网站正文，因此我不能把模型记忆当成官网结果。请稍后重试，或把官方页面链接直接发给我。";
+    }
+
+    const unavailableEvidence = context.sections.some((section) => allWeixinEvidenceUnavailable([section.content]));
+    const requireGrounding = context.sources.length > 0 || forceWebSearch || unavailableEvidence;
+    const verification = new CitationVerifierService().verify(answer, context.sources, {
+      requireCitations: requireGrounding,
+      minimumCompleteness: 0.7
+    });
+    const claimsReadUnavailableBody = unavailableEvidence
+      && /(?:已经|已|成功)(?:读到|读取|获取|访问)(?:了)?(?:正文|全文|页面内容)/u.test(answer);
+    const foreignSkills = selectedSkillIds.length > 0
+      ? unselectedWeixinSkillMentions(answer, selectedSkillIds, skills)
+      : [];
+    const constraints = extractWeixinUserConstraints(request, history);
+    const needsQualityReview = selectedSkillIds.length > 0 || constraints.length > 0;
+    const selectedSkills = skills.filter((skill) => selectedSkillIds.includes(skill.id));
+    const selectedSkillMethod = selectedSkillIds.length > 0
+      ? composeAiSkillPrompt(
+        selectedSkillIds,
+        "lifeos-general",
+        createImportedAiSkills(this.settings.importedAiSkills),
+        this.settings.customAiSkillCategories,
+        this.settings.aiSkillOverrides
+      ).slice(0, 8_000)
+      : "中性 Life OS 方法";
+    const qualityReview = requireGrounding || needsQualityReview
+      ? await this.reviewWeixinAnswer(answer, context.promptContext, {
+        requireGrounding,
+        selectedSkillNames: selectedSkills.map((skill) => skill.name),
+        selectedSkillMethod,
+        constraints
+      })
+      : {
+        supported: true,
+        unsupportedClaims: [],
+        methodAdherent: true,
+        constraintsRespected: true,
+        qualityIssues: []
+      };
+    const issues = [
+      requireGrounding && !verification.valid ? verification.warningMarkdown : "",
+      claimsReadUnavailableBody ? "回答声称读到了来源中明确标记为不可访问的正文" : "",
+      qualityReview === null
+        ? "无法完成回答质量校验"
+        : requireGrounding && !qualityReview.supported
+          ? `来源不能支持这些结论：${qualityReview.unsupportedClaims.join("；") || "存在未被证据支持的事实性表述"}`
+          : "",
+      qualityReview && selectedSkillIds.length > 0 && !qualityReview.methodAdherent
+        ? `回答没有忠实执行本轮 Skill：${qualityReview.qualityIssues.join("；") || "方法步骤不一致"}`
+        : "",
+      qualityReview && constraints.length > 0 && !qualityReview.constraintsRespected
+        ? `回答违反用户限制：${qualityReview.qualityIssues.join("；") || constraints.join("；")}`
+        : "",
+      foreignSkills.length > 0 ? `混入了未选择的 Skill：${foreignSkills.join("、")}` : ""
+    ].filter(Boolean);
+    if (issues.length === 0) return answer;
+    const failClosed = (): string => {
+      if (requireGrounding) {
+        return "现有来源不足以支撑一条可核对的回答，我没有发送未经证实的细节。请补充可访问的官方链接或稍后重试。";
+      }
+      if (selectedSkillIds.length > 0) {
+        return "这次回答没有通过所选 Skill 的方法一致性检查，我没有把混合方法的结果直接发给你。请重试或换一个更明确的 Skill 名称。";
+      }
+      if (constraints.length > 0) {
+        return "这次回答没有可靠遵守你刚才提出的限制，我没有直接采用它。请把最重要的限制再简短说一次。";
+      }
+      return "回答质量校验没有完成，我没有直接发送未经复核的结果。请稍后重试。";
+    };
+    if (!this.ai.isConfigured()) {
+      return requireGrounding && !verification.valid
+        ? "现有证据不足以支持可靠回答，我没有采用这条未经核对的结果。请补充可访问的官方链接或稍后重试联网检索。"
+        : answer;
+    }
+
+    const evidence = context.promptContext.slice(0, 16_000);
+    try {
+      const response = await this.ai.complete({
+        model: await this.resolveWeixinTextModel(),
+        reasoningEffort: "low",
+        temperature: 0,
+        messages: [
+          {
+            role: "system",
+            content: [
+              "你是 Life OS 微信回答质量校验器。只返回修订后的最终回答，不解释校验过程。",
+              "每个事实结论必须能从提供的证据直接推出，并在同一句末尾使用真实存在的 [S#]；删除无法支持的细节。",
+              "如果证据写明正文不可访问，不得声称已读取正文。",
+              "只使用本轮指定的 Skill，不得混入其他人物方法论；遵守用户最近明确说出的偏好和限制。",
+              "若原回答已经合格，原样返回。不要输出隐藏思维链。微信公式只能使用括号和 + - * /。"
+            ].join("\n")
+          },
+          {
+            role: "user",
+            content: [
+              `当前问题：${request}`,
+              `本轮 Skill：${selectedSkills.length > 0 ? selectedSkills.map((skill) => skill.name).join("；") : "中性 Life OS"}`,
+              `本轮方法约束：\n${selectedSkillMethod}`,
+              `用户约束：${constraints.join("；") || "无"}`,
+              `已发现问题：${issues.join("；") || "请做一致性复核"}`,
+              `原回答：\n${answer}`,
+              `可用证据：\n${evidence || "无结构化证据"}`
+            ].join("\n\n")
+          }
+        ]
+      });
+      const repaired = response.ok ? String(response.text || "").trim() : "";
+      if (!repaired) return failClosed();
+      const repairedVerification = new CitationVerifierService().verify(repaired, context.sources, {
+        requireCitations: requireGrounding,
+        minimumCompleteness: 0.7
+      });
+      const repairedReview = requireGrounding || needsQualityReview
+        ? await this.reviewWeixinAnswer(repaired, context.promptContext, {
+          requireGrounding,
+          selectedSkillNames: selectedSkills.map((skill) => skill.name),
+          selectedSkillMethod,
+          constraints
+        })
+        : qualityReview;
+      const stillClaimsUnavailable = unavailableEvidence
+        && /(?:已经|已|成功)(?:读到|读取|获取|访问)(?:了)?(?:正文|全文|页面内容)/u.test(repaired);
+      const stillForeign = selectedSkillIds.length > 0
+        ? unselectedWeixinSkillMentions(repaired, selectedSkillIds, skills)
+        : [];
+      if (
+        (requireGrounding && (!repairedVerification.valid || repairedReview === null || !repairedReview.supported))
+        || stillClaimsUnavailable
+        || stillForeign.length > 0
+      ) {
+        return failClosed();
+      }
+      if (
+        repairedReview === null
+        || (selectedSkillIds.length > 0 && !repairedReview.methodAdherent)
+        || (constraints.length > 0 && !repairedReview.constraintsRespected)
+      ) {
+        return selectedSkillIds.length > 0
+          ? "这次回答没有通过所选 Skill 的方法一致性检查，我没有把混合方法的结果直接发给你。请重试或换一个更明确的 Skill 名称。"
+          : "这次回答没有可靠遵守你刚才提出的限制，我没有直接采用它。请把最重要的限制再简短说一次。";
+      }
+      return repaired;
+    } catch {
+      return requireGrounding || needsQualityReview ? failClosed() : answer;
+    }
+  }
+
+  private async reviewWeixinAnswer(
+    answer: string,
+    evidence: string,
+    options: {
+      requireGrounding: boolean;
+      selectedSkillNames: string[];
+      selectedSkillMethod: string;
+      constraints: string[];
+    }
+  ): Promise<WeixinAnswerReview | null> {
+    if (!this.ai.isConfigured()) return null;
+    try {
+      const response = await this.ai.complete({
+        model: await this.resolveWeixinTextModel(),
+        reasoningEffort: "low",
+        temperature: 0,
+        messages: [
+          {
+            role: "system",
+            content: [
+              "你是严格的 Life OS 回答质量检查器，不回答用户问题，也不改写答案。",
+              options.requireGrounding
+                ? "逐条检查回答中的事实性结论能否从给定证据直接推出；只有引用编号存在并不等于结论受支持。"
+                : "本轮不要求来源校验，supported 固定为 true。",
+              "证据若写明正文未读取、无法访问或抓取失败，则任何关于正文细节的结论都必须判定为不支持。",
+              options.selectedSkillNames.length > 0
+                ? `检查回答是否只采用并忠实执行这些 Skill：${options.selectedSkillNames.join("；")}。不得混入其他人物方法或跳过关键步骤。`
+                : "本轮没有指定人物 Skill，methodAdherent 固定为 true。",
+              options.constraints.length > 0
+                ? `检查回答是否遵守用户约束：${options.constraints.join("；")}`
+                : "本轮没有显式用户约束，constraintsRespected 固定为 true。",
+              "纯建议、明确标注的推测和简单算术不用作为不支持事实。",
+              "只输出 JSON：{\"supported\":true,\"unsupportedClaims\":[],\"methodAdherent\":true,\"constraintsRespected\":true,\"qualityIssues\":[]}"
+            ].join("\n")
+          },
+          {
+            role: "user",
+            content: [
+              `回答：\n${answer.slice(0, 20_000)}`,
+              `证据：\n${evidence.slice(0, 20_000) || "无"}`,
+              `本轮 Skill 方法：\n${options.selectedSkillMethod.slice(0, 8_000)}`,
+              `用户约束：\n${options.constraints.join("；") || "无"}`
+            ].join("\n\n")
+          }
+        ]
+      });
+      const match = response.ok ? response.text?.match(/\{[\s\S]*\}/u) : null;
+      if (!match) return null;
+      const parsed = JSON.parse(match[0]) as Record<string, unknown>;
+      const unsupportedClaims = Array.isArray(parsed.unsupportedClaims)
+        ? parsed.unsupportedClaims.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+        : [];
+      const qualityIssues = Array.isArray(parsed.qualityIssues)
+        ? parsed.qualityIssues.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+        : [];
+      return {
+        supported: !options.requireGrounding || (parsed.supported === true && unsupportedClaims.length === 0),
+        unsupportedClaims,
+        methodAdherent: options.selectedSkillNames.length === 0 || parsed.methodAdherent === true,
+        constraintsRespected: options.constraints.length === 0 || parsed.constraintsRespected === true,
+        qualityIssues
+      };
+    } catch {
+      return null;
+    }
+  }
+
   private async resolveSemanticRoute(content: string, skills: AiSkill[]): Promise<WeixinSemanticRoute | null> {
     const skillCatalog = skills.slice(0, 120).map((skill) => ({
       id: skill.id,
@@ -738,6 +1161,7 @@ export class WeixinAssistantService {
       lens: skill.lens.slice(0, 100)
     }));
     const response = await this.ai.complete({
+      model: await this.resolveWeixinTextModel(),
       reasoningEffort: "low",
       temperature: 0,
       messages: [
@@ -748,7 +1172,7 @@ export class WeixinAssistantService {
             "仅当用户明确要求现在执行操作时选择写入类 intent；讨论功能、询问方法或举例一律选择 chat。",
             "若用户要求采用某位人物、方法论或 Skill 的方式回答，从目录中选择唯一最匹配的 skillId；不确定就留空。",
             "只输出一个 JSON 对象，不要 Markdown：",
-            '{"intent":"chat|diary-add|diary-generate|task-list|task-add|task-complete|review-generate|summary-generate|link-save|knowledge-save|reminder-add|reminder-list|reminder-cancel","confidence":0,"skillId":"","skillConfidence":0,"query":"","title":"","content":"","when":"","period":"today|week|month","url":"","id":""}'
+            '{"intent":"chat|diary-add|diary-read|diary-generate|task-list|task-add|task-complete|review-generate|summary-generate|link-save|knowledge-save|reminder-add|reminder-list|reminder-cancel","confidence":0,"skillId":"","skillConfidence":0,"query":"","title":"","content":"","when":"","period":"today|week|month","url":"","collection":"","id":""}'
           ].join("\n")
         },
         { role: "user", content: `用户消息：\n${content}\n\n可用 Skill：\n${JSON.stringify(skillCatalog)}` }
@@ -782,6 +1206,7 @@ export class WeixinAssistantService {
       ? String(record.period) as WeixinLifeOSPeriod
       : "today";
     if (intent === "diary-add") return { kind: intent, content: String(record.content || query).trim(), source };
+    if (intent === "diary-read") return { kind: intent, date: "today", source };
     if (intent === "diary-generate") return { kind: intent, source };
     if (intent === "task-list") return { kind: intent, source };
     if (intent === "task-add") return { kind: intent, title: String(record.title || record.content || query).trim(), due: String(record.when || "").trim() || undefined, source };
@@ -789,7 +1214,13 @@ export class WeixinAssistantService {
     if (intent === "review-generate" || intent === "summary-generate") return { kind: intent, period, source };
     if (intent === "link-save") {
       const url = String(record.url || original.match(/https?:\/\/[^\s]+/iu)?.[0] || "").trim();
-      return url ? { kind: intent, url, title: String(record.title || "").trim(), source } : null;
+      return url ? {
+        kind: intent,
+        url,
+        title: String(record.title || "").trim(),
+        collection: String(record.collection || "").trim() || undefined,
+        source
+      } : null;
     }
     if (intent === "knowledge-save") return { kind: intent, title: String(record.title || "微信知识").trim(), content: String(record.content || query).trim(), source };
     if (intent === "reminder-add") return { kind: intent, when: String(record.when || "").trim(), content: String(record.content || record.title || query).trim(), source };
@@ -804,6 +1235,19 @@ export class WeixinAssistantService {
   ): Promise<WeixinAssistantResponse> {
     const project = await this.resolveProject(request);
     const tasks = new TaskService(this.app, this.fs);
+    if (action.kind === "diary-read") {
+      const date = action.date === "today" ? weixinLocalDate(request.timestamp) : action.date;
+      const daily = new DailyNoteService(this.app, this.fs, this.settings);
+      const content = (await daily.readTodayNote(date)).trim();
+      if (!content) return { reply: `${date} 的日记还没有内容。` };
+      return {
+        reply: [
+          `${date} 日记：`,
+          this.readableDailyExcerpt(content, 12_000),
+          content.length > 12_000 ? "日记较长，以上为微信可读摘要；完整内容请在 Obsidian 中查看。" : ""
+        ].filter(Boolean).join("\n\n")
+      };
+    }
     if (action.kind === "task-list") {
       const open = await tasks.loadOpenTasks();
       const visible = open.slice(0, 30);
@@ -926,6 +1370,7 @@ export class WeixinAssistantService {
         "",
         "- 状态：已进入知识库 Raw Inbox，等待 AI 整理与人工确认。",
         `- 原始链接：${action.url}`,
+        action.collection ? `- 用户指定分类：${action.collection}` : "",
         "",
         "## 可检索正文",
         "",
@@ -1321,6 +1766,16 @@ export class WeixinAssistantService {
     return clean.length > max ? `${clean.slice(0, max)}…` : clean;
   }
 
+  private readableDailyExcerpt(value: string, max = 12_000): string {
+    const clean = value
+      .replace(/^---\s*[\s\S]*?\s*---\s*/u, "")
+      .replace(/<!--\s*lifeos:[\s\S]*?-->/giu, "")
+      .replace(/<!--\s*lifeos-[\s\S]*?-->/giu, "")
+      .replace(/\n{3,}/gu, "\n\n")
+      .trim();
+    return clean.length > max ? `${clean.slice(0, max).trimEnd()}…` : clean;
+  }
+
   private errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error || "未知错误");
   }
@@ -1335,9 +1790,11 @@ export class WeixinAssistantService {
     selectedSkillIds?: string[]
   ): AiMessage[] {
     const importedSkills = createImportedAiSkills(this.settings.importedAiSkills);
+    const isolatedSkillIds = selectedSkillIds?.length ? selectedSkillIds : ["lifeos-general"];
+    const selectedSkills = this.availableSkills().filter((skill) => isolatedSkillIds.includes(skill.id));
     const skillPrompt = composeAiSkillPrompt(
-      selectedSkillIds?.length ? selectedSkillIds : this.settings.defaultAiSkillIds,
-      this.settings.defaultAiSkillId,
+      isolatedSkillIds,
+      "lifeos-general",
       importedSkills,
       this.settings.customAiSkillCategories,
       this.settings.aiSkillOverrides
@@ -1356,9 +1813,14 @@ export class WeixinAssistantService {
       ? this.availableSkills().filter((skill) => selectedSkillIds.includes(skill.id)).map((skill) => skill.name)
       : [];
     const skillSelectionRule = selectedSkillNames.length > 0
-      ? `本轮微信消息临时指定 Skill：${selectedSkillNames.join(" + ")}。只对本条微信消息生效，不修改 Obsidian 桌面端的 Skill 选择。`
-      : "本轮微信消息没有临时指定 Skill，使用 Life OS 当前默认 Skill；桌面端仍可独立点击选择。";
-    const recent = this.compactHistory(history).map((message): AiMessage => ({
+      ? `当前微信会话本轮使用 Skill：${selectedSkillNames.join(" + ")}。依赖上下文的追问可继续沿用，但不会修改 Obsidian 桌面端的 Skill 选择。`
+      : "本轮微信消息没有临时指定人物 Skill，使用中性的 Life OS 总管方法；不得继承桌面端已选择的 Skill。";
+    // A message-local Skill must not inherit a previous teacher's answer.
+    // User turns remain available for references such as “前面那道题”.
+    const isolatedHistory = selectedSkillIds?.length
+      ? history.filter((message) => message.role === "user")
+      : history;
+    const recent = this.compactHistory(isolatedHistory).map((message): AiMessage => ({
       role: message.role === "ai" ? "assistant" : "user",
       content: message.content
     }));
@@ -1377,6 +1839,9 @@ export class WeixinAssistantService {
       skillSelectionRule,
       "微信不渲染 LaTeX。禁止输出 $、$$、\\(...\\)、\\[...\\]、\\frac、\\times、\\cdot 等公式语法；所有算式都改写为普通文本，例如 (a+b)/c、a*b、a<=b。",
       "避免 Markdown 表格；使用短段落和普通列表，确保微信客户端直接可读。",
+      selectedSkills.length === 1
+        ? `本轮只使用 Skill“${selectedSkills[0].name}”，不得混用或点名其他人物 Skill。`
+        : "本轮没有点名人物 Skill，使用中性的 Life OS 方法回答；不得继承电脑端已选择的人物 Skill。",
       citationRule,
       writebackRule,
       promptContext ? `# 与当前请求相关的 Life OS 证据\n${promptContext}` : ""
@@ -1385,7 +1850,9 @@ export class WeixinAssistantService {
       {
         role: "system",
         content: [
-          buildSystemPrompt(this.settings),
+          buildSystemPrompt(project || selectedSkillIds?.length
+            ? this.settings
+            : { ...this.settings, assistantStyle: "concise-executor", assistantCustomPrompt: "" }),
           "你正在处理由微信 iLink Bot 直连传入的消息。微信只负责传输，Life OS 负责模型、项目上下文、权限和持久化。",
           "如果用户发送图片，你会收到真实的视觉输入。必须观察图片后回答，不能只复述“收到图片引用”。若图片读取失败，明确说明失败原因并请用户重发。",
           "当前输出渠道是微信纯文本：永远不要输出 LaTeX 或数学 Markdown，公式只用括号和 + - * / 等普通字符表达。",
@@ -1408,6 +1875,38 @@ export class WeixinAssistantService {
       createImportedAiSkills(this.settings.importedAiSkills),
       this.settings.aiSkillOverrides
     );
+  }
+
+  /**
+   * Keep ordinary Weixin text traffic off an experimental vision model when
+   * the provider exposes the corresponding text model. An explicit Weixin
+   * text model always wins; otherwise the normal configured model is retained.
+   */
+  private async resolveWeixinTextModel(): Promise<string | undefined> {
+    const explicit = this.settings.weixinTextAiModel.trim();
+    if (explicit) return explicit;
+    const configured = this.settings.aiModel.trim();
+    if (!configured || !VISION_MODEL_PATTERN.test(configured)) return undefined;
+    const key = `${this.settings.aiBaseUrl}\u001f${configured}`;
+    if (this.textModelCache?.key === key) return this.textModelCache.model;
+
+    const canonical = (value: string) => value
+      .trim()
+      .toLowerCase()
+      .split("/")
+      .pop()!
+      .replace(/(?:[._-](?:vision|vl|image|multimodal|ocr))(?:[._-](?:exp|experimental|preview))?/giu, "")
+      .replace(/[._-]+$/u, "");
+    const target = canonical(configured);
+    let resolved: string | undefined;
+    try {
+      const models = await this.ai.listModels();
+      resolved = models.find((model) => !VISION_MODEL_PATTERN.test(model) && canonical(model) === target);
+    } catch {
+      resolved = undefined;
+    }
+    this.textModelCache = { key, model: resolved };
+    return resolved;
   }
 
   private async resolveProject(request: WeixinInboundRequest): Promise<LifeOSProject | null> {
@@ -1598,33 +2097,6 @@ export class WeixinAssistantService {
     return tail.length > 18 ? `${tail.slice(0, 8)}…${tail.slice(-6)}` : tail;
   }
 
-  private async stageInbound(request: WeixinInboundRequest): Promise<void> {
-    const auditId = this.stableHash([
-      "weixin",
-      request.accountId || "default",
-      request.messageId
-    ].join("\u001f"));
-    const readableId = this.safeName(request.messageId).slice(0, 48);
-    const path = this.fs.path(
-      "Chat",
-      "Weixin",
-      "Inbox",
-      `${auditId}-${readableId}.json`
-    );
-    const file = await ensureFile(this.app, path, "");
-    const mediaSummary = redactWorkspaceSecrets(formatWeixinMediaContext(request.media));
-    const auditRequest = {
-      ...request,
-      content: redactWorkspaceSecrets(request.content),
-      // Do not persist channel cache paths or signed attachment URLs. The
-      // readable transcript/metadata summary is enough to replay the request.
-      media: request.media.length > 0
-        ? { count: request.media.length, summary: mediaSummary }
-        : []
-    };
-    await this.app.vault.modify(file, `${JSON.stringify({ receivedAt: new Date().toISOString(), request: auditRequest }, null, 2)}\n`);
-  }
-
   private async handleWriteback(
     request: WeixinInboundRequest,
     project: LifeOSProject | null,
@@ -1793,7 +2265,7 @@ export class WeixinAssistantService {
   private remoteUserContent(request: WeixinInboundRequest): string {
     const mediaContext = formatWeixinMediaContext(request.media);
     return [
-      request.content.trim() || (mediaContext ? "[用户发送了附件]" : ""),
+      redactWorkspaceSecrets(request.content).trim() || (mediaContext ? "[用户发送了附件]" : ""),
       mediaContext ? `\n\n附件：\n${mediaContext}` : ""
     ].filter(Boolean).join("").trim();
   }

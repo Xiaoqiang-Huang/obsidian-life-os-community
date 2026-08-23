@@ -702,6 +702,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.settings.weixinDefaultProjectId = String(
       legacyBotData.weixinDefaultProjectId ?? legacyBotData.openClawDefaultProjectId ?? ""
     ).trim();
+    this.settings.weixinTextAiModel = String(legacyBotData.weixinTextAiModel ?? "").trim();
     this.settings.weixinApprovedSenders = normalizeWeixinApprovedSenders(
       legacyBotData.weixinApprovedSenders ?? legacyBotData.openClawApprovedSenders
     );
@@ -847,7 +848,11 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
         allowedGroups: this.settings.weixinAllowedGroups
       }, request).allowed,
       canAnalyzeImages: () => this.settings.enableVisionFileAnalysis === true && Boolean(this.settings.visionAiModel?.trim()),
-      handleMessage: (request) => this.getWeixinAssistantService().handleMessage(request)
+      stageInboundMessage: (request) => this.getWeixinAssistantService().stageInboundMessage(request),
+      handleMessage: (request) => this.getWeixinAssistantService().handleMessage(request),
+      recoverPendingMessages: (accountId) => this.getWeixinAssistantService().recoverPendingMessages(accountId),
+      markMessageDelivered: (request) => this.getWeixinAssistantService().markMessageDelivered(request),
+      markMessageDeliveryFailed: (request, error) => this.getWeixinAssistantService().markMessageDeliveryFailed(request, error)
     });
     return this.weixinIlinkService.initialize();
   }
@@ -988,7 +993,11 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
           allowedGroups: this.settings.weixinAllowedGroups
         }, request).allowed,
         canAnalyzeImages: () => this.settings.enableVisionFileAnalysis === true && Boolean(this.settings.visionAiModel?.trim()),
-        handleMessage: (request) => this.getWeixinAssistantService().handleMessage(request)
+        stageInboundMessage: (request) => this.getWeixinAssistantService().stageInboundMessage(request),
+        handleMessage: (request) => this.getWeixinAssistantService().handleMessage(request),
+        recoverPendingMessages: (accountId) => this.getWeixinAssistantService().recoverPendingMessages(accountId),
+        markMessageDelivered: (request) => this.getWeixinAssistantService().markMessageDelivered(request),
+        markMessageDeliveryFailed: (request, error) => this.getWeixinAssistantService().markMessageDeliveryFailed(request, error)
       });
     }
     return this.weixinIlinkService;

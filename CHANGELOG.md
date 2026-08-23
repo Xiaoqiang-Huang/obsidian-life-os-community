@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.3.14 - 2026-08-23
+
+### Added
+
+- Added durable per-conversation Weixin state for standalone follow-up queries, selected Skills, pending link-collection operations, and reusable local image references.
+- Added a redacted inbound task queue with separate pending, processing, responded, delivered, and failed states. Interrupted work and generated-but-undelivered replies now recover after reconnect or plugin restart.
+- Added an optional Weixin text-model setting. When the global default is a Vision/VL model, Life OS can select the exact corresponding text model from the configured provider while keeping image requests on the vision model.
+
+### Changed
+
+- Context-dependent requests such as “check the official site” are rewritten with the preceding user question before retrieval. Link collection can also continue across turns when the URL and destination are provided separately.
+- Weixin images are stored as local Vault attachments and can be reused by a later Skill request or after restart. Durable state stores only Vault-relative references; signed CDN URLs, Data URLs, and embedded bytes are excluded.
+- Natural Skill routing now recognizes spaced nicknames and follow-up wording, remembers the current conversation's explicit choice, and never inherits the desktop default Skill. Project context is included only when the current query is actually project-related.
+- Reduced Weixin history and retrieval budgets, separated text and vision routing, and added answer checks for source support, selected-Skill adherence, cross-Skill leakage, and the user's latest constraints.
+
+### Fixed
+
+- Fixed web follow-ups that searched only the latest fragment and could turn “check the official site” into an unrelated dictionary query.
+- Blocked factual claims based on sources marked unreadable, unavailable, body-missing, or pending content extraction; citation verification now covers both local and web evidence.
+- Fixed authorized Weixin input failing to enter the daily journal when adapter writes to the former hidden digest-state file failed. Diary capture is now isolated from route-state errors, and the visible state file supports one-time legacy migration.
+- Fixed natural references such as “how would Xiao P solve this?” falling back to large desktop Skills and mixing methods from different teachers.
+- Fixed “read today's diary” and two-turn “save this link / save it under …” flows falling back to unrelated knowledge retrieval.
+- Fixed inbound messages being acknowledged by the channel before they were durably recoverable, which could lose unfinished work after Obsidian restarted.
+
+### Validation
+
+- Added regression coverage for contextual query rewriting, source-availability guards, project relevance gating, spaced Skill aliases, durable image reuse, latest-image batching, two-turn link collection, visible daily state, idempotent inbound staging, restart replay, and staged-before-next-poll ordering.
+
 ## 0.3.13 - 2026-08-23
 
 ### Fixed

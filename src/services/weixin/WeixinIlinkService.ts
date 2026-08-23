@@ -169,6 +169,9 @@ interface WeixinAccountRuntime {
   status: WeixinAccountConnectionStatus;
   messageQueues: Map<string, Promise<void>>;
   processingMessageIds: Set<string>;
+  preparedMessages: Map<string, WeixinInboundRequest>;
+  recoveryStarted: boolean;
+  lastRecoveryAt: number;
 }
 
 function clean(value: unknown, maxLength = 500): string {
@@ -475,7 +478,7 @@ function stableClientId(value: string, purpose = "reply"): string {
 }
 
 function baseInfo(): { channel_version: string; bot_agent: string } {
-  return { channel_version: CHANNEL_VERSION, bot_agent: "LifeOS/0.3.13" };
+  return { channel_version: CHANNEL_VERSION, bot_agent: "LifeOS/0.3.14" };
 }
 
 function splitReply(value: string): string[] {
@@ -611,7 +614,12 @@ export interface WeixinIlinkServiceOptions {
   isEnabled: () => boolean;
   canHydrateMedia?: (request: WeixinInboundRequest) => boolean;
   canAnalyzeImages?: () => boolean;
+  /** Persist the inbound request before the iLink cursor is advanced. */
+  stageInboundMessage?: (request: WeixinInboundRequest) => Promise<WeixinInboundRequest>;
   handleMessage: (request: WeixinInboundRequest) => Promise<WeixinAssistantResponse>;
+  recoverPendingMessages?: (accountId: string) => Promise<Array<{ request: WeixinInboundRequest; response: WeixinAssistantResponse }>>;
+  markMessageDelivered?: (request: WeixinInboundRequest) => Promise<void>;
+  markMessageDeliveryFailed?: (request: WeixinInboundRequest, error: unknown) => Promise<void>;
 }
 
 export class WeixinIlinkService {
@@ -754,7 +762,10 @@ export class WeixinIlinkService {
         lastError: ""
       },
       messageQueues: new Map(),
-      processingMessageIds: new Set()
+      processingMessageIds: new Set(),
+      preparedMessages: new Map(),
+      recoveryStarted: false,
+      lastRecoveryAt: 0
     };
   }
 
@@ -806,6 +817,7 @@ export class WeixinIlinkService {
           message: "微信在线状态已确认，Life OS 正在等待新消息。",
           lastError: ""
         });
+        void this.recoverInboundQueue(runtime);
       } else if (action === "stop") {
         this.clearPresenceRetry(runtime);
         runtime.lastPresenceAt = 0;
@@ -1164,7 +1176,13 @@ export class WeixinIlinkService {
           message: "微信已连接，Life OS 正在等待新消息。",
           lastError: ""
         });
-        (response.msgs || []).forEach((message) => {
+        void this.recoverInboundQueue(runtime);
+        const inboundMessages = response.msgs || [];
+        // The durable inbox must exist before advancing get_updates_buf. AI
+        // processing remains asynchronous, so long polling is not blocked by
+        // a slow model response.
+        await Promise.all(inboundMessages.map((message) => this.prepareInboundForQueue(runtime, message)));
+        inboundMessages.forEach((message) => {
           void this.enqueueMessage(runtime, message);
         });
         if (generation !== runtime.monitorGeneration || this.accounts.get(runtime.stored.accountId) !== runtime) return;
@@ -1288,15 +1306,43 @@ export class WeixinIlinkService {
     }
   }
 
+  private async prepareInboundForQueue(
+    runtime: WeixinAccountRuntime,
+    message: WeixinMessage
+  ): Promise<void> {
+    const inbound = parseWeixinProtocolMessage(message, runtime.stored.accountId);
+    if (!inbound || (!inbound.content && inbound.media.length === 0)) return;
+    const queueId = inbound.messageId;
+    if (
+      runtime.preparedMessages.has(queueId)
+      || runtime.processingMessageIds.has(queueId)
+      || runtime.stored.recentMessageIds.includes(queueId)
+    ) return;
+    await this.hydrateInboundImages(message, inbound);
+    if (message.context_token) {
+      runtime.stored.contextTokens[inbound.conversationId] = clean(message.context_token, 20_000);
+    }
+    const prepared = this.options.stageInboundMessage
+      ? await this.options.stageInboundMessage(inbound)
+      : inbound;
+    runtime.preparedMessages.set(queueId, prepared);
+  }
+
   private async processMessage(
     runtime: WeixinAccountRuntime,
     message: WeixinMessage
   ): Promise<void> {
     if (this.accounts.get(runtime.stored.accountId) !== runtime) return;
-    const inbound = parseWeixinProtocolMessage(message, runtime.stored.accountId);
+    const messageId = clean(message.message_id || message.client_id, 300);
+    const prepared = runtime.preparedMessages.get(messageId);
+    const inbound = prepared || parseWeixinProtocolMessage(message, runtime.stored.accountId);
     if (!inbound || (!inbound.content && inbound.media.length === 0)) return;
-    if (runtime.stored.recentMessageIds.includes(inbound.messageId)) return;
-    await this.hydrateInboundImages(message, inbound);
+    if (runtime.stored.recentMessageIds.includes(inbound.messageId)) {
+      runtime.preparedMessages.delete(inbound.messageId);
+      return;
+    }
+    runtime.preparedMessages.delete(inbound.messageId);
+    if (!prepared) await this.hydrateInboundImages(message, inbound);
     const contextKey = inbound.conversationId;
     if (message.context_token) runtime.stored.contextTokens[contextKey] = clean(message.context_token, 20_000);
     this.updateAccountStatus(runtime, {
@@ -1320,13 +1366,19 @@ export class WeixinIlinkService {
         );
       }
       runtime.stored.recentMessageIds = [...runtime.stored.recentMessageIds, inbound.messageId].slice(-MAX_RECENT_MESSAGE_IDS);
-      await this.saveAccounts();
+      await this.saveAccounts().catch((error) => {
+        console.warn(`[Life OS] Weixin account cursor persistence failed for ${runtime.stored.accountId}`, errorMessage(error));
+      });
+      await this.options.markMessageDelivered?.(inbound).catch((error) => {
+        console.warn(`[Life OS] Weixin durable delivery acknowledgement failed for ${inbound.messageId}`, errorMessage(error));
+      });
       this.updateAccountStatus(runtime, {
         lastReplyAt: Date.now(),
         message: "回复已发送，Life OS 正在等待新消息。",
         lastError: ""
       });
     } catch (error) {
+      await this.options.markMessageDeliveryFailed?.(inbound, error).catch(() => undefined);
       const detail = formatWeixinPlainTextReply(errorMessage(error));
       await this.sendText(
         runtime,
@@ -1335,6 +1387,51 @@ export class WeixinIlinkService {
         runtime.stored.contextTokens[contextKey]
       ).catch(() => undefined);
       throw error;
+    }
+  }
+
+  private async recoverInboundQueue(runtime: WeixinAccountRuntime): Promise<void> {
+    const now = Date.now();
+    if (
+      runtime.recoveryStarted
+      || now - runtime.lastRecoveryAt < 30_000
+      || !this.options.recoverPendingMessages
+    ) return;
+    runtime.recoveryStarted = true;
+    runtime.lastRecoveryAt = now;
+    try {
+      const pending = await this.options.recoverPendingMessages(runtime.stored.accountId);
+      for (const item of pending) {
+        if (this.accounts.get(runtime.stored.accountId) !== runtime || !runtime.status.connected) return;
+        if (runtime.stored.recentMessageIds.includes(item.request.messageId)) {
+          await this.options.markMessageDelivered?.(item.request);
+          continue;
+        }
+        try {
+          const reply = formatWeixinPlainTextReply(item.response.reply) || "处理完成。";
+          const chunks = splitReply(reply);
+          for (let index = 0; index < chunks.length; index += 1) {
+            await this.sendText(
+              runtime,
+              item.request.senderId,
+              chunks[index],
+              runtime.stored.contextTokens[item.request.conversationId] || "",
+              stableClientId(`${runtime.stored.accountId}\u001f${item.request.messageId}\u001f${index + 1}`)
+            );
+          }
+          runtime.stored.recentMessageIds = [...runtime.stored.recentMessageIds, item.request.messageId]
+            .slice(-MAX_RECENT_MESSAGE_IDS);
+          await this.saveAccounts();
+          await this.options.markMessageDelivered?.(item.request);
+        } catch (error) {
+          await this.options.markMessageDeliveryFailed?.(item.request, error).catch(() => undefined);
+          console.warn(`[Life OS] Weixin recovered message delivery failed for ${item.request.messageId}`, errorMessage(error));
+        }
+      }
+    } catch (error) {
+      console.warn(`[Life OS] Weixin durable inbox recovery failed for ${runtime.stored.accountId}`, errorMessage(error));
+    } finally {
+      runtime.recoveryStarted = false;
     }
   }
 

@@ -845,6 +845,21 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
         : "图片识别尚未启用：请先在“AI 模型”中开启图片视觉分析并填写视觉模型。"
     });
 
+    const textModelInput = this.text(
+      card,
+      "微信文字模型（可选）",
+      "普通文字消息优先使用这个稳定的文本模型；留空时通常使用默认模型。若默认模型名称含 Vision/VL，Life OS 会优先从服务模型列表匹配同名文本模型。图片消息仍使用视觉模型。",
+      this.plugin.settings.weixinTextAiModel,
+      (value) => {
+        this.plugin.settings.weixinTextAiModel = value;
+      }
+    );
+    textModelInput.setAttr("placeholder", this.plugin.settings.aiModel || "留空则使用默认模型");
+    textModelInput.onblur = async () => {
+      this.plugin.settings.weixinTextAiModel = textModelInput.value.trim();
+      await this.plugin.saveSettings();
+    };
+
     const connectionPanel = card.createDiv({ cls: "lifeos-weixin-connection" });
     const renderConnection = (status: WeixinConnectionStatus): void => {
       if (!connectionPanel.isConnected) return;
@@ -1053,7 +1068,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       "点击“生成二维码”，用手机微信扫码并在手机端确认；连接后可继续点“添加微信账号”。无需安装 OpenClaw。",
       "用微信向新创建的 Bot 发送消息；首次私聊默认返回配对码，在本页批准。",
       "在上方选择默认项目。每个微信会话会独立保存上下文，不会混入其他微信账号的对话。",
-      "先在“AI 模型”中启用图片视觉分析并填写视觉模型。微信无法同时发送图片和文字时，先发最多 4 张图片，再发问题；图片只在内存中等待 15 分钟。",
+      "先在“AI 模型”中启用图片视觉分析并填写视觉模型。微信无法同时发送图片和文字时，先发最多 4 张图片，再发问题；图片会保存为当前会话附件，最近批次引用保留 3 天，可用另一种 Skill 追问前面的图片。",
       "直接说“用花生十三回答……”“小P，帮我解这题”或“陈怀安分析这份资料”，即可临时调用已安装 Skill；同名系列会结合题目自动选择具体模块，不改变电脑端选择。",
       "直接说“联网查一下……”即可搜索网页；粘贴链接可读取正文，明确说“把这个链接存入知识库”时会抓取可读内容后保存，而不是只存网址。",
       "微信对话就是 Life OS 的一个完整输入端：普通对话可进入当日日记证据；也可用自然语言记日记、管理待办、生成复盘或总结、收藏网页、存入知识库并设置提醒。",

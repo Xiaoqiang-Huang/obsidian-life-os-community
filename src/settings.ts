@@ -565,6 +565,8 @@ export interface PersonalLifeSystemSettings {
   weixinDailyDigestEnabled: boolean;
   weixinDailyDigestCatchUp: boolean;
   weixinDefaultProjectId: string;
+  /** Optional text-only model for Weixin. Empty means use the normal AI model. */
+  weixinTextAiModel: string;
   weixinApprovedSenders: WeixinApprovedSender[];
   weixinAllowedGroups: string[];
   weixinPendingPairings: WeixinPairingRecord[];
@@ -1200,6 +1202,7 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   weixinDailyDigestEnabled: true,
   weixinDailyDigestCatchUp: true,
   weixinDefaultProjectId: "",
+  weixinTextAiModel: "",
   weixinApprovedSenders: [],
   weixinAllowedGroups: [],
   weixinPendingPairings: [],
