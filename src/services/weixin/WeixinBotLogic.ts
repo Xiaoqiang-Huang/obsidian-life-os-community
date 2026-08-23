@@ -46,13 +46,14 @@ export type WeixinLifeOSPeriod = "today" | "week" | "month";
 export type WeixinLifeOSActionSource = "command" | "natural" | "semantic";
 export type WeixinLifeOSAction =
   | { kind: "diary-add"; content: string; source: WeixinLifeOSActionSource }
+  | { kind: "diary-read"; date: string; source: WeixinLifeOSActionSource }
   | { kind: "diary-generate"; source: WeixinLifeOSActionSource }
   | { kind: "task-list"; source: WeixinLifeOSActionSource }
   | { kind: "task-add"; title: string; due?: string; source: WeixinLifeOSActionSource }
   | { kind: "task-complete"; query: string; source: WeixinLifeOSActionSource }
   | { kind: "review-generate"; period: WeixinLifeOSPeriod; source: WeixinLifeOSActionSource }
   | { kind: "summary-generate"; period: WeixinLifeOSPeriod; source: WeixinLifeOSActionSource }
-  | { kind: "link-save"; url: string; title: string; source: WeixinLifeOSActionSource }
+  | { kind: "link-save"; url: string; title: string; collection?: string; source: WeixinLifeOSActionSource }
   | { kind: "knowledge-save"; title: string; content: string; source: WeixinLifeOSActionSource }
   | { kind: "reminder-add"; when: string; content: string; source: WeixinLifeOSActionSource }
   | { kind: "reminder-list"; source: WeixinLifeOSActionSource }
@@ -452,6 +453,10 @@ export function parseWeixinLifeOSAction(value: unknown): WeixinLifeOSAction | nu
     return { kind: "diary-generate", source: "natural" };
   }
 
+  if (/^(?:请|帮我|麻烦)?\s*(?:打开|查看|看看|看一下|读一下|读取|告诉我)(?:一下)?(?:今天|今日|当天)(?:的)?日记(?:内容)?\s*$/u.test(source)) {
+    return { kind: "diary-read", date: "today", source: "natural" };
+  }
+
   let match = source.match(/^(?:记日记|写日记|记录到日记|把(?:这段|下面|这些)?(?:内容)?记到日记(?:里)?|帮我记(?:到)?日记)\s*[：:,，]?\s*([\s\S]+)$/u);
   if (match) return { kind: "diary-add", content: match[1].trim(), source: "natural" };
   match = source.match(/^(?:添加|新建|创建|帮我加|记下)(?:一个|一条)?(?:待办|任务)\s*[：:,，]?\s*([\s\S]+)$/u);
@@ -511,6 +516,7 @@ export function getWeixinDailyCaptureText(value: unknown): string {
   if (action?.source === "command") return "";
   if (action && [
     "diary-generate",
+    "diary-read",
     "task-list",
     "review-generate",
     "summary-generate",
@@ -783,6 +789,12 @@ function invocationPrefix(value: string): { rest: string; naturalKeyword?: strin
   return prefixed ? { rest: prefixed[1].trim() } : null;
 }
 
+function flexibleSkillAliasPattern(alias: string): string {
+  return Array.from(alias.trim())
+    .map((character) => character.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("\\s*");
+}
+
 /**
  * Resolve an explicit, message-local Skill invocation.
  *
@@ -804,7 +816,7 @@ export function parseWeixinSkillInvocation(
   let prefix = invocationPrefix(source);
   if (!prefix) {
     const naturalMatches = available.flatMap(({ skill, aliases }) => aliases.flatMap((alias) => {
-      const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const escaped = flexibleSkillAliasPattern(alias);
       const match = source.match(new RegExp(`^(?:(?:我想|我要|想请|请你|麻烦你?|能不能)\\s*)?(?:用|让|按照|采用|调用|交给)\\s*[“\"「『]?${escaped}[”\"」』]?(?:老师|教练)?(?:的)?(?:方法|思路|框架|视角|技能|skill)?\\s*(?:来|帮我|给我)?\\s*[：:,，]?\\s*([\\s\\S]+)$`, "iu"));
       return match ? [{ skill, alias, query: match[1].trim() }] : [];
     })).sort((a, b) => b.alias.length - a.alias.length);
@@ -818,7 +830,7 @@ export function parseWeixinSkillInvocation(
   }
   if (!prefix) {
     const bareMatches = available.flatMap(({ skill, aliases }) => aliases.flatMap((alias) => {
-      const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const escaped = flexibleSkillAliasPattern(alias);
       const match = source.match(new RegExp(`^[“\"「『]?${escaped}[”\"」』]?(?:老师|教练)?[。.!！]?$`, "iu"));
       return match ? [{ skill, alias }] : [];
     })).sort((a, b) => b.alias.length - a.alias.length);
@@ -832,8 +844,8 @@ export function parseWeixinSkillInvocation(
   }
   if (!prefix) {
     const addressedMatches = available.flatMap(({ skill, aliases }) => aliases.flatMap((alias) => {
-      const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const match = source.match(new RegExp(`^[“\"「『]?${escaped}[”\"」』]?(?:老师|教练)?\\s*(?:[：:,，、]|来|请|帮我|给我)\\s*([\\s\\S]+)$`, "iu"));
+      const escaped = flexibleSkillAliasPattern(alias);
+      const match = source.match(new RegExp(`^[“\"「『]?${escaped}[”\"」』]?(?:老师|教练)?\\s*(?:(?:[：:,，、]|来|请|帮我|给我)\\s*|(?=(?:是|会)?\\s*(?:怎么|如何)))([\\s\\S]+)$`, "iu"));
       return match ? [{ skill, alias, query: match[1].trim() }] : [];
     })).sort((a, b) => b.alias.length - a.alias.length);
     if (addressedMatches.length > 0) {
@@ -1003,10 +1015,11 @@ function safeMediaReference(value: unknown): string {
   const name = firstText(record, ["name", "fileName", "filename", "title"], 240);
   const transcript = firstText(record, ["transcript", "text", "caption", "description"], 12_000);
   const error = firstText(record, ["error"], 500);
+  const vaultPath = firstText(record, ["vaultPath"], 1_000);
   const hasVisionData = /^data:image\/(?:png|jpe?g|webp|gif);base64,/iu.test(cleanText(record.dataUrl, 30_000_000));
   const size = Number(record.size || record.fileSize || 0);
   const details = [name, Number.isFinite(size) && size > 0 ? `${Math.round(size / 1024)} KB` : ""].filter(Boolean).join(" · ");
-  return `${type}${details ? `（${details}）` : ""}${hasVisionData ? "（已传入视觉模型）" : ""}${transcript ? `\n  已提取文字：${transcript}` : ""}${error ? `\n  读取状态：${error}` : ""}`;
+  return `${type}${details ? `（${details}）` : ""}${hasVisionData ? "（已传入视觉模型）" : ""}${vaultPath ? "（已保存到会话附件）" : ""}${transcript ? `\n  已提取文字：${transcript}` : ""}${error ? `\n  读取状态：${error}` : ""}`;
 }
 
 export function formatWeixinMediaContext(value: unknown): string {

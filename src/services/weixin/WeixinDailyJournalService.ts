@@ -167,17 +167,30 @@ export class WeixinDailyJournalService {
    */
   async captureInput(request: WeixinInboundRequest, routeRef: string): Promise<{ captured: boolean; path: string }> {
     const date = weixinLocalDate(request.timestamp);
-    if (!request.isGroup && routeRef) await this.markRouteActive(date, routeRef);
+    const rememberRoute = async () => {
+      if (request.isGroup || !routeRef) return;
+      try {
+        await this.markRouteActive(date, routeRef);
+      } catch (error) {
+        // Route/delivery bookkeeping must never prevent the user-authored
+        // message from reaching the daily note.
+        console.warn("[Life OS] Weixin daily route state update failed", error);
+      }
+    };
     if (
       request.isGroup
       || !this.settings.weixinCaptureToDailyEnabled
       || this.settings.weixinPermissionMode === "read-only"
     ) {
+      await rememberRoute();
       return { captured: false, path: "" };
     }
     const capture = getWeixinDailyCaptureText(request.content);
     const mediaCount = request.media.length;
-    if (!capture && mediaCount === 0) return { captured: false, path: "" };
+    if (!capture && mediaCount === 0) {
+      await rememberRoute();
+      return { captured: false, path: "" };
+    }
     const daily = new DailyNoteService(this.app, this.fs, this.settings);
     const file = await daily.ensureTodayNote(date);
     const identity = normalizeLine(request.senderName, 40);
@@ -193,6 +206,7 @@ export class WeixinDailyJournalService {
       request.messageId
     ].join("\u001f"));
     await this.processFile(file, (current) => appendWeixinDailyInputBlock(current, line, entryId));
+    await rememberRoute();
     return { captured: true, path: file.path };
   }
 
@@ -326,6 +340,12 @@ export class WeixinDailyJournalService {
   }
 
   private statePath(): string {
+    // Hidden files are intentionally avoided: Obsidian's indexed Vault API
+    // may not expose dotfiles consistently across desktop/mobile adapters.
+    return this.fs.path("Chat", "Weixin", "Daily", "daily-digest-state.json");
+  }
+
+  private legacyStatePath(): string {
     return this.fs.path("Chat", "Weixin", "Daily", ".daily-digest-state.json");
   }
 
@@ -335,7 +355,17 @@ export class WeixinDailyJournalService {
   }
 
   private async readState(): Promise<WeixinDailyDigestState> {
-    const source = await readFile(this.app, this.statePath());
+    let source = await readFile(this.app, this.statePath());
+    if (!source.trim()) {
+      // DataAdapter can read legacy hidden files even when getAbstractFileByPath
+      // cannot index them. A valid legacy state is migrated on the next write.
+      const adapter = this.app.vault.adapter as typeof this.app.vault.adapter & {
+        read?: (path: string) => Promise<string>;
+      };
+      source = typeof adapter.read === "function"
+        ? await adapter.read(this.legacyStatePath()).catch(() => "")
+        : "";
+    }
     if (!source.trim()) return { version: 1, days: {} };
     try {
       const parsed = JSON.parse(source) as Partial<WeixinDailyDigestState>;
