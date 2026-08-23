@@ -88,7 +88,7 @@ function renderNavItem(
     if (item.key === "diary") void plugin.activateDaily();
     if (item.key === "knowledge") void plugin.activateKnowledge();
     if (item.key === "checkins") void plugin.showCheckinModal();
-    if (item.key === "settings") openSettings(plugin);
+    if (item.key === "settings") void plugin.activateSettings();
   };
 }
 
@@ -100,10 +100,4 @@ function markNavigationPending(button: HTMLButtonElement): void {
     button.removeClass("is-pending");
     root?.removeClass("is-navigating");
   }, 360);
-}
-
-function openSettings(plugin: PersonalLifeSystemPlugin): void {
-  const appWithSettings = plugin.app as unknown as { setting?: { open: () => void; openTabById?: (id: string) => void } };
-  appWithSettings.setting?.open();
-  appWithSettings.setting?.openTabById?.(plugin.manifest.id);
 }

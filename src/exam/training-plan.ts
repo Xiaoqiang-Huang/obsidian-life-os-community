@@ -1,8 +1,9 @@
-import { Component, MarkdownRenderer, Modal, Notice, TFile, type App } from "obsidian";
+import { Component, Modal, Notice, TFile, type App } from "obsidian";
 import type { IPlugin } from "../plugin-api";
 import { formatDate } from "../utils";
 import { listExamFiles, parseFrontmatter } from "./data";
 import { CATEGORY_GUIDANCE, IMPROVEMENT_TIPS, type EvalRecord } from "./interview";
+import { renderMarkdownDisplay } from "../utils/markdown-render";
 
 interface PlanSection {
   title: string;
@@ -21,6 +22,27 @@ interface InterviewAnalysis {
   nextDrill: string | null;
   practicedCategories: string[];
   recentAvg: number | null;
+}
+
+interface InterviewNextDrillCandidate {
+  created: string;
+  nextDrill: unknown;
+}
+
+export function selectLatestInterviewNextDrill(candidates: InterviewNextDrillCandidate[]): string | null {
+  let latest: { created: string; nextDrill: string } | null = null;
+
+  for (const candidate of candidates) {
+    if (typeof candidate.nextDrill !== "string") continue;
+    const nextDrill = candidate.nextDrill.trim();
+    if (!nextDrill) continue;
+    const created = candidate.created || "";
+    if (!latest || created.localeCompare(latest.created) > 0) {
+      latest = { created, nextDrill };
+    }
+  }
+
+  return latest?.nextDrill ?? null;
 }
 
 function buildInterviewSection(ia: InterviewAnalysis): PlanSection {
@@ -217,24 +239,25 @@ export async function showTrainingPlan(app: App, plugin: IPlugin): Promise<void>
   const interviewPath = plugin.path("Exam", "Interview");
   const interviewFiles = listExamFiles(app, interviewPath);
   const evalRecords: EvalRecord[] = [];
-  let latestNextDrill: string | null = null;
+  const nextDrillCandidates: InterviewNextDrillCandidate[] = [];
 
   for (const file of interviewFiles) {
     const fm = parseFrontmatter(app, file);
     if (!fm || fm.type !== "interview-practice") continue;
     const scores = fm.scores;
     if (scores && typeof scores === "object") {
+      const created = String(fm.created ?? "");
       evalRecords.push({
-        date: String(fm.created ?? ""),
+        date: created,
         category: String(fm.category ?? ""),
         scores: scores as Record<string, number>
       });
-      // Grab nextDrill from the most recent entry
-      if (!latestNextDrill && fm.nextDrill && typeof fm.nextDrill === "string") {
-        latestNextDrill = fm.nextDrill;
+      if (fm.nextDrill && typeof fm.nextDrill === "string") {
+        nextDrillCandidates.push({ created, nextDrill: fm.nextDrill });
       }
     }
   }
+  const latestNextDrill = selectLatestInterviewNextDrill(nextDrillCandidates);
 
   // Build per-dim averages
   const dimTotals: Record<string, { sum: number; count: number }> = {};
@@ -325,7 +348,7 @@ class TrainingPlanModal extends Modal {
         .join("\n\n");
       if (markdown) {
         const body = sec.createDiv();
-        await MarkdownRenderer.renderMarkdown(markdown, body, "", this.mdComponent);
+        await renderMarkdownDisplay(this.app, this.mdComponent, body, markdown);
       }
     }
 

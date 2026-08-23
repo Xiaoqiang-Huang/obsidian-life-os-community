@@ -6,6 +6,7 @@ tmp/
 .tmp/
 output/
 data.json
+weixin-state.json
 .env
 .env.*
 .DS_Store

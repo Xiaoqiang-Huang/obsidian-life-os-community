@@ -1,7 +1,6 @@
 // Legacy chat view, kept for reference; active implementation is src/views/ChatView.ts.
 import {
   ItemView,
-  MarkdownRenderer,
   Notice,
   requestUrl,
   TAbstractFile,
@@ -16,6 +15,7 @@ import { ensureFile, formatDate, formatRelativeTime, makeId, stripCodeFences } f
 import { openWritebackPreview, type WritebackItem } from "./writeback-preview";
 import { buildNoteLinkContext, formatLinkContextForPrompt } from "./link-context";
 import { createLifeOsShell } from "./lifeos-shell";
+import { renderMarkdownDisplay } from "./utils/markdown-render";
 
 export class ChatView extends ItemView {
   private logEl: HTMLElement;
@@ -540,11 +540,12 @@ ${body}
       const timeStr = message.time ? formatRelativeTime(message.time) : "";
       el.createEl("strong", { text: timeStr ? `${label} · ${timeStr}` : label });
       const body = el.createDiv({ cls: "pls-message-body" });
-      await MarkdownRenderer.renderMarkdown(
-        message.role === "assistant" ? this.normalizeAiMarkdown(message.content) : message.content,
+      await renderMarkdownDisplay(
+        this.app,
+        this,
         body,
-        this.getChatFilePath(),
-        this
+        message.role === "assistant" ? this.normalizeAiMarkdown(message.content) : message.content,
+        this.getChatFilePath()
       );
     }
   }

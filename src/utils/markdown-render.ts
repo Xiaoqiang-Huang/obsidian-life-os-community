@@ -1,4 +1,9 @@
 import { App, Component, MarkdownRenderer } from "obsidian";
+import { normalizeDisplayMarkdown } from "./markdown-normalize";
+
+export { normalizeDisplayMarkdown } from "./markdown-normalize";
+
+const markdownRenderRevisions = new WeakMap<HTMLElement, number>();
 
 export interface MarkdownDisplayOptions {
   cls?: string;
@@ -23,16 +28,30 @@ export function renderMarkdownDisplay(
   el: HTMLElement,
   markdown: string,
   sourcePath = ""
-): void {
+): Promise<void> {
+  const revision = (markdownRenderRevisions.get(el) ?? 0) + 1;
+  markdownRenderRevisions.set(el, revision);
   el.empty();
   el.addClass("lifeos-markdown-content");
   const normalized = normalizeDisplayMarkdown(markdown);
-  if (!normalized) return;
-  void MarkdownRenderer.renderMarkdown(normalized, el, sourcePath, component);
-}
+  if (!normalized) return Promise.resolve();
 
-export function normalizeDisplayMarkdown(markdown: string): string {
-  return markdown
-    .replace(/\r\n/g, "\n")
-    .trim();
+  el.setAttribute("aria-busy", "true");
+  const staging = el.ownerDocument.createElement("div");
+  return MarkdownRenderer.renderMarkdown(normalized, staging, sourcePath, component)
+    .then(() => {
+      if (markdownRenderRevisions.get(el) !== revision) return;
+      el.empty();
+      while (staging.firstChild) el.appendChild(staging.firstChild);
+    })
+    .catch(() => {
+      if (markdownRenderRevisions.get(el) !== revision) return;
+      el.empty();
+      el.setText(normalized);
+    })
+    .finally(() => {
+      if (markdownRenderRevisions.get(el) === revision) {
+        el.removeAttribute("aria-busy");
+      }
+    });
 }

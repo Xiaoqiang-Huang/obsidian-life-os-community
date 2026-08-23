@@ -1160,6 +1160,8 @@ button.pls-btn-generate:active {
 
 .lifeos-writeback-target-card {
   min-width: 0;
+  width: 100%;
+  height: auto;
   text-align: left;
   border: 1px solid var(--lifeos-border);
   border-radius: var(--lifeos-radius-md);
@@ -1168,9 +1170,12 @@ button.pls-btn-generate:active {
   padding: 14px;
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr);
+  align-items: start;
   gap: 12px;
   color: var(--lifeos-ink);
   cursor: pointer;
+  white-space: normal;
+  line-height: 1.45;
 }
 
 .lifeos-writeback-target-card:hover,
@@ -1228,6 +1233,88 @@ button.pls-btn-generate:active {
 
   .lifeos-writeback-target-card {
     min-height: 92px;
+  }
+}
+
+/* Keep writeback target choices as cards even when Obsidian or theme-level
+   button rules try to restyle all modal buttons. */
+.modal.lifeos-writeback-target-modal-host .lifeos-writeback-target-grid {
+  align-items: stretch;
+}
+
+.modal.lifeos-writeback-target-modal-host button.lifeos-writeback-target-card {
+  appearance: none;
+  -webkit-appearance: none;
+  display: grid !important;
+  grid-template-columns: 38px minmax(0, 1fr) !important;
+  align-items: start !important;
+  justify-items: stretch !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 124px !important;
+  height: auto !important;
+  padding: 14px !important;
+  white-space: normal !important;
+  text-align: left !important;
+}
+
+.modal.lifeos-writeback-target-modal-host .lifeos-writeback-target-icon {
+  grid-column: 1;
+  grid-row: 1;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  margin: 0;
+}
+
+.modal.lifeos-writeback-target-modal-host .lifeos-writeback-target-copy {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.modal.lifeos-writeback-target-modal-host .lifeos-writeback-target-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.modal.lifeos-writeback-target-modal-host .lifeos-writeback-target-head strong {
+  flex: 0 1 auto;
+  max-width: 100%;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.modal.lifeos-writeback-target-modal-host .lifeos-writeback-target-head .lifeos-badge {
+  flex: 0 0 auto;
+  max-width: 100%;
+  line-height: 1.2;
+}
+
+.modal.lifeos-writeback-target-modal-host .lifeos-writeback-target-copy p,
+.modal.lifeos-writeback-target-modal-host .lifeos-writeback-target-copy .lifeos-muted {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  text-align: left;
+  white-space: normal;
+}
+
+@media (max-width: 760px) {
+  .modal.lifeos-writeback-target-modal-host .lifeos-writeback-target-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .modal.lifeos-writeback-target-modal-host button.lifeos-writeback-target-card {
+    min-height: 104px !important;
   }
 }
 
@@ -15648,6 +15735,45 @@ select.lifeos-input {
   padding: 1px 5px;
   border-radius: 6px;
   background: var(--lifeos-surface-soft);
+}
+
+.lifeos-markdown-content pre {
+  max-width: 100%;
+  overflow: auto;
+}
+
+.lifeos-markdown-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.lifeos-markdown-content :is(.math-block, mjx-container[display="true"], .MathJax_Display) {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.2em;
+  -webkit-overflow-scrolling: touch;
+}
+
+.lifeos-markdown-content :is(.math-inline, mjx-container:not([display="true"])) {
+  max-width: 100%;
+}
+
+.lifeos-markdown-content .math-inline {
+  display: inline-block;
+  overflow-x: auto;
+  overflow-y: hidden;
+  vertical-align: middle;
+  -webkit-overflow-scrolling: touch;
+}
+
+.lifeos-markdown-content .math-block > :is(svg, mjx-container),
+.lifeos-markdown-content .math-inline > :is(svg, mjx-container),
+.lifeos-markdown-content mjx-container[display="true"] > svg {
+  min-width: max-content;
 }
 
 .lifeos-board-card-title.lifeos-markdown-content,
@@ -54536,7 +54662,7 @@ body.lifeos-theme-codex-dark .modal.mod-settings .lifeos-settings.lifeos-theme-c
 .lifeos-root.lifeos-chat-root .lifeos-chat-message-actions button {
   min-height: 28px !important;
   padding: 3px 7px !important;
-  border-radius: 5px !important;
+  border-radius: 8px !important;
   color: var(--lifeos-muted) !important;
   background: transparent !important;
   font-size: 11px !important;
@@ -55474,3 +55600,2550 @@ body.is-mobile .lifeos-period-review-modal .lifeos-period-review-draft-actions >
   min-height: 44px;
 }
 /* Life OS review evidence and pending-draft workflow v2 end */
+
+/* Life OS inline AI opt-in prompt start */
+.lifeos-ai-edit-popover.is-selection-prompt {
+  width: min(360px, calc(100vw - 32px)) !important;
+  max-height: none !important;
+  grid-template-rows: auto auto auto !important;
+  gap: 10px !important;
+  padding: 11px !important;
+}
+
+.lifeos-ai-edit-popover.is-panel.is-selection-prompt {
+  position: relative !important;
+  inset: auto !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  align-self: start !important;
+}
+
+.lifeos-ai-edit-selection-prompt-header {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 32px;
+  gap: 9px;
+  align-items: center;
+  min-width: 0;
+}
+
+.lifeos-ai-edit-selection-prompt-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lifeos-ai-edit-selection-prompt-copy strong {
+  color: var(--text-normal);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.lifeos-ai-edit-selection-prompt-copy span,
+.lifeos-ai-edit-selection-prompt-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.lifeos-ai-edit-selection-prompt-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-ai-edit-selection-prompt-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.lifeos-ai-edit-selection-prompt-actions .lifeos-ai-edit-action {
+  min-height: 34px !important;
+  margin: 0 !important;
+}
+
+.lifeos-ai-edit-selection-prompt-hint {
+  padding-inline: 2px;
+}
+/* Life OS inline AI opt-in prompt end */
+
+/* Life OS chat web grounding controls start */
+.lifeos-chat-composer-toolbar .lifeos-chat-web-search-button {
+  min-width: 0 !important;
+  min-height: 32px !important;
+  height: 32px !important;
+  padding: 4px 9px !important;
+  white-space: nowrap !important;
+  box-shadow: none !important;
+}
+
+.lifeos-chat-web-search-button.is-always {
+  color: var(--interactive-accent) !important;
+  background: color-mix(in srgb, var(--interactive-accent) 11%, transparent) !important;
+}
+
+.lifeos-chat-web-search-button.is-off {
+  color: var(--text-muted) !important;
+  opacity: 0.78;
+}
+
+.lifeos-chat-web-search-control {
+  min-width: min(100%, 220px);
+}
+/* Life OS chat web grounding controls end */
+
+/* Life OS chat streaming layout guard start */
+.lifeos-chat-view-host .lifeos-chat-log,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-log,
+.lifeos-root.lifeos-chat-root .lifeos-chat-log {
+  order: 3 !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-loading,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-loading,
+.lifeos-root.lifeos-chat-root .lifeos-chat-loading {
+  order: 4 !important;
+  min-height: 32px !important;
+  max-height: 40px !important;
+  margin: 0 !important;
+  padding: 7px 14px !important;
+  overflow: hidden !important;
+  border-top: 1px solid var(--lifeos-border-soft, var(--lifeos-border)) !important;
+  color: var(--interactive-accent) !important;
+  background: color-mix(in srgb, var(--interactive-accent) 5%, var(--background-primary) 95%) !important;
+  font-size: 12px !important;
+  line-height: 18px !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-runtime-status,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-runtime-status,
+.lifeos-root.lifeos-chat-root .lifeos-chat-runtime-status {
+  order: 5 !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-composer,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer {
+  order: 6 !important;
+}
+/* Life OS chat streaming layout guard end */
+
+/* Life OS AI assistant exported compact toolbar layout v1 start */
+.lifeos-chat-view-host .lifeos-chat-composer-toolbar,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-composer-toolbar,
+.lifeos-root.lifeos-chat-root .lifeos-chat-composer-toolbar {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: visible !important;
+  padding: 0 0 4px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-compact-toolbar,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-compact-toolbar,
+.lifeos-root.lifeos-chat-root .lifeos-chat-compact-toolbar {
+  position: relative !important;
+  display: flex !important;
+  grid-column: auto !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  max-height: none !important;
+  min-height: 34px !important;
+  flex-flow: row nowrap !important;
+  align-items: center !important;
+  align-content: center !important;
+  gap: 6px !important;
+  margin: 0 !important;
+  padding: 0 1px !important;
+  overflow: visible !important;
+  contain: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-compact-control,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-compact-control,
+.lifeos-root.lifeos-chat-root .lifeos-chat-compact-control,
+.lifeos-chat-view-host .lifeos-chat-compact-action,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-compact-action,
+.lifeos-root.lifeos-chat-root .lifeos-chat-compact-action {
+  box-sizing: border-box !important;
+  min-width: 0 !important;
+  min-height: 34px !important;
+  height: 34px !important;
+  flex: 0 1 auto !important;
+  position: relative !important;
+  margin: 0 !important;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, var(--text-muted) 12%) !important;
+  border-radius: 6px !important;
+  color: var(--text-normal, var(--lifeos-ink)) !important;
+  background: color-mix(in srgb, var(--background-primary) 96%, var(--background-secondary) 4%) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--text-on-accent) 14%, transparent),
+    0 1px 2px rgba(15, 23, 42, 0.05) !important;
+  transition-property: border-color, background-color, box-shadow, transform !important;
+  transition-duration: 120ms !important;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1) !important;
+}
+
+.lifeos-chat-view-host label.lifeos-chat-compact-control,
+.workspace-leaf-content[data-type="personal-life-system-chat"] label.lifeos-chat-compact-control,
+.lifeos-root.lifeos-chat-root label.lifeos-chat-compact-control {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  padding: 2px 2px 2px 8px !important;
+  overflow: hidden !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-compact-label,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-compact-label,
+.lifeos-root.lifeos-chat-root .lifeos-chat-compact-label {
+  flex: 0 0 auto !important;
+  color: var(--text-muted, var(--lifeos-muted)) !important;
+  font-size: 10.5px !important;
+  font-weight: 650 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-compact-select,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-compact-select,
+.lifeos-root.lifeos-chat-root .lifeos-chat-compact-select {
+  width: auto !important;
+  min-width: 36px !important;
+  max-width: 96px !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  box-sizing: border-box !important;
+  margin: 0 !important;
+  padding: 0 18px 0 7px !important;
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent) !important;
+  border-radius: 6px !important;
+  color: var(--text-normal, var(--lifeos-ink)) !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  background-color: color-mix(in srgb, var(--background-primary) 92%, var(--background-secondary) 8%) !important;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%) !important;
+  background-position:
+    calc(100% - 9px) 11px,
+    calc(100% - 5px) 11px !important;
+  background-repeat: no-repeat !important;
+  background-size: 4px 4px, 4px 4px !important;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text-on-accent) 10%, transparent) !important;
+  font-size: 11px !important;
+  font-weight: 650 !important;
+  line-height: 26px !important;
+  text-overflow: ellipsis !important;
+  cursor: pointer !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-compact-control:hover,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-compact-control:hover,
+.lifeos-root.lifeos-chat-root .lifeos-chat-compact-control:hover,
+.lifeos-chat-view-host .lifeos-chat-compact-action:hover,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-compact-action:hover,
+.lifeos-root.lifeos-chat-root .lifeos-chat-compact-action:hover {
+  border-color: color-mix(in srgb, var(--interactive-accent) 28%, var(--background-modifier-border)) !important;
+  background: color-mix(in srgb, var(--interactive-accent) 4%, var(--background-primary)) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--text-on-accent) 16%, transparent),
+    0 2px 5px rgba(15, 23, 42, 0.07) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-compact-control:focus-within,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-compact-control:focus-within,
+.lifeos-root.lifeos-chat-root .lifeos-chat-compact-control:focus-within {
+  border-color: color-mix(in srgb, var(--interactive-accent) 48%, var(--background-modifier-border)) !important;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 20%, transparent),
+    0 1px 2px rgba(15, 23, 42, 0.04) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-compact-control:focus-within .lifeos-chat-compact-select,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-compact-control:focus-within .lifeos-chat-compact-select,
+.lifeos-root.lifeos-chat-root .lifeos-chat-compact-control:focus-within .lifeos-chat-compact-select {
+  border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--background-modifier-border)) !important;
+  background-color: color-mix(in srgb, var(--interactive-accent) 5%, var(--background-primary)) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-compact-control[data-control-id="project"] .lifeos-chat-compact-select,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-compact-control[data-control-id="project"] .lifeos-chat-compact-select,
+.lifeos-root.lifeos-chat-root .lifeos-chat-compact-control[data-control-id="project"] .lifeos-chat-compact-select {
+  max-width: 78px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-compact-control[data-control-id="model"] .lifeos-chat-compact-select,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-compact-control[data-control-id="model"] .lifeos-chat-compact-select,
+.lifeos-root.lifeos-chat-root .lifeos-chat-compact-control[data-control-id="model"] .lifeos-chat-compact-select {
+  max-width: 135px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-compact-action,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-compact-action,
+.lifeos-root.lifeos-chat-root .lifeos-chat-compact-action {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 4px !important;
+  padding: 3px 9px !important;
+  font-size: 11px !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+  transition-property: transform, border-color, background-color, color !important;
+  transition-duration: 120ms !important;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-compact-action:active,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-compact-action:active,
+.lifeos-root.lifeos-chat-root .lifeos-chat-compact-action:active {
+  transform: scale(0.96) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-compact-action[data-control-id="board"],
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-compact-action[data-control-id="board"],
+.lifeos-root.lifeos-chat-root .lifeos-chat-compact-action[data-control-id="board"] {
+  border-color: color-mix(in srgb, var(--interactive-accent) 32%, var(--background-modifier-border)) !important;
+  color: var(--interactive-accent) !important;
+  background: color-mix(in srgb, var(--interactive-accent) 6%, var(--background-primary)) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-skill-dropdown,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-dropdown,
+.lifeos-root.lifeos-chat-root .lifeos-chat-skill-dropdown {
+  position: relative !important;
+  display: block !important;
+  width: min(145px, 100%) !important;
+  padding: 0 !important;
+  overflow: visible !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-skill-dropdown[open],
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-dropdown[open],
+.lifeos-root.lifeos-chat-root .lifeos-chat-skill-dropdown[open] {
+  z-index: 80 !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-skill-dropdown-summary,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-dropdown-summary,
+.lifeos-root.lifeos-chat-root .lifeos-chat-skill-dropdown-summary {
+  box-sizing: border-box !important;
+  display: flex !important;
+  width: 100% !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  align-items: center !important;
+  gap: 3px !important;
+  padding: 0 22px 0 8px !important;
+  overflow: hidden !important;
+  cursor: pointer !important;
+  list-style: none !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-skill-dropdown-summary::-webkit-details-marker,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-dropdown-summary::-webkit-details-marker,
+.lifeos-root.lifeos-chat-root .lifeos-chat-skill-dropdown-summary::-webkit-details-marker {
+  display: none !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-skill-dropdown-summary::after,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-dropdown-summary::after,
+.lifeos-root.lifeos-chat-root .lifeos-chat-skill-dropdown-summary::after {
+  content: "⌄" !important;
+  position: absolute !important;
+  right: 8px !important;
+  color: var(--text-muted) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-skill-dropdown-value,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-dropdown-value,
+.lifeos-root.lifeos-chat-root .lifeos-chat-skill-dropdown-value {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  color: var(--text-normal) !important;
+  font-size: 11px !important;
+  font-weight: 650 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-skill-dropdown-panel,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-dropdown-panel,
+.lifeos-root.lifeos-chat-root .lifeos-chat-skill-dropdown-panel {
+  position: absolute !important;
+  z-index: 90 !important;
+  left: 50% !important;
+  bottom: calc(100% + 8px) !important;
+  width: min(720px, calc(100vw - 64px)) !important;
+  max-width: min(720px, calc(100vw - 64px)) !important;
+  max-height: min(58svh, 520px) !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 10px !important;
+  padding: 12px !important;
+  overflow: auto !important;
+  transform: translateX(-50%) !important;
+  border: 1px solid var(--background-modifier-border) !important;
+  border-radius: 12px !important;
+  background: var(--background-primary) !important;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.18) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-skill-dropdown-heading,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-dropdown-heading,
+.lifeos-root.lifeos-chat-root .lifeos-chat-skill-dropdown-heading {
+  display: flex !important;
+  align-items: flex-start !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-skill-dropdown-panel .lifeos-skill-picker-panel,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-dropdown-panel .lifeos-skill-picker-panel,
+.lifeos-root.lifeos-chat-root .lifeos-chat-skill-dropdown-panel .lifeos-skill-picker-panel {
+  display: block !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-skill-dropdown-panel .lifeos-skill-picker-grid,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-dropdown-panel .lifeos-skill-picker-grid,
+.lifeos-root.lifeos-chat-root .lifeos-chat-skill-dropdown-panel .lifeos-skill-picker-grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)) !important;
+  gap: 8px !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-skill-option,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-option,
+.lifeos-root.lifeos-chat-root .lifeos-chat-skill-option {
+  display: flex !important;
+  min-width: 0 !important;
+  align-items: center !important;
+  gap: 7px !important;
+  padding: 6px 8px !important;
+  border-radius: 7px !important;
+  color: var(--text-normal) !important;
+  background: var(--background-secondary) !important;
+  cursor: pointer !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-skill-option.is-active,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-option.is-active,
+.lifeos-root.lifeos-chat-root .lifeos-chat-skill-option.is-active {
+  color: var(--interactive-accent) !important;
+  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary)) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-skill-option input,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-option input,
+.lifeos-root.lifeos-chat-root .lifeos-chat-skill-option input {
+  flex: 0 0 auto !important;
+  margin: 0 !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-send-actions,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-send-actions,
+.lifeos-root.lifeos-chat-root .lifeos-chat-send-actions {
+  display: grid !important;
+  width: 108px !important;
+  min-width: 108px !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 4px !important;
+  align-self: end !important;
+  justify-self: end !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-send-actions .lifeos-button,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-send-actions .lifeos-button,
+.lifeos-root.lifeos-chat-root .lifeos-chat-send-actions .lifeos-button {
+  width: 100% !important;
+  margin: 0 !important;
+  justify-content: center !important;
+  transition-property: transform, border-color, background-color, color !important;
+  transition-duration: 120ms !important;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-send-actions .lifeos-button:active,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-send-actions .lifeos-button:active,
+.lifeos-root.lifeos-chat-root .lifeos-chat-send-actions .lifeos-button:active {
+  transform: scale(0.96) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-send-actions .lifeos-chat-send-attach,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-send-actions .lifeos-chat-send-attach,
+.lifeos-root.lifeos-chat-root .lifeos-chat-send-actions .lifeos-chat-send-attach {
+  min-height: 30px !important;
+  height: 30px !important;
+  padding: 3px 7px !important;
+  border-radius: 7px !important;
+  color: var(--text-muted, var(--lifeos-muted)) !important;
+  font-size: 11px !important;
+  background: var(--background-primary, var(--lifeos-surface)) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-send-actions :is(.lifeos-chat-send, .lifeos-chat-stop),
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-send-actions :is(.lifeos-chat-send, .lifeos-chat-stop),
+.lifeos-root.lifeos-chat-root .lifeos-chat-send-actions :is(.lifeos-chat-send, .lifeos-chat-stop) {
+  min-height: 42px !important;
+  height: 42px !important;
+  border-radius: 8px !important;
+}
+
+@media (max-width: 1800px) {
+  .lifeos-chat-view-host .lifeos-chat-compact-toolbar,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-compact-toolbar,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-compact-toolbar {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    padding-bottom: 5px !important;
+    scrollbar-width: thin !important;
+    overscroll-behavior-inline: contain !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-compact-control,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-compact-control,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-compact-control,
+  .lifeos-chat-view-host .lifeos-chat-compact-action,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-compact-action,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-compact-action {
+    flex: 0 0 auto !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-skill-dropdown-panel,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-dropdown-panel,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-skill-dropdown-panel {
+    position: fixed !important;
+    inset: auto 12px calc(148px + env(safe-area-inset-bottom, 0px)) 12px !important;
+    width: auto !important;
+    max-width: none !important;
+    max-height: min(58svh, 480px) !important;
+    transform: none !important;
+  }
+}
+
+@media (max-width: 560px) {
+  .lifeos-chat-view-host .lifeos-chat-compact-toolbar,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-compact-toolbar,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-compact-toolbar {
+    max-height: none !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-skill-dropdown-panel,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-dropdown-panel,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-skill-dropdown-panel {
+    bottom: calc(222px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+/* Life OS AI assistant exported compact toolbar layout v1 end */
+/* Life OS local Skill intake, selectable chat text, and observable run trace start */
+.lifeos-chat-view-host .lifeos-chat-bubble-content,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-bubble-content,
+.lifeos-root.lifeos-chat-root .lifeos-chat-bubble-content,
+.lifeos-chat-view-host .lifeos-chat-bubble-content :is(p, li, blockquote, pre, code, table, span, strong, em, a),
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-bubble-content :is(p, li, blockquote, pre, code, table, span, strong, em, a),
+.lifeos-root.lifeos-chat-root .lifeos-chat-bubble-content :is(p, li, blockquote, pre, code, table, span, strong, em, a) {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text;
+}
+
+.lifeos-chat-view-host .lifeos-chat-bubble-content ::selection,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-bubble-content ::selection,
+.lifeos-root.lifeos-chat-root .lifeos-chat-bubble-content ::selection {
+  background: color-mix(in srgb, var(--interactive-accent) 28%, transparent);
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity {
+  margin: 2px 0 8px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--background-secondary) 76%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+  overflow: clip;
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity-summary,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity-summary,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity-summary {
+  display: grid;
+  grid-template-columns: 18px auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 7px 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity-summary::-webkit-details-marker,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity-summary::-webkit-details-marker,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity-summary::-webkit-details-marker {
+  display: none;
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity-status-dot,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity-status-dot,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity-status-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+  color: var(--interactive-accent);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity.is-running .lifeos-chat-activity-status-dot,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity.is-running .lifeos-chat-activity-status-dot,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity.is-running .lifeos-chat-activity-status-dot {
+  animation: lifeos-chat-activity-pulse 1.2s ease-in-out infinite;
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity.is-error .lifeos-chat-activity-status-dot,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity.is-error .lifeos-chat-activity-status-dot,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity.is-error .lifeos-chat-activity-status-dot {
+  background: color-mix(in srgb, var(--text-error) 14%, transparent);
+  color: var(--text-error);
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity-title,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity-title,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity-title {
+  color: var(--text-normal);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity-current,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity-current,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity-current {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-chat-view-host :is(.lifeos-chat-activity-time, .lifeos-chat-activity-step-time),
+.workspace-leaf-content[data-type="personal-life-system-chat"] :is(.lifeos-chat-activity-time, .lifeos-chat-activity-step-time),
+.lifeos-root.lifeos-chat-root :is(.lifeos-chat-activity-time, .lifeos-chat-activity-step-time) {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity-list,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity-list,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity-list {
+  display: grid;
+  gap: 2px;
+  padding: 0 10px 9px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity-step,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity-step,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity-step {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 7px;
+  min-width: 0;
+  padding: 5px 0;
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity-step-icon,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity-step-icon,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity-step-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity-step.is-active .lifeos-chat-activity-step-icon,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity-step.is-active .lifeos-chat-activity-step-icon,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity-step.is-active .lifeos-chat-activity-step-icon {
+  color: var(--interactive-accent);
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity-step.is-error .lifeos-chat-activity-step-icon,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity-step.is-error .lifeos-chat-activity-step-icon,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity-step.is-error .lifeos-chat-activity-step-icon {
+  color: var(--text-error);
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity-step-copy,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity-step-copy,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity-step-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity-step-copy strong,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity-step-copy strong,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity-step-copy strong {
+  color: var(--text-normal);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity-step-copy span,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity-step-copy span,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity-step-copy span {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity-step-items,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity-step-items,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity-step-items {
+  display: grid;
+  gap: 2px;
+  margin-top: 3px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--background-primary) 72%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity-step-item,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity-step-item,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity-step-item {
+  position: relative;
+  min-width: 0;
+  padding-left: 10px;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-chat-view-host .lifeos-chat-activity-step-item::before,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity-step-item::before,
+.lifeos-root.lifeos-chat-root .lifeos-chat-activity-step-item::before {
+  position: absolute;
+  left: 1px;
+  color: var(--text-faint);
+  content: "›";
+}
+
+.lifeos-skill-local-file-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.lifeos-skill-local-file-input {
+  display: none !important;
+}
+
+.lifeos-skill-local-file-row .lifeos-button {
+  min-height: 40px;
+}
+
+.lifeos-skill-local-file-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.lifeos-skill-import-divider {
+  display: grid;
+  grid-template-columns: minmax(24px, 1fr) auto minmax(24px, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 8px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.lifeos-skill-import-divider::before,
+.lifeos-skill-import-divider::after {
+  height: 1px;
+  background: var(--background-modifier-border);
+  content: "";
+}
+
+@keyframes lifeos-chat-activity-pulse {
+  0%, 100% { opacity: 0.62; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lifeos-chat-view-host .lifeos-chat-activity.is-running .lifeos-chat-activity-status-dot,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity.is-running .lifeos-chat-activity-status-dot,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-activity.is-running .lifeos-chat-activity-status-dot {
+    animation: none;
+  }
+}
+
+@media (max-width: 620px) {
+  .lifeos-chat-view-host .lifeos-chat-activity-summary,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity-summary,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-activity-summary {
+    grid-template-columns: 18px auto minmax(0, 1fr);
+  }
+
+  .lifeos-chat-view-host .lifeos-chat-activity-time,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-activity-time,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-activity-time {
+    display: none;
+  }
+}
+/* Life OS local Skill intake, selectable chat text, and observable run trace end */
+
+/* Life OS compact Skill library and management */
+.lifeos-chat-view-host .lifeos-chat-skill-dropdown-panel,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-dropdown-panel,
+.lifeos-root.lifeos-chat-root .lifeos-chat-skill-dropdown-panel {
+  width: min(820px, calc(100vw - 48px)) !important;
+  max-width: min(820px, calc(100vw - 48px)) !important;
+  max-height: min(68svh, 640px) !important;
+  gap: 8px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-skill-dropdown-heading,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-dropdown-heading,
+.lifeos-root.lifeos-chat-root .lifeos-chat-skill-dropdown-heading {
+  align-items: center !important;
+  flex-wrap: wrap !important;
+}
+
+.lifeos-chat-view-host .lifeos-skill-picker-tool-actions,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-skill-picker-tool-actions,
+.lifeos-root.lifeos-chat-root .lifeos-skill-picker-tool-actions {
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
+  justify-content: flex-end !important;
+  gap: 6px !important;
+}
+
+.lifeos-chat-view-host .lifeos-skill-picker-tool-actions .lifeos-button,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-skill-picker-tool-actions .lifeos-button,
+.lifeos-root.lifeos-chat-root .lifeos-skill-picker-tool-actions .lifeos-button {
+  min-height: 34px !important;
+  padding: 5px 9px !important;
+  border-radius: 7px !important;
+  font-size: 12px !important;
+}
+
+.lifeos-skill-picker-search-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.lifeos-skill-picker-search-icon {
+  position: absolute;
+  z-index: 1;
+  left: 10px;
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.lifeos-skill-picker-search {
+  width: 100% !important;
+  height: 36px !important;
+  min-height: 36px !important;
+  padding-inline: 34px 10px !important;
+  border-radius: 8px !important;
+  font-size: 12px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-skill-dropdown-panel .lifeos-skill-picker-grid,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-dropdown-panel .lifeos-skill-picker-grid,
+.lifeos-root.lifeos-chat-root .lifeos-chat-skill-dropdown-panel .lifeos-skill-picker-grid {
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 7px !important;
+}
+
+.lifeos-chat-view-host .lifeos-skill-picker-redesigned .lifeos-skill-category,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-skill-picker-redesigned .lifeos-skill-category,
+.lifeos-root.lifeos-chat-root .lifeos-skill-picker-redesigned .lifeos-skill-category {
+  overflow: hidden !important;
+  padding: 0 8px 8px !important;
+  border: 1px solid var(--background-modifier-border) !important;
+  border-radius: 9px !important;
+  background: var(--background-primary-alt) !important;
+}
+
+.lifeos-chat-view-host .lifeos-skill-picker-redesigned .lifeos-skill-category summary,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-skill-picker-redesigned .lifeos-skill-category summary,
+.lifeos-root.lifeos-chat-root .lifeos-skill-picker-redesigned .lifeos-skill-category summary {
+  min-height: 34px !important;
+  padding: 6px 2px !important;
+}
+
+.lifeos-chat-view-host .lifeos-skill-picker-redesigned .lifeos-skill-category-desc,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-skill-picker-redesigned .lifeos-skill-category-desc,
+.lifeos-root.lifeos-chat-root .lifeos-skill-picker-redesigned .lifeos-skill-category-desc {
+  margin: -2px 0 6px !important;
+  overflow: hidden !important;
+  font-size: 11px !important;
+  line-height: 1.35 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-chat-view-host .lifeos-skill-picker-redesigned .lifeos-chat-skill-list-expanded,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-skill-picker-redesigned .lifeos-chat-skill-list-expanded,
+.lifeos-root.lifeos-chat-root .lifeos-skill-picker-redesigned .lifeos-chat-skill-list-expanded {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 156px), 1fr)) !important;
+  gap: 6px !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-skill-option,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-option,
+.lifeos-root.lifeos-chat-root .lifeos-chat-skill-option {
+  display: grid !important;
+  min-width: 0 !important;
+  min-height: 40px !important;
+  grid-template-columns: minmax(0, 1fr) 30px !important;
+  align-items: stretch !important;
+  gap: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border: 1px solid var(--background-modifier-border) !important;
+  border-radius: 8px !important;
+  background: var(--background-primary) !important;
+  box-shadow: none !important;
+}
+
+.lifeos-chat-view-host .lifeos-chat-skill-option.is-active,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-option.is-active,
+.lifeos-root.lifeos-chat-root .lifeos-chat-skill-option.is-active {
+  border-color: color-mix(in srgb, var(--interactive-accent) 64%, var(--background-modifier-border)) !important;
+  color: var(--text-on-accent) !important;
+  background: var(--interactive-accent) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 16%, transparent) !important;
+}
+
+.lifeos-chat-skill-select,
+.lifeos-chat-skill-manage {
+  min-width: 0;
+  border: 0 !important;
+  border-radius: 0 !important;
+  color: inherit !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.lifeos-chat-skill-select {
+  display: flex !important;
+  min-height: 40px !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 6px 7px !important;
+  text-align: left !important;
+}
+
+.lifeos-chat-skill-select-state {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  opacity: 0;
+}
+
+.lifeos-chat-skill-option.is-active .lifeos-chat-skill-select-state {
+  opacity: 1;
+}
+
+.lifeos-chat-skill-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 620;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-chat-skill-manage {
+  display: inline-flex !important;
+  width: 30px !important;
+  min-height: 40px !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  border-left: 1px solid color-mix(in srgb, currentColor 14%, transparent) !important;
+  opacity: 0.66;
+}
+
+.lifeos-chat-skill-manage:hover,
+.lifeos-chat-skill-manage:focus-visible {
+  opacity: 1;
+  background: color-mix(in srgb, currentColor 10%, transparent) !important;
+}
+
+.lifeos-chat-skill-select:focus-visible,
+.lifeos-chat-skill-manage:focus-visible {
+  outline: 2px solid var(--interactive-accent) !important;
+  outline-offset: -2px !important;
+}
+
+.lifeos-skill-category.is-filtered-out,
+.lifeos-chat-skill-option.is-filtered-out {
+  display: none !important;
+}
+
+.lifeos-skill-picker-search-empty {
+  padding: 18px;
+  color: var(--text-muted);
+  text-align: center;
+  font-size: 12px;
+}
+
+.lifeos-skill-picker-search-empty.is-hidden {
+  display: none;
+}
+
+/* Keep the sibling Settings selector compact and consistent. */
+.lifeos-settings-skill-list {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 170px), 1fr)) !important;
+  gap: 6px !important;
+}
+
+.lifeos-settings-skill-option {
+  min-height: 48px !important;
+  grid-template-columns: 18px minmax(0, 1fr) !important;
+  grid-template-rows: auto auto !important;
+  gap: 1px 7px !important;
+  padding: 7px 8px !important;
+  border-radius: 8px !important;
+}
+
+.lifeos-settings-skill-option input {
+  grid-row: 1 / span 2 !important;
+  align-self: center !important;
+}
+
+.lifeos-settings-skill-name,
+.lifeos-settings-skill-desc {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* Skill editor modal */
+.modal:has(.lifeos-skill-editor-modal) {
+  --lifeos-modal-width: min(720px, calc(100vw - 32px));
+}
+
+.modal:has(.lifeos-skill-editor-modal) .modal-content {
+  width: var(--lifeos-modal-width) !important;
+  max-width: var(--lifeos-modal-width) !important;
+}
+
+.lifeos-skill-editor-modal .lifeos-modal-body {
+  display: grid;
+  gap: 12px;
+  max-height: min(68vh, 680px);
+  overflow: auto;
+}
+
+.lifeos-skill-editor-source {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  font-size: 12px;
+}
+
+.lifeos-skill-editor-source > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-skill-editor-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.lifeos-skill-editor-form .lifeos-field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.lifeos-skill-editor-form .lifeos-field:has(textarea),
+.lifeos-skill-editor-note,
+.lifeos-skill-editor-custom-category {
+  grid-column: 1 / -1;
+}
+
+.lifeos-skill-editor-form :is(input, select, textarea) {
+  width: 100%;
+  max-width: 100%;
+  border-radius: 7px;
+}
+
+.lifeos-skill-editor-form textarea {
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.lifeos-skill-editor-custom-category {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 10px;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-secondary-alt);
+}
+
+.lifeos-skill-editor-custom-category.is-hidden {
+  display: none;
+}
+
+.lifeos-skill-editor-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  background: var(--background-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.lifeos-skill-editor-note > span:first-child {
+  display: inline-flex;
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  color: var(--interactive-accent);
+}
+
+.lifeos-skill-editor-remove {
+  margin-right: auto !important;
+  color: var(--text-error) !important;
+}
+
+.lifeos-github-skill-name-field {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 700px) {
+  .lifeos-chat-view-host .lifeos-chat-skill-dropdown-panel,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-dropdown-panel,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-skill-dropdown-panel {
+    width: min(94vw, 820px) !important;
+    max-width: min(94vw, 820px) !important;
+  }
+
+  .lifeos-chat-view-host .lifeos-skill-picker-redesigned .lifeos-chat-skill-list-expanded,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-skill-picker-redesigned .lifeos-chat-skill-list-expanded,
+  .lifeos-root.lifeos-chat-root .lifeos-skill-picker-redesigned .lifeos-chat-skill-list-expanded {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 138px), 1fr)) !important;
+  }
+
+  .lifeos-skill-editor-form,
+  .lifeos-skill-editor-custom-category {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* Life OS compact Skill library and management end */
+
+/* Life OS direct Weixin iLink connection */
+.lifeos-settings .lifeos-weixin-card {
+  grid-column: 1 / -1;
+}
+
+.lifeos-weixin-card :is(.lifeos-weixin-groups, .lifeos-weixin-project-select) {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.lifeos-weixin-vision-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--lifeos-accent) 24%, var(--background-modifier-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--lifeos-accent) 6%, var(--background-primary));
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.lifeos-weixin-vision-hint.is-warning {
+  border-color: color-mix(in srgb, var(--text-warning) 34%, var(--background-modifier-border));
+  background: color-mix(in srgb, var(--text-warning) 7%, var(--background-primary));
+}
+
+.lifeos-weixin-vision-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.lifeos-weixin-vision-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.lifeos-weixin-connection {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--interactive-accent) 5%, var(--background-secondary));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 16%, transparent),
+    0 12px 28px rgba(15, 23, 42, 0.06);
+}
+
+.lifeos-weixin-connection-head {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lifeos-weixin-connection-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.lifeos-weixin-status {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--background-primary);
+  color: var(--text-muted);
+  box-shadow: inset 0 0 0 1px var(--background-modifier-border);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.lifeos-weixin-status-connected {
+  background: color-mix(in srgb, var(--color-green) 12%, var(--background-primary));
+  color: var(--color-green);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-green) 26%, transparent);
+}
+
+.lifeos-weixin-status-waiting-scan,
+.lifeos-weixin-status-scanned,
+.lifeos-weixin-status-verification-required,
+.lifeos-weixin-status-requesting-qr,
+.lifeos-weixin-status-reconnecting {
+  background: color-mix(in srgb, var(--interactive-accent) 11%, var(--background-primary));
+  color: var(--interactive-accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 25%, transparent);
+}
+
+.lifeos-weixin-status-error,
+.lifeos-weixin-status-expired {
+  background: color-mix(in srgb, var(--text-error) 10%, var(--background-primary));
+  color: var(--text-error);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-error) 22%, transparent);
+}
+
+.lifeos-weixin-qr-wrap {
+  display: grid;
+  grid-template-columns: 188px minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--background-primary);
+  box-shadow: inset 0 0 0 1px var(--background-modifier-border);
+}
+
+.lifeos-weixin-qr {
+  display: block;
+  width: 188px;
+  height: 188px;
+  border-radius: 10px;
+  background: #fff;
+  outline: 1px solid rgba(0, 0, 0, 0.1);
+  outline-offset: -1px;
+  image-rendering: pixelated;
+  user-select: none;
+}
+
+.lifeos-weixin-qr-copy {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lifeos-weixin-qr-copy > strong {
+  color: var(--text-normal);
+  font-size: 16px;
+  text-wrap: balance;
+}
+
+.lifeos-weixin-qr-copy > :is(p, span) {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+.lifeos-weixin-verify {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.lifeos-weixin-actions,
+.lifeos-weixin-access-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lifeos-weixin-card :is(.lifeos-weixin-actions, .lifeos-weixin-access-actions, .lifeos-weixin-verify) .lifeos-button {
+  min-height: 40px;
+  border-radius: 10px;
+  transition-property: transform, background-color, border-color, color, box-shadow;
+  transition-duration: 100ms, 140ms, 140ms, 140ms, 140ms;
+  transition-timing-function: ease;
+}
+
+.lifeos-weixin-card :is(.lifeos-weixin-actions, .lifeos-weixin-access-actions, .lifeos-weixin-verify) .lifeos-button:active {
+  transform: scale(0.96);
+}
+
+.lifeos-weixin-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lifeos-weixin-facts > span {
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: var(--background-primary);
+  box-shadow: inset 0 0 0 1px var(--background-modifier-border);
+}
+
+.lifeos-weixin-account-section {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.lifeos-weixin-account-head {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.lifeos-weixin-account-head > span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.lifeos-weixin-account-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 8px;
+}
+
+.lifeos-weixin-account-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--background-primary);
+  box-shadow: inset 0 0 0 1px var(--background-modifier-border);
+}
+
+.lifeos-weixin-account-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.lifeos-weixin-account-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.lifeos-weixin-account-title .lifeos-weixin-status {
+  min-height: 22px;
+  padding: 3px 7px;
+}
+
+.lifeos-weixin-account-copy > span {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-weixin-account-actions {
+  display: flex;
+  align-items: center;
+}
+
+.lifeos-weixin-account-actions .lifeos-button {
+  min-height: 36px;
+  border-radius: 10px;
+}
+
+.lifeos-weixin-error {
+  color: var(--text-error);
+  font-size: 12px;
+}
+
+.lifeos-weixin-error > summary {
+  min-height: 40px;
+  cursor: pointer;
+}
+
+.lifeos-weixin-error > code {
+  display: block;
+  overflow-wrap: anywhere;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--background-primary);
+  white-space: pre-wrap;
+}
+
+.lifeos-weixin-access-section {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--background-secondary-alt);
+  box-shadow: inset 0 0 0 1px var(--background-modifier-border);
+}
+
+.lifeos-weixin-access-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr));
+  gap: 8px;
+}
+
+.lifeos-weixin-access-item {
+  display: flex;
+  min-width: 0;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--background-primary);
+  box-shadow: inset 0 0 0 1px var(--background-modifier-border);
+}
+
+.lifeos-weixin-access-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.lifeos-weixin-access-copy > :is(strong, span) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-weixin-access-copy > span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.lifeos-weixin-advanced {
+  padding: 2px 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.lifeos-weixin-advanced > summary {
+  min-height: 40px;
+  cursor: pointer;
+  color: var(--text-normal);
+  font-weight: 650;
+}
+
+.lifeos-weixin-guide {
+  margin: 10px 0 8px;
+  padding-left: 22px;
+}
+
+.lifeos-weixin-groups {
+  min-height: 82px;
+  resize: vertical;
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@media (max-width: 760px) {
+  .lifeos-weixin-qr-wrap {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    text-align: center;
+  }
+
+  .lifeos-weixin-access-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .lifeos-weixin-account-head,
+  .lifeos-weixin-account-item {
+    align-items: flex-start;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lifeos-weixin-account-head {
+    display: grid;
+  }
+
+  .lifeos-weixin-account-actions,
+  .lifeos-weixin-account-actions .lifeos-button {
+    width: 100%;
+  }
+
+  .lifeos-weixin-access-actions,
+  .lifeos-weixin-access-actions .lifeos-button,
+  .lifeos-weixin-verify {
+    width: 100%;
+  }
+
+  .lifeos-weixin-verify {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* Life OS direct Weixin iLink connection end */
+
+/* Life OS standalone settings center */
+.lifeos-settings-page {
+  width: 100%;
+  min-width: 0;
+  padding: clamp(16px, 2.2vw, 30px);
+}
+
+.lifeos-settings-page > .lifeos-settings-full {
+  width: 100%;
+  max-width: min(1480px, 100%) !important;
+  min-height: 100%;
+  margin-inline: auto;
+  padding: 0;
+  box-sizing: border-box;
+  background: transparent;
+}
+
+.lifeos-settings-page .lifeos-settings-hero,
+.lifeos-settings-page .lifeos-settings-grid {
+  width: 100%;
+  max-width: none;
+}
+
+.lifeos-settings-page .lifeos-settings-hero {
+  margin-bottom: 18px;
+  padding: clamp(20px, 2.4vw, 30px);
+  border: 1px solid var(--lifeos-border, var(--background-modifier-border));
+  border-radius: 20px;
+  background: var(--lifeos-surface, var(--background-primary));
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.06);
+}
+
+.lifeos-settings-page > .lifeos-settings-full .lifeos-settings-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-flow: row dense;
+  align-items: start;
+  gap: 20px;
+}
+
+.lifeos-settings-page .lifeos-settings-card {
+  min-width: 0;
+  max-width: none;
+  padding: clamp(18px, 2vw, 24px);
+  border-radius: 18px;
+}
+
+.lifeos-settings-page :is(
+  .lifeos-settings-section-theme,
+  .lifeos-settings-section-ai,
+  .lifeos-settings-section-chat,
+  .lifeos-settings-section-weixin,
+  .lifeos-settings-section-wiki,
+  .lifeos-settings-section-heatmap
+) {
+  grid-column: 1 / -1;
+}
+
+.lifeos-settings-page .lifeos-settings-full .lifeos-setting-row {
+  grid-template-columns: minmax(190px, 0.78fr) minmax(240px, 1.22fr) !important;
+  align-items: center;
+  column-gap: clamp(18px, 2vw, 30px);
+}
+
+.lifeos-settings-page .lifeos-settings-full .lifeos-setting-row-vertical {
+  grid-template-columns: minmax(0, 1fr) !important;
+  align-items: start;
+}
+
+.lifeos-settings-page .lifeos-settings-full .lifeos-setting-copy,
+.lifeos-settings-page .lifeos-settings-full .lifeos-setting-row > :not(.lifeos-setting-copy) {
+  width: 100% !important;
+  max-width: none !important;
+  justify-self: stretch !important;
+}
+
+.lifeos-settings-page .lifeos-settings-full .lifeos-setting-row select {
+  width: min(100%, 520px) !important;
+  max-width: 520px !important;
+}
+
+.lifeos-settings-page .lifeos-settings-full .lifeos-setting-row input:not([type="checkbox"]) {
+  width: min(100%, 680px) !important;
+  max-width: 680px !important;
+}
+
+.lifeos-settings-page .lifeos-settings-full .lifeos-setting-row textarea,
+.lifeos-settings-page .lifeos-settings-full .lifeos-setting-row-vertical :is(
+  .lifeos-theme-gallery-panel,
+  .lifeos-theme-preview-grid,
+  .lifeos-settings-skill-details,
+  .lifeos-settings-skill-list
+) {
+  width: 100% !important;
+  max-width: none !important;
+}
+
+.lifeos-settings-page .lifeos-settings-full .lifeos-secret-input {
+  width: min(100%, 680px) !important;
+  max-width: 680px !important;
+}
+
+.lifeos-settings-page .lifeos-settings-actions {
+  gap: 8px;
+}
+
+.lifeos-settings-page .lifeos-settings-actions .lifeos-button,
+.lifeos-settings-page .lifeos-settings-card button {
+  border-radius: 10px;
+}
+
+@media (min-width: 1181px) {
+  .lifeos-settings-page .lifeos-settings-full :is(
+    .lifeos-settings-section-chat,
+    .lifeos-settings-section-wiki
+  ) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+
+  .lifeos-settings-page .lifeos-settings-full :is(
+    .lifeos-settings-section-chat,
+    .lifeos-settings-section-wiki
+  ) > :is(
+    .lifeos-settings-card-header,
+    .lifeos-setting-row-vertical,
+    .lifeos-settings-help,
+    .lifeos-settings-advanced
+  ) {
+    grid-column: 1 / -1;
+  }
+
+  .lifeos-settings-page .lifeos-theme-preview-card {
+    min-height: 238px;
+    padding: 15px;
+  }
+
+  .lifeos-settings-page .lifeos-theme-preview-scene {
+    min-height: 96px;
+  }
+}
+
+.lifeos-settings-launcher {
+  min-height: 0;
+  padding: 18px;
+}
+
+.lifeos-settings-launcher-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px;
+  width: min(100%, 760px);
+  margin: 0 auto;
+  padding: 22px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 18px;
+  background: var(--background-primary);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.07);
+}
+
+.lifeos-settings-launcher-icon {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary));
+  color: var(--interactive-accent);
+}
+
+.lifeos-settings-launcher-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.lifeos-settings-launcher-copy {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+}
+
+.lifeos-settings-launcher-copy .setting-item {
+  padding: 0;
+  border: 0;
+}
+
+.lifeos-settings-launcher-copy p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.65;
+}
+
+.lifeos-settings-launcher-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lifeos-settings-launcher-facts span {
+  padding: 5px 9px;
+  border-radius: 8px;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.lifeos-settings-launcher-button {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  border-radius: 10px;
+}
+
+@media (max-width: 1180px) {
+  .lifeos-settings-page > .lifeos-settings-full .lifeos-settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .lifeos-settings-page .lifeos-settings-card {
+    grid-column: 1;
+  }
+}
+
+@media (max-width: 760px) {
+  .lifeos-settings-page {
+    padding: 10px;
+  }
+
+  .lifeos-settings-page .lifeos-settings-full .lifeos-setting-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px;
+  }
+
+  .lifeos-settings-launcher-card {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 18px;
+  }
+}
+/* Life OS standalone settings center end */
+
+/* Life OS settings one-screen workspace */
+.workspace-leaf-content[data-type="personal-life-system-settings"] > .view-content,
+.workspace-leaf-content[data-type="personal-life-system-settings"] .lifeos-root,
+.workspace-leaf-content[data-type="personal-life-system-settings"] .lifeos-shell {
+  height: 100%;
+  min-height: 0;
+}
+
+.lifeos-settings-main {
+  width: 100% !important;
+  max-width: none !important;
+  height: 100%;
+  min-height: 0;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+.workspace-leaf-content[data-type="personal-life-system-settings"]
+  .lifeos-root.lifeos-is-narrow-pane
+  > .lifeos-shell
+  > .lifeos-sidebar {
+  display: none !important;
+}
+
+.workspace-leaf-content[data-type="personal-life-system-settings"]
+  .lifeos-root.lifeos-is-narrow-pane
+  > .lifeos-shell {
+  display: block !important;
+  height: 100%;
+  min-height: 0;
+}
+
+.lifeos-settings-page {
+  height: 100%;
+  min-height: 0;
+  padding: clamp(10px, 1.25vw, 18px);
+  overflow: hidden;
+}
+
+.lifeos-settings-page > .lifeos-settings-full {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+}
+
+.lifeos-settings-page .lifeos-settings-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 0;
+  padding: 13px 16px !important;
+  border-radius: 16px;
+}
+
+.lifeos-settings-toolbar-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.lifeos-settings-toolbar-copy .lifeos-kicker {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.lifeos-settings-toolbar-copy h1 {
+  margin: 0;
+  font-size: clamp(20px, 1.65vw, 25px);
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
+.lifeos-settings-toolbar-copy p {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+  text-wrap: pretty;
+}
+
+.lifeos-settings-toolbar .lifeos-settings-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.lifeos-settings-toolbar .lifeos-settings-actions .lifeos-button {
+  min-height: 40px;
+  padding: 7px 12px;
+  white-space: nowrap;
+  transition-property: transform, background-color, border-color, color, box-shadow;
+  transition-duration: 100ms, 140ms, 140ms, 140ms, 140ms;
+}
+
+.lifeos-settings-toolbar .lifeos-settings-actions .lifeos-button:active,
+.lifeos-settings-nav-button:active,
+.lifeos-settings-overview-open:active {
+  transform: scale(0.96);
+}
+
+.lifeos-settings-workspace {
+  display: grid;
+  grid-template-columns: 218px minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+
+.lifeos-settings-nav,
+.lifeos-settings-stage {
+  min-width: 0;
+  min-height: 0;
+  border-radius: 16px;
+  background: var(--lifeos-settings-shell-bg, var(--background-primary));
+  box-shadow:
+    inset 0 0 0 1px var(--lifeos-settings-shell-border, var(--background-modifier-border)),
+    0 12px 30px rgba(15, 23, 42, 0.05);
+}
+
+.lifeos-settings-nav {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 10px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.lifeos-settings-nav-overview,
+.lifeos-settings-nav-group,
+.lifeos-settings-nav-list {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.lifeos-settings-nav-group-label {
+  padding: 4px 8px 1px;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: 0.06em;
+}
+
+.lifeos-settings-nav-button {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: left;
+  transition-property: transform, background-color, color, box-shadow;
+  transition-duration: 100ms, 140ms, 140ms, 140ms;
+}
+
+.lifeos-settings-nav-button:hover {
+  color: var(--text-normal);
+  background: color-mix(in srgb, var(--interactive-accent) 6%, var(--background-primary));
+}
+
+.lifeos-settings-nav-button.is-active {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+}
+
+.lifeos-settings-nav-icon {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+}
+
+.lifeos-settings-nav-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.lifeos-settings-nav-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.lifeos-settings-nav-title {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-settings-nav-description {
+  display: none;
+  overflow: hidden;
+  font-size: 10px;
+  line-height: 1.25;
+  opacity: 0.78;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-settings-stage {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.lifeos-settings-stage-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 14px;
+  box-shadow: inset 0 -1px 0 var(--lifeos-settings-shell-border, var(--background-modifier-border));
+}
+
+.lifeos-settings-stage-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.lifeos-settings-stage-copy h2 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+.lifeos-settings-stage-copy p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+
+.lifeos-settings-stage-hint {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.lifeos-settings-stage-hint-icon,
+.lifeos-settings-stage-hint-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.lifeos-settings-panel {
+  min-width: 0;
+  min-height: 0;
+  padding: 10px;
+  overflow: hidden;
+}
+
+.lifeos-settings-panel > :is(.lifeos-settings-overview, .lifeos-settings-grid) {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.lifeos-settings-panel .is-settings-section-hidden {
+  display: none !important;
+}
+
+.lifeos-settings-overview {
+  display: block;
+  padding: 2px;
+  overflow: hidden;
+}
+
+.lifeos-settings-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: minmax(156px, max-content);
+  align-content: start;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+}
+
+.lifeos-settings-overview-card {
+  display: grid;
+  grid-template-rows: auto repeat(2, minmax(38px, auto));
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  padding: 11px;
+  border-radius: 14px;
+  background: var(--lifeos-settings-row-bg, var(--background-primary));
+  box-shadow:
+    inset 0 0 0 1px var(--lifeos-settings-row-border, var(--background-modifier-border)),
+    0 6px 16px rgba(15, 23, 42, 0.035);
+}
+
+.lifeos-settings-overview-card-head {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lifeos-settings-overview-card-icon {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+  color: var(--interactive-accent);
+}
+
+.lifeos-settings-overview-card-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.lifeos-settings-overview-card-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.lifeos-settings-overview-card-copy strong {
+  overflow: hidden;
+  color: var(--text-normal);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-settings-overview-card-copy span {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-settings-overview-open {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition-property: transform, background-color, color;
+  transition-duration: 100ms, 140ms, 140ms;
+}
+
+.lifeos-settings-overview-open:hover {
+  background: var(--background-secondary);
+  color: var(--interactive-accent);
+}
+
+.lifeos-settings-overview-open svg {
+  width: 15px;
+  height: 15px;
+}
+
+.lifeos-settings-overview-field {
+  display: grid;
+  grid-template-columns: minmax(62px, 0.34fr) minmax(0, 1fr);
+  min-width: 0;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+}
+
+.lifeos-settings-overview-field-label {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-settings .lifeos-settings-overview-field :is(input:not([type="checkbox"]), select) {
+  width: 100% !important;
+  max-width: none !important;
+  min-height: 36px;
+  padding-block: 5px;
+  border-radius: 9px;
+  font-size: 11.5px;
+}
+
+.lifeos-settings-overview-toggle {
+  display: inline-flex;
+  width: 100%;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 9px;
+  border-radius: 9px;
+  background: var(--background-primary);
+  box-shadow: inset 0 0 0 1px var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.lifeos-settings-panel > .lifeos-settings-grid {
+  display: block !important;
+  overflow: hidden;
+}
+
+.lifeos-settings-panel .lifeos-settings-card {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 10px !important;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 13px !important;
+  border-radius: 14px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.lifeos-settings-panel .lifeos-settings-card > :is(
+  .lifeos-settings-card-header,
+  .lifeos-setting-row-vertical,
+  .lifeos-provider-status,
+  .lifeos-provider-grid,
+  .lifeos-settings-help,
+  .lifeos-settings-advanced,
+  .lifeos-settings-actions,
+  .lifeos-theme-quick-row,
+  .lifeos-theme-gallery-details,
+  .lifeos-weixin-vision-hint,
+  .lifeos-weixin-connection,
+  .lifeos-weixin-account-section,
+  .lifeos-weixin-access-section,
+  .lifeos-weixin-advanced
+) {
+  grid-column: 1 / -1;
+}
+
+.lifeos-settings-panel .lifeos-settings-card > .lifeos-setting-row-vertical:not(.lifeos-theme-swatch-row):not(:has(.lifeos-settings-skill-details)) {
+  grid-column: auto;
+}
+
+.lifeos-settings-panel .lifeos-settings-card-header {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 9px;
+  margin-bottom: 1px;
+}
+
+.lifeos-settings-panel .lifeos-settings-card-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+}
+
+.lifeos-settings-panel .lifeos-settings-card-header .setting-item {
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.lifeos-settings-panel .lifeos-settings-card-header .setting-item-heading {
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.lifeos-settings-panel .lifeos-settings-card-header p {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.lifeos-settings-panel .lifeos-settings-card .lifeos-setting-row,
+.lifeos-settings-panel .lifeos-settings-card .setting-item {
+  gap: 5px !important;
+  min-height: auto;
+  padding: 9px 10px !important;
+  border-radius: 11px !important;
+}
+
+.lifeos-settings-panel .lifeos-settings-card .lifeos-setting-label {
+  font-size: 11.5px;
+  line-height: 1.3;
+}
+
+.lifeos-settings-panel .lifeos-settings-card .lifeos-setting-description {
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.lifeos-settings-panel .lifeos-settings-card :is(input:not([type="checkbox"]), select, textarea, .lifeos-input) {
+  min-height: 36px;
+  font-size: 11.5px;
+}
+
+.lifeos-settings-panel .lifeos-settings-card .lifeos-toggle-card {
+  min-height: 36px;
+  border-radius: 9px;
+}
+
+.lifeos-settings-panel .lifeos-theme-gallery-details {
+  border-radius: 12px !important;
+}
+
+.lifeos-settings-panel .lifeos-theme-swatch-summary {
+  min-height: 48px;
+  padding: 9px 11px;
+}
+
+.lifeos-settings-panel .lifeos-theme-gallery-panel {
+  gap: 10px;
+  padding: 10px;
+}
+
+.lifeos-settings-panel .lifeos-theme-preview-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+  gap: 10px;
+}
+
+.lifeos-settings-panel .lifeos-theme-preview-card {
+  min-height: 196px;
+  padding: 11px;
+  border-radius: 14px;
+}
+
+.lifeos-settings-panel .lifeos-theme-preview-scene {
+  min-height: 74px;
+}
+
+@media (max-width: 1180px) {
+  .lifeos-settings-page {
+    padding: 8px 10px;
+  }
+
+  .lifeos-settings-page > .lifeos-settings-full {
+    gap: 8px;
+  }
+
+  .lifeos-settings-page .lifeos-settings-toolbar {
+    padding: 10px 14px !important;
+  }
+
+  .lifeos-settings.lifeos-is-narrow-pane .lifeos-settings-toolbar-copy :is(h1, p) {
+    display: none;
+  }
+
+  .lifeos-settings-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .lifeos-settings-nav {
+    display: flex;
+    gap: 6px;
+    padding: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+  }
+
+  .lifeos-settings-nav-overview,
+  .lifeos-settings-nav-group,
+  .lifeos-settings-nav-list {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 5px;
+  }
+
+  .lifeos-settings-nav-group-label {
+    display: none;
+  }
+
+  .lifeos-settings-nav-button {
+    width: auto;
+    min-width: max-content;
+    padding-inline: 10px;
+  }
+
+  .lifeos-settings-nav-description {
+    display: none !important;
+  }
+
+  .lifeos-settings-overview-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-auto-rows: minmax(144px, max-content);
+    gap: 8px;
+  }
+
+  .lifeos-settings-overview-card {
+    grid-template-rows: auto repeat(2, minmax(34px, auto));
+    gap: 5px;
+    padding: 8px;
+  }
+
+  .lifeos-settings-overview-field {
+    min-height: 34px;
+  }
+
+  .lifeos-settings .lifeos-settings-overview-field :is(input:not([type="checkbox"]), select),
+  .lifeos-settings-overview-toggle {
+    min-height: 32px;
+  }
+
+  .lifeos-settings-stage-header {
+    padding-block: 9px;
+  }
+
+  .lifeos-settings-panel {
+    padding: 8px;
+  }
+}
+
+@media (max-width: 900px) {
+  .lifeos-settings-page .lifeos-settings-toolbar {
+    align-items: flex-start;
+  }
+
+  .lifeos-settings-toolbar-copy p,
+  .lifeos-settings-stage-hint {
+    display: none;
+  }
+
+  .lifeos-settings-toolbar .lifeos-settings-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .lifeos-settings-panel .lifeos-settings-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lifeos-settings-panel .lifeos-settings-card > .lifeos-setting-row-vertical:not(.lifeos-theme-swatch-row):not(:has(.lifeos-settings-skill-details)) {
+    grid-column: 1;
+  }
+}
+
+@media (max-width: 760px) {
+  .workspace-leaf-content[data-type="personal-life-system-settings"] > .view-content,
+  .workspace-leaf-content[data-type="personal-life-system-settings"] .lifeos-root,
+  .workspace-leaf-content[data-type="personal-life-system-settings"] .lifeos-shell,
+  .lifeos-settings-main,
+  .lifeos-settings-page,
+  .lifeos-settings-page > .lifeos-settings-full {
+    height: auto;
+    min-height: 100%;
+    overflow: visible !important;
+  }
+
+  .lifeos-settings-page > .lifeos-settings-full {
+    display: grid;
+  }
+
+  .lifeos-settings-page .lifeos-settings-toolbar {
+    display: grid;
+    gap: 10px;
+  }
+
+  .lifeos-settings-toolbar .lifeos-settings-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .lifeos-settings-toolbar .lifeos-settings-actions .lifeos-button {
+    width: 100%;
+    padding-inline: 6px;
+  }
+
+  .lifeos-settings-workspace,
+  .lifeos-settings-stage {
+    display: grid;
+    grid-template-rows: auto auto;
+    overflow: visible;
+  }
+
+  .lifeos-settings-panel,
+  .lifeos-settings-panel > :is(.lifeos-settings-overview, .lifeos-settings-grid),
+  .lifeos-settings-panel .lifeos-settings-card {
+    height: auto;
+    overflow: visible;
+  }
+
+  .lifeos-settings-overview {
+    overflow: visible;
+  }
+
+  .lifeos-settings-overview-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: auto;
+  }
+}
+/* Life OS settings one-screen workspace end */

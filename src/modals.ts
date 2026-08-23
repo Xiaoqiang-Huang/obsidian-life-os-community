@@ -1,10 +1,11 @@
-import { App, Component, MarkdownRenderer, Modal, Notice } from "obsidian";
+import { App, Component, Modal, Notice } from "obsidian";
 import type { IPlugin } from "./plugin-api";
 import { buildSystemPrompt } from "./ai";
-import { evaluateAnswer, formatEvaluation, generatePracticePlan } from "./exam/interview";
+import { evaluateAnswer, formatEvaluation, generatePracticePlan, type ScoreResult } from "./exam/interview";
 import { listExamFiles, parseFrontmatter } from "./exam/data";
 import { requireProFeature } from "./licensing/entitlement";
-import { getCivilServiceInterviewThinkingModelPrompt, normalizeExamProfileType } from "./settings";
+import { getCivilServiceInterviewThinkingModelPrompt, getExamProfileLabel, normalizeExamProfileType } from "./settings";
+import { renderMarkdownDisplay } from "./utils/markdown-render";
 
 export function sanitizeFileName(name: string): string {
   return name.replace(/[\\/:*?"<>|]/g, "-").replace(/\s+/g, " ").trim();
@@ -170,15 +171,21 @@ export class InterviewPracticeModal extends Modal {
       attr: { placeholder: "点击 AI 评价或 AI 结构化评分后显示结果..." }
     });
     evaluationArea.rows = 7;
+    let evaluationResult: ScoreResult | null = null;
 
     const row = contentEl.createDiv({ cls: "pls-button-row" });
     row.createEl("button", { text: "🤖 AI 生成题目" }).onclick = async () => {
       if (!requireProFeature(this.plugin, "aiExamCoach")) return;
       const catName = INTERVIEW_CATEGORIES.find(c => c.key === categorySelect.value)?.name ?? "综合分析";
+      const examLabel = getExamProfileLabel(this.plugin.settings);
+      const isCivilServiceProfile = normalizeExamProfileType(this.plugin.settings.examProfileType) === "civil-service";
+      const prompt = isCivilServiceProfile
+        ? `请生成一道公务员结构化面试题，题型：${catName}。只输出题目，不要解释。`
+        : `请生成一道适合${examLabel}备考场景的面试或口述练习题，题型：${catName}。不要套用公务员结构化面试身份或政策治理模型。只输出题目，不要解释。`;
       const response = await this.plugin.ai.complete({
         messages: [
           { role: "system", content: buildSystemPrompt(this.plugin.settings) },
-          { role: "user", content: `请生成一道公务员结构化面试题，题型：${catName}。只输出题目，不要解释。` }
+          { role: "user", content: prompt }
         ]
       });
       if (response.ok && response.text) {
@@ -199,6 +206,7 @@ export class InterviewPracticeModal extends Modal {
         categorySelect.value
       );
       if (result) {
+        evaluationResult = result;
         evaluationArea.value = formatEvaluation(result);
         new Notice(`评分完成：${result.totalScore}/10`);
       } else {
@@ -211,7 +219,12 @@ export class InterviewPracticeModal extends Modal {
         category: catName,
         question: question.value,
         answer: answer.value,
-        evaluation: evaluationArea.value
+        evaluation: evaluationArea.value,
+        scores: evaluationResult?.scores,
+        totalScore: evaluationResult?.totalScore,
+        objectiveAssessment: evaluationResult?.objectiveAssessment,
+        encouragement: evaluationResult?.encouragement,
+        nextDrill: evaluationResult?.nextDrill
       });
       await this.app.workspace.getLeaf(false).openFile(file);
       this.close();
@@ -222,7 +235,7 @@ export class InterviewPracticeModal extends Modal {
     planSection.createEl("h3", { text: "练习计划" });
     const planText = generatePracticePlan([categorySelect.value], history ?? undefined);
     const planBody = planSection.createDiv();
-    void MarkdownRenderer.renderMarkdown(planText, planBody, "", this.mdComponent);
+    void renderMarkdownDisplay(this.app, this.mdComponent, planBody, planText);
   }
 
   onClose(): void {
@@ -328,7 +341,7 @@ export class InterviewPracticeModal extends Modal {
       vocational: { framework: "岗位职责 → 自身匹配 → 短板改进 → 入职计划", pitfalls: "动机只讲稳定、优势与岗位脱节", drill: "把岗位职责整理成3个关键词匹配经历", time: 150 },
       situation: { framework: "进入角色 → 共情沟通 → 解释规则 → 给出方案", pitfalls: "不像现场说话、只有道理没对象感", drill: "把答案改成可直接说出口的话", time: 150 },
       leaderless_group: { framework: "提出观点 → 回应他人 → 推进共识 → 总结输出", pitfalls: "抢话过多、沉默无贡献", drill: "练习30秒立论、20秒回应、30秒总结", time: 240 },
-      professional: { framework: "专业判断 → 依据说明 → 实务处理 → 风险提示", pitfalls: "术语堆砌、只讲技术不讲治理", drill: "用公务员语境解释技术问题", time: 180 }
+      professional: { framework: "专业判断 → 依据说明 → 实务处理 → 风险提示", pitfalls: "术语堆砌、只讲技术不讲场景", drill: "用当前备考语境解释专业问题", time: 180 }
     };
 
     const g = guidance[categoryKey];

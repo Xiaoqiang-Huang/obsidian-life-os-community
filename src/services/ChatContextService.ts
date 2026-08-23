@@ -1,9 +1,9 @@
 import type { App } from "obsidian";
-import { localizeLifeOsPathParts, normalizeDirectoryLanguage, type ChatContextMode, type PersonalLifeSystemSettings } from "../settings";
+import { localizeLifeOsPathParts, normalizeDirectoryLanguage, type ChatContextMode, type PersonalLifeSystemSettings, type WebSearchMode } from "../settings";
 import { today } from "../utils/dates";
 import { ContextEngine, chatModeToEngineMode } from "./ContextEngine";
 import { ContextSourcePolicyService } from "./context-engine/ContextSourcePolicyService";
-import type { AiLike, ContextEngineResult, ContextRetrievalTrace, ContextSource } from "./context-engine/types";
+import type { AiLike, ContextEngineResult, ContextRetrievalTrace, ContextSource, WebSearchProviderResult } from "./context-engine/types";
 import { LlmWikiContextService } from "./LlmWikiContextService";
 
 export type ChatContextKey = "daily" | "tasks" | "memory" | "review" | "knowledge" | "current-note";
@@ -39,7 +39,9 @@ export interface BuildChatContextOptions {
   userMessage?: string;
   maxChars?: number;
   fetchUrl?: (url: string) => Promise<string>;
-  searchWeb?: (query: string) => Promise<string>;
+  searchWeb?: (query: string) => Promise<WebSearchProviderResult>;
+  webSearchMode?: WebSearchMode;
+  webSearchQuery?: string;
   contextMode?: ChatContextMode;
   projectScopeId?: string;
   includeQuestionInPrompt?: boolean;
@@ -75,6 +77,8 @@ export class ChatContextService {
         projectScopeId: options.projectScopeId,
         fetchUrl: options.fetchUrl,
         searchWeb: options.searchWeb,
+        webSearchMode: options.webSearchMode,
+        webSearchQuery: options.webSearchQuery,
         useAiPlanner: options.useAiPlanner === true
       });
       const sections = result.sections;

@@ -12,6 +12,7 @@ export const USER_GUIDE_VIEW_TYPE = "personal-life-system-user-guide";
 export const PRO_LICENSE_VIEW_TYPE = "personal-life-system-pro-license";
 export const PRO_COMPARE_VIEW_TYPE = "personal-life-system-pro-compare";
 export const AI_WORKSPACE_VIEW_TYPE = "personal-life-system-ai-workspace";
+export const SETTINGS_VIEW_TYPE = "personal-life-system-settings";
 
 export const DEFAULT_LIGHT_DAILY_TEMPLATE = `---
 type: daily-note

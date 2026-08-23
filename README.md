@@ -6,7 +6,7 @@
 
 [**English**](README.md) · [简体中文](README.zh-CN.md)
 
-![Version](https://img.shields.io/badge/version-0.3.11-0f172a?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.3.12-0f172a?style=flat-square)
 ![Obsidian](https://img.shields.io/badge/Obsidian-1.5.0%2B-7c3aed?style=flat-square)
 ![Local first](https://img.shields.io/badge/data-local--first-15803d?style=flat-square)
 ![Mobile](https://img.shields.io/badge/mobile-supported-2563eb?style=flat-square)
@@ -15,11 +15,11 @@
 
 ## English
 
-Life OS Assistant turns an Obsidian vault into a connected workspace for **today, tasks, diary, knowledge, memory, reviews, AI assistance, and project AI sessions**. Your readable records remain Markdown in the vault. AI-generated content is proposed as a candidate, with its sources and destination visible before you confirm a write.
+Life OS Assistant turns an Obsidian vault into a connected workspace for **today, tasks, diary, knowledge, memory, reviews, AI assistance, and project AI sessions**. Your readable records remain Markdown in the vault. AI writeback is off by default; you can keep preview confirmation or explicitly opt in to automatic writes only when the current request names one unambiguous destination.
 
-Current release: **0.3.11** · Obsidian **1.5.0+** · `isDesktopOnly: false`
+Current release: **0.3.12** · Obsidian **1.5.0+** · `isDesktopOnly: false`
 
-> **About the images:** the walkthrough images below were generated from the current 0.3.11 information architecture and implemented workflows. They use synthetic data and a neutral Obsidian theme; your actual layout follows your Obsidian theme, viewport, and enabled features.
+> **About the images:** the walkthrough images below were generated from the current 0.3.12 information architecture and implemented workflows. They use synthetic data and a neutral Obsidian theme; your actual layout follows your Obsidian theme, viewport, and enabled features.
 
 ![Life OS Today dashboard](readme-assets/01-today-overview.webp)
 
@@ -29,7 +29,7 @@ Current release: **0.3.11** · Obsidian **1.5.0+** · `isDesktopOnly: false`
 | --- | --- | --- |
 | Today & Tasks | Plan the next action, capture tasks, carry unfinished work, and group tasks by project | Completing or moving a task is an explicit user action |
 | Diary & Check-ins | Keep a daily record, add quick captures, and retain learning/check-in history | Your authored diary text remains editable Markdown |
-| AI Assistant | Ask across selected vault context, inspect citations, and preview writeback | Answers and writes are separate; writes require confirmation |
+| AI Assistant | Ask across selected vault context, inspect citations and activity, copy replies, and control writeback | Writeback is off by default; preview mode and explicit-target auto mode are user-selected |
 | Knowledge & Memory | Import material, review LLM Wiki drafts, and confirm durable memories | Raw or AI-generated content is not formal knowledge until accepted |
 | Reviews | Build daily, weekly, monthly, or custom reviews from traceable evidence | AI refresh replaces only the AI region and preserves your notes |
 | Project Context | Manage AI coding sessions, project memory, process nodes, handoffs, and prompts | Scans are user-triggered; unmatched sessions are never auto-assigned |
@@ -51,13 +51,27 @@ The Today page combines the day's tasks, diary state, check-ins, review status, 
 
 ![Life OS AI Assistant with source citations](readme-assets/02-ai-assistant.webp)
 
-The assistant analyzes the request, retrieves a limited set of relevant vault excerpts, and cites them with markers such as `[S1]`. **Context sources** shows the exact file and excerpt behind an answer. Long chats are compacted instead of resending the whole history on every turn.
+The assistant analyzes the request, retrieves a limited set of relevant vault excerpts, and cites them with markers such as `[S1]`. **Context sources** shows the exact file, web page, and excerpt behind an answer. Long chats are compacted instead of resending the whole history on every turn.
+
+The composer now uses one ordered single-line settings row: **Mode → Project Q&A → AI model → Skill → Web → Reasoning → Context → AI reply → Writeback → Generate project whiteboard → Length → Style**. Every setting with two or more choices is a dropdown; Skill uses a multi-select dropdown. Generate project whiteboard remains a direct action. Add file is stacked immediately above Send beside the input box, so attachments stay close to the final submit action without consuming settings-row space. The old Today summary, task breakdown, weekly review, study suggestion, and More settings buttons no longer occupy the composer.
+
+The **Web** dropdown keeps search explicit and inspectable: Auto searches only for clearly time-sensitive or explicit web questions, On searches for the next questions, and Off stays local (direct URLs you provide can still be read). Life OS sends a focused search query rather than the whole conversation, may run a second query for cross-checking, fetches only the top pages, and keeps every result as a separate citable source.
+
+Selecting text no longer starts an AI request. A small choice appears first; choose **AI edit** or **Ask about selection** to open the full tool, then press the action button to call the model. Copying or manually restructuring text does not trigger background analysis.
+
+Each chat bubble is selectable and has a full-message copy action. While a reply is running, an **Activity** panel reports observable stages such as understanding the request, retrieving local/web context, generating the answer, and applying an approved write. It intentionally does not expose hidden chain-of-thought; citations and the activity summary are the inspectable evidence. The panel appears immediately, which improves progress visibility but does not reduce the model provider's network latency.
+
+The **Writeback** dropdown has three modes: **No write**, **Preview before write**, and **Auto-write explicit destination**. Auto mode runs only when the current instruction names one supported destination (for example, today's diary, knowledge, memory candidate, selected-project document, or an exact document-edit target). Vague requests such as “save this” still open a destination choice, and project writes never guess a project.
+
+The Skill picker can now import a local `.md`, `.markdown`, `.txt`, `.yaml`, `.yml`, or `.json` file directly, in addition to GitHub files and directories. Local Skill files are treated as inert prompt assets, limited to 1 MB, previewed before import, and never executed.
+
+The Skill library now uses compact rounded cards instead of tall checkbox blocks. Click a card to select it, search by name/category/description, or open its management menu to rename it, edit its description, and move it to another category. Imported Skills can also edit their prompt text or be deleted permanently; bundled Skills can be hidden and restored without losing the upgradeable built-in source. Both local and GitHub imports support a custom display name before installation.
 
 **Use it like this**
 
-1. Select a project and context mode.
-2. Ask a concrete question, then inspect **Context sources** when the answer matters.
-3. If the answer should become a diary, task, knowledge, memory, or project record, open the preview and confirm the destination.
+1. Select Mode, Project Q&A, model, Skill, Web, Reasoning, Context, AI reply, Writeback, Length, and Style from the compact dropdown row; leave **Web** on Auto for normal use.
+2. Ask a concrete question. Switch Web to On when you explicitly need current external facts, then inspect **Context sources** and open the cited pages when the answer matters.
+3. Choose the Writeback safety level you want. Keep Preview for normal use; use explicit-target auto mode only when you want commands such as “write this to today's diary” to apply without a second confirmation.
 
 ### 3. Project Context — preserve AI work as a reusable project asset
 
@@ -126,6 +140,32 @@ The bridge is bound to `127.0.0.1` and protected by a pairing token. It does not
 
 > The companion extension is distributed separately from the Obsidian Community release assets.
 
+### 7. Weixin connection — scan once and use the same Life OS from Weixin
+
+Life OS now implements the Weixin iLink Bot connection directly inside the plugin. There is no OpenClaw installation, local Gateway, port, or adapter command. The built-in connector owns QR login and message delivery; the Life OS assistant continues to own project routing, local retrieval, selected Skills, citations, permission checks, Markdown history, and controlled writeback.
+
+**Desktop setup**
+
+1. Open **Settings → Life OS Assistant → Weixin connection** and enable it.
+2. Select **Generate QR code**, scan it with the Weixin mobile app, and confirm on the phone. If Weixin requests a verification code, enter it in the same settings card.
+3. Send a private message to the newly created Bot. With the recommended pairing policy, approve the six-digit code in Life OS settings.
+4. Say “use the ROS project for this conversation” to bind the chat naturally. `/lifeos use <project>` and `/lifeos status` remain optional compatibility shortcuts.
+5. Select **Add Weixin account** to scan additional accounts. Each saved Bot keeps its own token, poll cursor, reply context, and status; removing one account does not stop the others.
+
+Each Bot account, sender, and conversation has isolated approval and project routing. The recommended **natural-language authorization** mode executes a clear, user-authored write request from an approved private chat; an AI-inferred or ambiguous mutation becomes a 24-hour proposal that the same conversation can approve by simply replying “confirm” or reject with “cancel”. Compatibility commands remain available, but are not required. Group auto-write is always blocked. Remote conversations are readable Markdown under `<Life OS root>/Chat/Weixin/`; `/lifeos new` archives the previous conversation instead of deleting it.
+
+Images are downloaded from the trusted Weixin CDN, decrypted in memory, and sent to the separately configured vision model; enable **Image vision analysis** and set **Vision model** first. Because Weixin sends an image and its instruction separately, an image-only message is held in memory for up to 15 minutes and automatically paired with the next text message. Use `/lifeos image-status` or `/lifeos cancel-image` to inspect or clear the batch. Image bytes and signed CDN URLs are never written to Markdown. A natural request such as “Xiao P, solve this data-analysis question”, “use Chen Huaian”, “let Zhengdao answer”, or “use Huasheng Shisan” invokes the matching installed Skill only for that message. Shared nicknames are narrowed by the question subject or the waiting image; the desktop Skill selection is never changed. `/skill` and `@name` remain exact-control fallbacks. Every reply rewrites LaTeX into Weixin-safe arithmetic such as `(a+b)/c` and `a*b`.
+
+The Bot is also a permission-gated remote Life OS workbench, not a separate chat toy. Users can naturally ask it to capture a diary entry, manage tasks, generate an evidence-based review, save knowledge, or schedule a reminder. “Search the web for …” runs grounded web search even when the desktop default is off; a pasted public URL is read as answer context, while “save this link to the knowledge base” fetches the readable page body through the SSRF-safe reader before creating the knowledge item. `/lifeos ...` commands remain compatibility and diagnostic shortcuts. Reminder routes are isolated per Bot account, sender, and conversation; delivery uses a stable idempotency ID with retry backoff.
+
+With **Weixin conversation → today's diary** enabled, every meaningful natural-language input from an approved private chat becomes a managed evidence entry in that day's diary. Explicit diary, task, reminder, knowledge, and review actions also write to their canonical Life OS destinations, so Weixin acts as a complete Life OS input surface rather than only a remote control. Pure confirmations, list queries, generation triggers, and diagnostic commands are omitted. Assistant replies remain in Weixin conversation history for continuity, but are never treated as proof that the user completed something. Handwritten diary content stays outside the managed block and is never overwritten.
+
+Users can say “generate today's diary from our Weixin conversation” at any time. Life OS combines the user's Weixin inputs and diary text with tasks, check-ins, and confirmed project facts, then runs the existing evidence-quality and repair pipeline. In writable modes it refreshes only the managed **Life OS end-of-day digest** block; in read-only mode it returns a preview without modifying the Vault.
+
+When **00:00 end-of-day digest** is enabled, the desktop summarizes the day that just ended, updates its diary, and proactively sends the result to every still-authorized private route that has used the Bot. Delivery is leased, retried with backoff, and keyed by a stable client ID, so a restart does not intentionally send the same digest twice. If Obsidian was closed at midnight, **catch up after startup** processes the previous day on the next launch.
+
+Login credentials are stored only in the current Vault's plugin directory as the multi-account `weixin-state.json`, never in Markdown or normal plugin settings. Removing one account deletes only that account; **Disconnect all accounts** clears the remaining local credentials. Digest delivery state stores only opaque route references under `<Life OS root>/Chat/Weixin/Daily/.daily-digest-state.json`. Desktop Obsidian must remain running for live replies, scheduled reminders, and on-time 00:00 delivery; overdue reminders and the optional previous-day digest resume after reconnect/startup. The connection creates separate Bot identities and does not read the user's personal Weixin chat history; direct messages are the reliable path, while ordinary group availability depends on the channel.
+
 ## A practical daily workflow
 
 ```text
@@ -150,7 +190,7 @@ After the listing is accepted:
 
 ### Manual installation
 
-Create `.obsidian/plugins/personal-life-system/` and copy these three assets from an exact semantic-version release tag such as `0.3.11`:
+Create `.obsidian/plugins/personal-life-system/` and copy these three assets from an exact semantic-version release tag such as `0.3.12`:
 
 - `main.js`
 - `manifest.json`
@@ -164,6 +204,7 @@ Reload Obsidian and enable **Life OS Assistant**. Do not copy another user's `da
 2. Configure an AI provider only if you want generation. Local reading, editing, export, backup, and migration remain available without an AI key.
 3. Optionally create a project and bind work directories in **Project Context**.
 4. Keep write confirmation enabled until you are familiar with every destination.
+5. Optionally enable **Weixin connection** on desktop and scan the in-plugin QR code if you want to reach the same local assistant from Weixin.
 
 ### Upgrade and uninstall
 
@@ -200,7 +241,7 @@ Life OS can make network requests only for user-visible functions:
 - Explicit web search or URL-reading requests.
 - First-use OCR runtime/language downloads from Tesseract.js/jsDelivr when the package does not contain the asset.
 - PDF upload to a user-configured PaddleOCR PP-StructureV3 endpoint.
-- GitHub Skill download after you provide or confirm a GitHub source.
+- GitHub Skill download after you provide or confirm a GitHub source. Importing a local Skill file performs no network request.
 
 The browser bridge uses loopback networking only. Life OS contains no silent client-side telemetry.
 
@@ -209,7 +250,7 @@ The browser bridge uses loopback networking only. Life OS contains no silent cli
 - Vault content stays local unless you invoke a feature that requires an AI, web, OCR, GitHub, or license request.
 - Project scans are explicit. Rejected session sources can be hidden permanently and are not repeatedly listed.
 - Imported rules and conversations are untrusted data. Sensitive patterns are redacted from supported project-memory and migration exports.
-- AI memories, project facts, knowledge drafts, and review drafts require confirmation before becoming formal records.
+- Formal memories, project facts, LLM Wiki drafts, and review drafts still require their review workflows. The optional explicit-target chat mode can directly append supported diary/knowledge/project-document writes; it never activates itself and never guesses an ambiguous destination.
 - Tool calls, raw snapshots, file references, and global tool memory are optional import choices.
 - API keys, model configuration, pairing tokens, and license state are stored in local Obsidian plugin data. Protect vault backups accordingly.
 

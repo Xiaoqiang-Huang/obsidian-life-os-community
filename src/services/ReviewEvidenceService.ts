@@ -97,8 +97,10 @@ interface WorkspaceStateShape {
 const TEMPLATE_ONLY_LINE = /^(?:[-*]\s*)?(?:\d+[.、]\s*)?(?:今天[：:]?|精力[：:]?_*\/?10|情绪[：:]?_*|睡眠[：:]?_*h?|来自昨天的[：:]?_*|明天要做[：:]?_*|#(?:科研|求职|备考|学习|健康|社交|其他)(?:\s+#\S+)*|_+|暂无)$/u;
 const MANAGED_DAILY_BLOCKS = [
   /<!--\s*pls-daily-archive:start\s*-->[\s\S]*?<!--\s*pls-daily-archive:end\s*-->/giu,
-  /<!--\s*lifeos-ai-workspace:start\s*-->[\s\S]*?<!--\s*lifeos-ai-workspace:end\s*-->/giu
+  /<!--\s*lifeos-ai-workspace:start\s*-->[\s\S]*?<!--\s*lifeos-ai-workspace:end\s*-->/giu,
+  /<!--\s*lifeos-weixin-daily-digest:start\s*-->[\s\S]*?<!--\s*lifeos-weixin-daily-digest:end\s*-->/giu
 ];
+const WEIXIN_DAILY_INPUT_BLOCK = /<!--\s*lifeos-weixin-daily-inputs:start\s*-->([\s\S]*?)<!--\s*lifeos-weixin-daily-inputs:end\s*-->/giu;
 
 /**
  * 统一日、周、月复盘使用的事实入口。所有 AI 生成都必须先经过这里，
@@ -376,6 +378,11 @@ export class ReviewEvidenceService {
 
 export function cleanReviewDailyContent(content: string): string {
   let clean = content.replace(/^---\s*\n[\s\S]*?\n---\s*/u, "");
+  clean = clean.replace(WEIXIN_DAILY_INPUT_BLOCK, (_block, body: string) => body
+    .split(/\r?\n/u)
+    .filter((line) => /^\s*-\s+\S/u.test(line))
+    .join("\n"));
+  clean = clean.replace(/<!--\s*lifeos-weixin-input:[^>]+-->/giu, "");
   for (const pattern of MANAGED_DAILY_BLOCKS) clean = clean.replace(pattern, "");
   const lines = clean.split(/\r?\n/);
   const filtered: string[] = [];

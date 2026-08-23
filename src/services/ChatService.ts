@@ -37,7 +37,12 @@ export class ChatService {
     const history: ChatHistoryItem[] = [];
     for (const file of files) {
       const content = await this.app.vault.read(file);
-      history.push({ path: file.path, title: file.basename, messages: parseChatMarkdown(content, this.assistantName) as ChatMessage[] });
+      const cachedTitle = String(this.app.metadataCache.getFileCache(file)?.frontmatter?.title ?? "").trim();
+      history.push({
+        path: file.path,
+        title: cachedTitle || this.frontmatterTitle(content) || file.basename,
+        messages: parseChatMarkdown(content, this.assistantName) as ChatMessage[]
+      });
     }
     return history;
   }
@@ -104,6 +109,21 @@ export class ChatService {
     const prefix = this.fs.path("Chat") + "/";
     return this.app.vault.getMarkdownFiles()
       .filter((file) => file.path.startsWith(prefix))
-      .sort((a, b) => b.basename.localeCompare(a.basename));
+      .sort((a, b) => b.stat.mtime - a.stat.mtime || b.basename.localeCompare(a.basename));
+  }
+
+  private frontmatterTitle(content: string): string {
+    const block = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u)?.[1] ?? "";
+    const raw = block.match(/^title:\s*(.+)$/mu)?.[1]?.trim() ?? "";
+    if (!raw) return "";
+    if (raw.startsWith('"') && raw.endsWith('"')) {
+      try {
+        const parsed = JSON.parse(raw);
+        return typeof parsed === "string" ? parsed.trim() : "";
+      } catch {
+        return raw.slice(1, -1).trim();
+      }
+    }
+    return raw.replace(/^['"]|['"]$/g, "").trim();
   }
 }
