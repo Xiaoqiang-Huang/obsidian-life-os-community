@@ -143,6 +143,16 @@ export function weixinLocalDate(value: string | Date | number = new Date()): str
   return formatDate(Number.isFinite(date.getTime()) ? date : new Date());
 }
 
+export function weixinRelativeLocalDate(
+  value: string | Date | number = new Date(),
+  offsetDays = 0
+): string {
+  const parsed = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  const date = Number.isFinite(parsed.getTime()) ? parsed : new Date();
+  date.setDate(date.getDate() + Math.trunc(offsetDays));
+  return formatDate(date);
+}
+
 function localTime(value: string | Date | number = new Date()): string {
   const date = value instanceof Date ? value : new Date(value);
   const safe = Number.isFinite(date.getTime()) ? date : new Date();

@@ -30,6 +30,7 @@ import {
   normalizeExamProfileType,
   normalizeDirectoryLanguage,
   normalizeBrowserCapturePort,
+  normalizeWebSearchProvider,
   normalizeWeixinApprovedSenders,
   normalizeWeixinConversationRoutes,
   normalizeWeixinReminderRoutes,
@@ -678,6 +679,9 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       : storedData.browserCaptureEnabled !== false;
     this.settings.browserCaptureSetupVersion = 1;
     this.settings.browserCapturePort = normalizeBrowserCapturePort(storedData.browserCapturePort);
+    this.settings.webSearchProvider = normalizeWebSearchProvider(legacyBotData.webSearchProvider);
+    this.settings.webSearchApiKey = String(legacyBotData.webSearchApiKey || "").trim();
+    this.settings.webSearchEndpoint = String(legacyBotData.webSearchEndpoint || "").trim();
     this.settings.pdfOcrEngine = normalizePdfOcrEngine(storedData.pdfOcrEngine);
     this.settings.paddleOcrEndpoint = normalizePaddleOcrEndpoint(storedData.paddleOcrEndpoint);
     this.settings.autoReviewEnabled = storedData.autoReviewEnabled === true;

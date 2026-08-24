@@ -35,6 +35,7 @@ import { PdfOcrService } from "../services/PdfOcrService";
 import { buildNumericEvidenceMarkdown, extractNumericEvidence, hasNumericIntent, type NumericEvidence } from "../services/NumericEvidenceService";
 import { MemoryService } from "../services/MemoryService";
 import {
+  createConfiguredWebSearchProvider,
   fetchReadableUrl,
   normalizeWebSearchMode,
   searchWebGrounding,
@@ -3972,11 +3973,17 @@ export class LifeOSChatView extends ItemView {
         warnings: ["此联网搜索能力需要 Pro 授权。"]
       };
     }
-    return searchWebGrounding(query, (targetUrl, options) => this.requestWebContext(targetUrl, options), {
+    const request = (targetUrl: string, options?: WebContextRequestOptions) => this.requestWebContext(targetUrl, options);
+    return searchWebGrounding(query, request, {
       maxResults: 6,
       fetchTopPages: 3,
       maxPageChars: 6000,
-      maxQueries: 2
+      maxQueries: 2,
+      searchProvider: createConfiguredWebSearchProvider({
+        type: this.plugin.settings.webSearchProvider ?? "built-in",
+        endpoint: this.plugin.settings.webSearchEndpoint,
+        apiKey: this.plugin.settings.webSearchApiKey
+      }, request)
     });
   }
 
@@ -3984,7 +3991,8 @@ export class LifeOSChatView extends ItemView {
     const response = await requestUrl({
       url,
       method: options.method ?? "GET",
-      headers: options.headers
+      headers: options.headers,
+      body: options.body
     });
     return { text: response.text, status: response.status };
   }
@@ -5024,5 +5032,3 @@ class GitHubSkillInstallModal extends Modal {
     }
   }
 }
-
-
