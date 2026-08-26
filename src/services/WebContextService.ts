@@ -16,6 +16,7 @@ export interface WebSearchItem {
   url: string;
   source: string;
   snippet: string;
+  publishedAt?: string;
   discoveredFrom?: string;
   endorsedByOfficial?: boolean;
 }
@@ -52,6 +53,20 @@ export interface WebSearchRecoveryInput {
 export interface WebSearchRecoveryPlan {
   queries: string[];
   urls?: string[];
+  /**
+   * A planner may resolve an exact non-Latin entity label to its commonly
+   * indexed Latin alias. The alias does not become evidence or authority: it
+   * only permits a bounded search query after source, target and confidence
+   * validation. Retrieved pages still need independent subject, intent and
+   * multi-source evidence checks.
+   */
+  entityAliases?: WebSearchEntityAlias[];
+}
+
+export interface WebSearchEntityAlias {
+  source: string;
+  target: string;
+  confidence: number;
 }
 
 export type WebSearchQueryPlanner = (
@@ -143,6 +158,10 @@ const WEB_EVIDENCE_INTENT_GROUPS: Array<{ query: RegExp; evidence: RegExp }> = [
   {
     query: /(政策|法规|法律|标准|policy|regulation|law|standard)/i,
     evidence: /(政策|法规|法律|标准|实施|生效|policy|regulation|law|standard|effective)/i
+  },
+  {
+    query: /(新闻|动态|消息|资讯|news)/i,
+    evidence: /(新闻|动态|消息|资讯|报道|宣布|发布|回应|采访|声明|news|reported?|announc(?:e|ed|ement)|statement|interview|\b20\d{2}[-/.年]\d{1,2})/i
   }
 ];
 const INTERNAL_RETRIEVAL_LINE_RE = /^(检索意图|当前项目|目标文档|本轮导入文件|项目范围|ContextMode|ContextEngine)\s*[：:].*$/gimu;
@@ -190,11 +209,14 @@ export function isWebEvidenceRelevant(query: string, evidence: string): boolean 
     // accidentally pass the evidence gate.
     if (!hasConcreteVersionFact(body)) return false;
   }
+  if (/(新闻|动态|消息|资讯|news)/i.test(prompt)) {
+    // A static biography or a navigation heading containing “latest news” is
+    // not a current event. Require both an event assertion and an inspectable
+    // date/freshness marker before allowing the page to ground a news answer.
+    if (!hasConcreteNewsFact(body)) return false;
+  }
 
-  const subjectTokens = (prompt.match(/[a-z][a-z0-9._+/#-]{1,}/gi) ?? [])
-    .map((token) => token.toLowerCase())
-    .filter((token) => !/^(?:api|sdk|web|online|internet|latest|current|official|price|pricing|cost|billing|version|release|search|look|up)$/i.test(token));
-  return subjectTokens.length === 0 || subjectTokens.some((token) => containsSearchToken(body, token));
+  return hasStrongSearchSubjectMatch(prompt, body);
 }
 
 /**
@@ -264,7 +286,9 @@ export function planWebSearchQueries(
   if (!base) return [];
   const maxQueries = Math.max(1, Math.min(options.maxQueries ?? 3, 5));
   const candidates = [base];
-  const year = (options.now ?? new Date()).getUTCFullYear();
+  const now = options.now ?? new Date();
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth() + 1;
   const subject = extractSearchSubjectTokens(base).slice(0, 4).join(" ");
   const intent = inferEnglishSearchIntent(base);
 
@@ -273,6 +297,13 @@ export function planWebSearchQueries(
   // This is the deterministic first stage used before an optional AI recovery
   // planner, following the same bounded plan -> retrieve -> assess shape as
   // mature research agents.
+  if (maxQueries > 1 && subject && isNewsSearchQuery(base) && /[\u3400-\u9fff]/u.test(base)) {
+    // Regional Chinese indexes return materially fresher results when “消息”
+    // is normalized to “新闻” and the current month is explicit. Keep this
+    // domain-neutral and derive the date from the request clock so tests and
+    // replayed conversations remain deterministic.
+    candidates.push(`${subject} 最新新闻 ${year}年${month}月`);
+  }
   if (maxQueries > 1 && subject && intent) candidates.push(`${subject} ${intent}`);
   if (maxQueries > 2 && subject && intent && AUTHORITATIVE_SEARCH_RE.test(base)) {
     candidates.push(`${subject} official ${intent}`);
@@ -383,15 +414,18 @@ export function createConfiguredWebSearchProvider(
   };
 }
 
-export function isWebRecoveryQueryAnchored(originalQuery: string, candidateQuery: string): boolean {
+export function isWebRecoveryQueryAnchored(
+  originalQuery: string,
+  candidateQuery: string,
+  entityAliases: WebSearchEntityAlias[] = []
+): boolean {
   const original = normalizeSearchQuery(originalQuery).toLowerCase();
   const candidate = normalizeSearchQuery(candidateQuery).toLowerCase();
   if (candidate.length < 3) return false;
-  const subjects = extractSearchSubjectTokens(original).map((item) => item.toLowerCase());
-  if (subjects.length > 0) return subjects.some((item) => candidate.includes(item));
-  const hanTerms = (original.match(/[\u3400-\u9fff]{2,8}/gu) ?? [])
-    .filter((item) => !/(?:联网|网页|网上|上网|搜索|搜一下|帮我搜|查一下|官网|官方|最新|当前|现在)/u.test(item));
-  return hanTerms.length === 0 || hanTerms.some((item) => candidate.includes(item));
+  if (hasStrongSearchSubjectMatch(original, candidate)) return true;
+  const aliases = normalizeWebSearchEntityAliases(original, entityAliases);
+  return aliases.some((alias) => hasStrongSearchSubjectMatch(alias.target, candidate)
+    && matchesEvidenceIntent(original, candidate));
 }
 
 export async function fetchReadableUrl(
@@ -456,19 +490,42 @@ export async function searchWebGrounding(
   const executedQueries = [...queries];
   const fetchedByUrl = new Map<string, { content: string; warning: string }>();
   const maxPlannerQueries = Math.max(1, Math.min(options.maxRecoveryQueries ?? 2, 3));
+  let activeEntityAliases: WebSearchEntityAlias[] = [];
+  const evidenceQueryFor = (itemQuery = ""): string => uniqueStrings([
+    cleanQuery,
+    itemQuery,
+    ...activeEntityAliases.map((item) => item.target)
+  ]).join("\n");
 
   const normalizePlannerResult = (
     proposed: string[] | WebSearchRecoveryPlan | null | undefined,
     maxQueries: number
-  ): { queries: string[]; urls: string[] } => {
+  ): { queries: string[]; urls: string[]; entityAliases: WebSearchEntityAlias[] } => {
     const proposedQueries = Array.isArray(proposed) ? proposed : proposed?.queries || [];
     const proposedUrls = Array.isArray(proposed) ? [] : proposed?.urls || [];
+    const proposedAliases = Array.isArray(proposed) ? [] : proposed?.entityAliases || [];
+    const normalizedAliases = normalizeWebSearchEntityAliases(cleanQuery, proposedAliases);
+    const aliases = [...activeEntityAliases];
+    for (const alias of normalizedAliases) {
+      const key = `${alias.source.toLowerCase()}\u0000${alias.target.toLowerCase()}`;
+      if (!aliases.some((item) => `${item.source.toLowerCase()}\u0000${item.target.toLowerCase()}` === key)) aliases.push(alias);
+    }
+    const normalizedQueries = uniqueStrings(proposedQueries.map(normalizeSearchQuery))
+      .filter((item) => !executedQueries.includes(item))
+      .filter((item) => isWebRecoveryQueryAnchored(cleanQuery, item, aliases))
+      .slice(0, maxQueries);
+    const aliasQueries = normalizedQueries.filter((item) => !isWebRecoveryQueryAnchored(cleanQuery, item));
+    activeEntityAliases = aliases.slice(0, 3);
+    if (aliasQueries.length > 0) {
+      const usedAliases = activeEntityAliases
+        .filter((alias) => aliasQueries.some((item) => hasStrongSearchSubjectMatch(alias.target, item)))
+        .map((alias) => `${alias.source}→${alias.target}`);
+      if (usedAliases.length > 0) warnings.push(`Validated entity alias search: ${usedAliases.join(", ")}`);
+    }
     return {
-      queries: uniqueStrings(proposedQueries.map(normalizeSearchQuery))
-        .filter((item) => !executedQueries.includes(item))
-        .filter((item) => isWebRecoveryQueryAnchored(cleanQuery, item))
-        .slice(0, maxQueries),
-      urls: normalizeRecoveryUrlCandidates(proposedUrls, maxQueries)
+      queries: normalizedQueries,
+      urls: normalizeRecoveryUrlCandidates(proposedUrls, maxQueries),
+      entityAliases: normalizedAliases
     };
   };
 
@@ -478,7 +535,7 @@ export async function searchWebGrounding(
       url,
       source: domainLabel(url),
       snippet: `Proposed by the bounded ${phase} web planner; content still requires relevance and authority verification.`,
-      query: cleanQuery
+      query: evidenceQueryFor()
     }));
 
   const searchQueries = async (plannedQueries: string[]) => {
@@ -492,7 +549,7 @@ export async function searchWebGrounding(
 
   const enrichCandidates = async (input: Array<WebSearchItem & { query: string }>) => {
     let next = dedupeGroundingItems(input);
-    const discovered = await discoverRelevantOfficialLinks(cleanQuery, next, request, maxResults);
+    const discovered = await discoverRelevantOfficialLinks(evidenceQueryFor(), next, request, maxResults);
     next = dedupeGroundingItems([...discovered, ...next]);
     return next;
   };
@@ -500,6 +557,7 @@ export async function searchWebGrounding(
   // Research agents work better when query planning and the first retrieval
   // round overlap instead of waiting for a failed search before planning.
   // The deterministic path remains available if the model is unavailable.
+  const firstSearchTask = searchQueries(queries);
   const initialPlannerTask = options.initialQueryPlanner
     ? options.initialQueryPlanner({
       phase: "initial",
@@ -515,10 +573,31 @@ export async function searchWebGrounding(
       .then((items) => ({ items, error: "" }))
       .catch((error) => ({ items: [] as WebSearchProviderItem[], error: errorMessage(error) }))
     : Promise.resolve({ items: [] as WebSearchProviderItem[], error: "" });
-  const [firstSearchCandidates, initialPlanResult, providerResult] = await Promise.all([
-    searchQueries(queries),
-    initialPlannerTask,
-    providerTask
+  // Await only the planner here; deterministic and configured-provider
+  // retrieval have already started. This lets the alias query begin without
+  // waiting for a weak regional index to exhaust its timeout first.
+  const initialPlanResult = await initialPlannerTask;
+  let initialPlan: { queries: string[]; urls: string[]; entityAliases: WebSearchEntityAlias[] } = {
+    queries: [],
+    urls: [],
+    entityAliases: []
+  };
+  if (initialPlanResult.error) {
+    warnings.push(`Initial web query planner failed: ${initialPlanResult.error}`);
+  } else if (initialPlanResult.proposed) {
+    // Normalize the alias plan before selecting provider body text and ranking
+    // candidates so an English-only page can be inspected for a Chinese entity
+    // without weakening the final evidence gate.
+    initialPlan = normalizePlannerResult(initialPlanResult.proposed, maxPlannerQueries);
+  }
+  if (initialPlan.queries.length > 0) executedQueries.push(...initialPlan.queries);
+  const plannedSearchTask = initialPlan.queries.length > 0
+    ? searchQueries(initialPlan.queries)
+    : Promise.resolve([] as Array<WebSearchItem & { query: string }>);
+  const [firstSearchCandidates, providerResult, initialSearchCandidates] = await Promise.all([
+    firstSearchTask,
+    providerTask,
+    plannedSearchTask
   ]);
   const providerCandidates: Array<WebSearchItem & { query: string }> = [];
   let rejectedProviderItems = 0;
@@ -530,7 +609,7 @@ export async function searchWebGrounding(
       const rawContent = String(item.content || "").trim();
       if (rawContent) {
         const readable = documentationMarkdownToReadableText(rawContent);
-        const selected = selectRelevantReadableText(readable, cleanQuery, maxPageChars);
+        const selected = selectRelevantReadableText(readable, evidenceQueryFor(), maxPageChars);
         if (selected) {
           fetchedByUrl.set(url, {
             content: [`Source: ${url}`, `Title: ${title}`, selected].join("\n"),
@@ -544,7 +623,7 @@ export async function searchWebGrounding(
         source: domainLabel(url),
         snippet,
         discoveredFrom: cleanProviderField(item.source, 80) || "configured-provider",
-        query: cleanQuery
+        query: evidenceQueryFor()
       });
     } catch {
       rejectedProviderItems += 1;
@@ -552,26 +631,19 @@ export async function searchWebGrounding(
   }
   if (providerResult.error) warnings.push(`Configured web provider failed: ${providerResult.error}`);
   if (rejectedProviderItems > 0) warnings.push(`Configured web provider returned ${rejectedProviderItems} unsafe or invalid URL(s); they were ignored.`);
-  let candidates = dedupeGroundingItems([...providerCandidates, ...firstSearchCandidates]);
-  if (initialPlanResult.error) {
-    warnings.push(`Initial web query planner failed: ${initialPlanResult.error}`);
-  } else if (initialPlanResult.proposed) {
-    const initialPlan = normalizePlannerResult(initialPlanResult.proposed, maxPlannerQueries);
-    if (initialPlan.queries.length > 0 || initialPlan.urls.length > 0) {
-      executedQueries.push(...initialPlan.queries);
-      candidates = dedupeGroundingItems([
-        ...plannerUrlItems(initialPlan.urls, "initial"),
-        ...candidates,
-        ...(initialPlan.queries.length > 0 ? await searchQueries(initialPlan.queries) : [])
-      ]);
-    }
+  let candidates = dedupeGroundingItems([...providerCandidates, ...firstSearchCandidates, ...initialSearchCandidates]);
+  if (initialPlan.queries.length > 0 || initialPlan.urls.length > 0) {
+    candidates = dedupeGroundingItems([
+      ...plannerUrlItems(initialPlan.urls, "initial"),
+      ...candidates
+    ]);
   }
 
   // If generic search only surfaced a matching vendor home page, derive one
   // bounded site query from that page. This is entity/domain discovery rather
   // than a vendor allow-list, so it works for new providers without code
   // changes and keeps the original subject anchored in the query.
-  const siteRecoveryQueries = planOfficialSiteRecoveryQueries(cleanQuery, candidates, 1)
+  const siteRecoveryQueries = planOfficialSiteRecoveryQueries(evidenceQueryFor(), candidates, 1)
     .filter((item) => !executedQueries.includes(item));
   if (siteRecoveryQueries.length > 0) {
     executedQueries.push(...siteRecoveryQueries);
@@ -579,12 +651,16 @@ export async function searchWebGrounding(
   }
 
   candidates = await enrichCandidates(candidates);
-  // The reader-backed search is a last resort for installations without an AI
-  // recovery planner. In the Weixin Agent, the bounded planner is faster and
-  // more precise than waiting on a second search-page proxy.
-  if (!options.initialQueryPlanner && !options.recoveryQueryPlanner && needsReaderSearch(cleanQuery, candidates)) {
+  // Query planning and retrieval are complementary. A planner can translate an
+  // entity correctly while the regional index still returns only profiles or
+  // topic archives. Run one bounded reader rescue whenever the candidates do
+  // not yet contain usable evidence; do not disable it merely because an AI
+  // planner exists.
+  if (needsReaderSearch(evidenceQueryFor(), candidates)) {
     const readerQuery = [...executedQueries].reverse().find((item) => /[A-Za-z]/u.test(item)) || executedQueries[0] || cleanQuery;
-    const readerUrl = `https://r.jina.ai/http://www.bing.com/search?q=${encodeURIComponent(readerQuery)}`;
+    const readerUrl = isNewsSearchQuery(evidenceQueryFor())
+      ? `https://r.jina.ai/http://www.bing.com/news/search?q=${encodeURIComponent(readerQuery)}&qft=sortbydate%3d%221%22`
+      : `https://r.jina.ai/http://www.bing.com/search?q=${encodeURIComponent(readerQuery)}`;
     const readerItems = (await requestSearchItems(readerUrl, request, maxResults))
       .map((item) => ({ ...item, query: readerQuery }));
     candidates = dedupeGroundingItems([...readerItems, ...candidates]);
@@ -594,7 +670,7 @@ export async function searchWebGrounding(
     fetchTopPages + (options.initialQueryPlanner || options.recoveryQueryPlanner ? 1 : 0)
   );
   const materialize = async (): Promise<WebSearchGrounding> => {
-    const ranked = rankSearchItems(candidates, cleanQuery).slice(0, maxResults);
+    const ranked = rankSearchItems(candidates, evidenceQueryFor()).slice(0, maxResults);
     const unfetched = ranked
       .filter((item) => !fetchedByUrl.has(item.url))
       // Recovery results arrive after the first materialization pass. Limiting
@@ -606,7 +682,7 @@ export async function searchWebGrounding(
       try {
         return {
           url: item.url,
-          content: await fetchSearchResultEvidence(item, cleanQuery, request, maxPageChars),
+          content: await fetchSearchResultEvidence(item, evidenceQueryFor(item.query), request, maxPageChars),
           warning: ""
         };
       } catch (error) {
@@ -625,13 +701,14 @@ export async function searchWebGrounding(
       const page = fetchedByUrl.get(item.url);
       const content = page?.content ?? "";
       const fetched = Boolean(content.trim());
-      const evidenceTier = classifyWebEvidenceTier(cleanQuery, item, fetched);
+      const evidenceQuery = evidenceQueryFor(item.query);
+      const evidenceTier = classifyWebEvidenceTier(evidenceQuery, item, fetched);
       return {
         ...item,
         content,
         fetched,
         evidenceTier,
-        relevanceScore: webEvidenceRelevanceScore(cleanQuery, `${item.title}\n${item.url}\n${item.snippet}\n${content}`, fetched)
+        relevanceScore: webEvidenceRelevanceScore(evidenceQuery, `${item.title}\n${item.url}\n${item.snippet}\n${content}`, fetched)
       };
     });
     return {
@@ -777,10 +854,80 @@ function cleanProviderField(value: unknown, maxChars: number): string {
 }
 
 function extractSearchSubjectTokens(query: string): string[] {
-  const stop = /^(?:api|sdk|web|online|internet|latest|current|today|recent|official|price|pricing|cost|billing|version|release|news|search|look|up|documentation|docs?)$/iu;
-  return uniqueStrings((query.match(/[A-Za-z][A-Za-z0-9._+/#-]{1,}/g) ?? [])
+  const stop = /^(?:ai|api|sdk|web|online|internet|latest|current|today|recent|official|price|pricing|cost|billing|version|release|news|search|look|up|documentation|docs?|site)$/iu;
+  const latin = (query.match(/[A-Za-z][A-Za-z0-9._+/#-]{1,}/g) ?? [])
     .map((token) => token.trim())
-    .filter((token) => !stop.test(token)));
+    .filter((token) => !stop.test(token));
+  return uniqueStrings([...latin, ...extractHanSearchSubjectPhrases(query)]);
+}
+
+function normalizeWebSearchEntityAliases(
+  originalQuery: string,
+  aliases: WebSearchEntityAlias[] | null | undefined
+): WebSearchEntityAlias[] {
+  const original = normalizeSearchQuery(originalQuery);
+  const originalLower = original.toLowerCase();
+  const originalSubjects = new Set(extractSearchSubjectTokens(original).map((item) => item.toLowerCase()));
+  const normalized: WebSearchEntityAlias[] = [];
+  for (const candidate of Array.isArray(aliases) ? aliases : []) {
+    const source = normalizeSearchQuery(String(candidate?.source || "")).trim();
+    const target = normalizeSearchQuery(String(candidate?.target || "")).trim();
+    const confidence = Number(candidate?.confidence);
+    const sourceLower = source.toLowerCase();
+    if (!source || !target || !Number.isFinite(confidence) || confidence < 0.88 || confidence > 1) continue;
+    // The source must be the complete subject label extracted from the user's
+    // own query. A planner cannot authorize an alias for an entity the user
+    // never mentioned.
+    if (!originalLower.includes(sourceLower) || !originalSubjects.has(sourceLower)) continue;
+    // Alias expansion exists for indices that work better with Latin entity
+    // names. Query operators, URLs and sentence-like targets are rejected.
+    if (!/[A-Za-z]/u.test(target)
+      || target.length > 80
+      || /(?:https?:\/\/|\b(?:site|file|url|inurl|intitle):|[\r\n<>"'`])/iu.test(target)) continue;
+    const targetSubjects = extractSearchSubjectTokens(target);
+    if (targetSubjects.length === 0 || targetSubjects.length > 8) continue;
+    const key = `${sourceLower}\u0000${target.toLowerCase()}`;
+    if (normalized.some((item) => `${item.source.toLowerCase()}\u0000${item.target.toLowerCase()}` === key)) continue;
+    normalized.push({ source, target, confidence });
+    if (normalized.length >= 3) break;
+  }
+  return normalized;
+}
+
+/**
+ * Keep Chinese entities as complete phrases. Generating arbitrary Han n-grams
+ * made “马斯克” collapse into “马” and admitted horse encyclopaedias as person
+ * news. This deliberately strips only command/intent shells and never guesses
+ * a dictionary segmentation inside the remaining entity phrase.
+ */
+function extractHanSearchSubjectPhrases(query: string): string[] {
+  const source = sanitizeSearchPrompt(query)
+    .replace(WEB_SEARCH_CLEAN_RE, " ")
+    .replace(/[A-Za-z][A-Za-z0-9._+/#-]*/gu, " ")
+    .replace(/\b20\d{2}\b/gu, " ")
+    .replace(/[：:？?。；;，,、()（）\[\]【】]/gu, " ");
+  const generic = /^(?:官网|官方网站|官方|最新|当前|现在|近期|最近|今日|今天|本周|本月|今年|刚刚|实时|现任|新闻|消息|动态|资讯|资料|信息|内容|规则|价格|费用|版本|发布|更新|文档|政策|法规|标准|论文|研究)$/u;
+  const suffix = /(?:最新|当前|现在|近期|最近|今日|今天|本周|本月|今年|刚刚|实时|现任)?(?:的)?(?:官网|官方网站|官方消息|新闻|消息|动态|资讯|计价规则|定价规则|收费规则|价格|费用|成本|版本|发布信息|发布|更新|变更|文档|资料|信息|内容|规则|政策|法规|标准|论文)(?:是什么|有哪些|怎么样|如何)?$/u;
+  const prefix = /^(?:请|帮我|麻烦|能不能|可以|是否可以|我想|我要|给我|替我|查|查查|查询|检索|搜索|搜|看看|看一下|了解一下|核实一下)+/u;
+  return uniqueStrings((source.match(/[\u3400-\u9fff]{2,}/gu) ?? [])
+    .map((run) => run
+      .replace(prefix, "")
+      .replace(/^(?:最新|当前|现在|近期|最近)(?:的)?(?:新闻|消息|动态|资讯)/u, "")
+      .replace(suffix, "")
+      .replace(/^(?:的)+|(?:是什么|有哪些|怎么样|如何|一下|吗|呢|的)+$/gu, "")
+      .trim())
+    .filter((item) => item.length >= 2 && !generic.test(item)));
+}
+
+function hasStrongSearchSubjectMatch(query: string, evidence: string): boolean {
+  const subjects = extractSearchSubjectTokens(query);
+  if (subjects.length === 0) return true;
+  const haystack = String(evidence || "").toLowerCase();
+  const latin = subjects.filter((item) => /[A-Za-z]/u.test(item)).map((item) => item.toLowerCase());
+  const han = subjects.filter((item) => /[\u3400-\u9fff]/u.test(item)).map((item) => item.toLowerCase());
+  const latinMatch = latin.length > 0 && latin.every((item) => containsSearchToken(haystack, item));
+  const hanMatch = han.length > 0 && han.some((item) => haystack.includes(item));
+  return latinMatch || hanMatch;
 }
 
 function inferEnglishSearchIntent(query: string): string {
@@ -797,9 +944,8 @@ function inferEnglishSearchIntent(query: string): string {
 function webEvidenceRelevanceScore(query: string, evidence: string, fetched: boolean): number {
   if (!fetched || !String(evidence || "").trim()) return 0;
   let score = isWebEvidenceRelevant(query, evidence) ? 0.58 : 0;
-  const lower = evidence.toLowerCase();
-  const subjects = extractSearchSubjectTokens(query).map((item) => item.toLowerCase());
-  if (subjects.length === 0 || subjects.some((item) => containsSearchToken(lower, item))) score += 0.16;
+  const subjects = extractSearchSubjectTokens(query);
+  if (subjects.length === 0 || hasStrongSearchSubjectMatch(query, evidence)) score += 0.16;
   if (matchesEvidenceIntent(query, evidence)) score += 0.12;
   if (/(?:[$¥￥]\s*\d|\d+(?:\.\d+)?\s*(?:元|美元|usd|cny)|\b20\d{2}\b|\d+(?:\.\d+)?\s*%)/iu.test(evidence)) score += 0.08;
   if (evidence.length >= 240) score += 0.06;
@@ -852,11 +998,40 @@ function sourceQualityScore(item: WebSearchItem, query = ""): number {
   if (matchesEvidenceIntent(query, `${item.title} ${item.url} ${item.snippet}`)) score += 3;
   const subjectTokens = extractSearchSubjectTokens(query).map((token) => token.toLowerCase());
   const haystack = `${item.title} ${item.url} ${item.snippet}`.toLowerCase();
-  const subjectHits = subjectTokens.filter((token) => containsSearchToken(haystack, token)).length;
-  score += Math.min(subjectHits * 3, 6);
-  if (subjectTokens.length > 0 && subjectHits === 0) score -= 4;
+  const strongSubjectMatch = subjectTokens.length === 0 || hasStrongSearchSubjectMatch(query, haystack);
+  if (strongSubjectMatch && subjectTokens.length > 0) score += 6;
+  if (!strongSubjectMatch) score -= 8;
   if (item.snippet.trim().length >= 40) score += 1;
+  if (isNewsSearchQuery(query)) score += newsFreshnessScore(item);
   return score;
+}
+
+function newsFreshnessScore(item: WebSearchItem): number {
+  const text = `${item.publishedAt || ""} ${item.snippet || ""}`.toLowerCase();
+  if (/\b(?:\d+\s*(?:minutes?|hours?)\s+ago|today|just now)\b/iu.test(text)) return 5;
+  if (/(?:\d+\s*(?:分钟|小时)前|今天|刚刚)/u.test(text)) return 5;
+  const days = text.match(/\b(\d+)\s*days?\s+ago\b/iu);
+  if (days) return Number.parseInt(days[1], 10) <= 7 ? 4 : 2;
+  const chineseDays = text.match(/(\d+)\s*天前/u);
+  if (chineseDays) return Number.parseInt(chineseDays[1], 10) <= 7 ? 4 : 2;
+  const weeks = text.match(/\b(\d+)\s*weeks?\s+ago\b/iu);
+  if (weeks) return Number.parseInt(weeks[1], 10) <= 2 ? 3 : 1;
+  const chineseWeeks = text.match(/(\d+)\s*周前/u);
+  if (chineseWeeks) return Number.parseInt(chineseWeeks[1], 10) <= 2 ? 3 : 1;
+  if (/\b\d+\s*months?\s+ago\b/iu.test(text) || /\d+\s*个月前/u.test(text)) return 0;
+  const dated = text.match(/(20\d{2})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])/u);
+  if (dated) {
+    const timestamp = Date.parse(`${dated[1]}-${dated[2].padStart(2, "0")}-${dated[3].padStart(2, "0")}T00:00:00Z`);
+    if (Number.isFinite(timestamp)) {
+      const ageDays = Math.floor((Date.now() - timestamp) / 86_400_000);
+      if (ageDays <= 1) return 6;
+      if (ageDays <= 7) return 5;
+      if (ageDays <= 30) return 3;
+      if (ageDays <= 90) return 1;
+      if (ageDays > 365) return -3;
+    }
+  }
+  return 0;
 }
 
 function uniqueStrings(values: string[]): string[] {
@@ -890,6 +1065,7 @@ function normalizeRecoveryUrlCandidates(values: string[], maxUrls: number): stri
 function containsSearchToken(haystack: string, token: string): boolean {
   const cleanToken = String(token || "").trim().toLowerCase();
   if (!cleanToken) return false;
+  if (/[\u3400-\u9fff]/u.test(cleanToken)) return String(haystack || "").toLowerCase().includes(cleanToken);
   const escaped = cleanToken.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, "iu").test(String(haystack || "").toLowerCase());
 }
@@ -900,16 +1076,46 @@ async function searchWebResults(query: string, request: WebContextRequest, maxRe
     ? `https://www.bing.com/search?q=${encodeURIComponent(query)}&mkt=en-US&setlang=en-US&cc=US`
     : `https://www.bing.com/search?q=${encodeURIComponent(query)}&mkt=zh-CN&setlang=zh-CN`;
   const duckDuckGo = `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=${englishLocale ? "us-en" : "cn-zh"}`;
+  const braveSearch = `https://search.brave.com/search?q=${encodeURIComponent(query)}&source=web`;
+  const qihooSearch = `https://www.so.com/s?q=${encodeURIComponent(query)}`;
+  const bingNews = `https://www.bing.com/news/search?q=${encodeURIComponent(query)}&format=rss&mkt=${englishLocale ? "en-US" : "zh-CN"}&setlang=${englishLocale ? "en-US" : "zh-CN"}`;
+  const bingWebRss = `https://www.bing.com/search?format=rss&q=${encodeURIComponent(query)}&mkt=${englishLocale ? "en-US" : "zh-CN"}&setlang=${englishLocale ? "en-US" : "zh-CN"}`;
   // Do not short-circuit after the first non-empty engine. A search page can be
   // syntactically valid while all results are off-topic. Running providers in
   // parallel keeps latency bounded and makes ranking resilient to one engine's
   // transient ordering or regional index.
   const providerLimit = Math.max(maxResults, Math.min(maxResults * 2, 16));
-  const [bingItems, duckItems] = await Promise.all([
+  const [bingItems, duckItems, braveItems, qihooItems, newsItems, webRssItems] = await Promise.all([
     requestSearchItems(directBing, request, providerLimit),
-    requestSearchItems(duckDuckGo, request, providerLimit)
+    requestSearchItems(duckDuckGo, request, providerLimit),
+    englishLocale
+      ? requestSearchItems(braveSearch, request, providerLimit)
+      : Promise.resolve([] as WebSearchItem[]),
+    /[\u3400-\u9fff]/u.test(query)
+      ? requestSearchItems(qihooSearch, request, providerLimit)
+      : Promise.resolve([] as WebSearchItem[]),
+    isNewsSearchQuery(query)
+      ? requestSearchItems(bingNews, request, providerLimit)
+      : Promise.resolve([] as WebSearchItem[]),
+    isNewsSearchQuery(query)
+      ? requestSearchItems(bingWebRss, request, providerLimit)
+      : Promise.resolve([] as WebSearchItem[])
   ]);
-  return rankSearchItems(dedupeSearchItems([...bingItems, ...duckItems]), query).slice(0, Math.min(maxResults * 3, 24));
+  // Bing's generic RSS endpoint can be regionally redirected and occasionally
+  // tokenizes Latin names into unrelated results. Keep it only as a candidate
+  // source when the complete subject survives in the returned card.
+  const subjectMatchedWebRss = webRssItems.filter((item) => hasStrongSearchSubjectMatch(
+    query,
+    `${item.title} ${item.url} ${item.snippet}`
+  ));
+  return rankSearchItems(
+    dedupeSearchItems([...newsItems, ...qihooItems, ...subjectMatchedWebRss, ...braveItems, ...bingItems, ...duckItems]),
+    query
+  ).slice(0, Math.min(maxResults * 3, 24));
+}
+
+function isNewsSearchQuery(query: string): boolean {
+  return /(?:新闻|动态|消息|资讯|news)/iu.test(query);
 }
 
 async function discoverRelevantOfficialLinks<T extends WebSearchItem & { query: string }>(
@@ -1022,8 +1228,13 @@ function hasSubjectUrlAffinity(query: string, url: string): boolean {
     const hostname = parsed.hostname.toLowerCase().replace(/^www\./u, "");
     const labels = hostname.split(".");
     const pathTokens = parsed.pathname.toLowerCase().split(/[^a-z0-9]+/u).filter(Boolean);
-    const subjectTokens = extractSearchSubjectTokens(query).map((token) => token.toLowerCase());
-    return subjectTokens.some((token) => labels.includes(token) || pathTokens.includes(token));
+    const subjectTokens = extractSearchSubjectTokens(query)
+      .filter((token) => /[A-Za-z]/u.test(token))
+      .map((token) => token.toLowerCase());
+    if (subjectTokens.length === 0) return false;
+    const hostHit = subjectTokens.some((token) => labels.includes(token));
+    const urlText = `${hostname} ${parsed.pathname}`.toLowerCase();
+    return hostHit && subjectTokens.every((token) => containsSearchToken(urlText, token) || pathTokens.includes(token));
   } catch {
     return false;
   }
@@ -1034,8 +1245,14 @@ function hasSubjectHostAffinity(query: string, url: string): boolean {
     const family = siteFamilyDomain(url);
     if (!family) return false;
     const labels = family.toLowerCase().split(".");
-    const subjectTokens = extractSearchSubjectTokens(query).map((token) => token.toLowerCase());
-    return subjectTokens.some((token) => labels.includes(token));
+    const subjectTokens = extractSearchSubjectTokens(query)
+      .filter((token) => /[A-Za-z]/u.test(token))
+      .map((token) => token.toLowerCase());
+    if (subjectTokens.length === 0) return false;
+    const hostHits = subjectTokens.filter((token) => labels.includes(token));
+    if (subjectTokens.length === 1) return hostHits.length === 1;
+    const urlText = new URL(url).href.toLowerCase();
+    return hostHits.length >= 1 && subjectTokens.every((token) => containsSearchToken(urlText, token));
   } catch {
     return false;
   }
@@ -1097,9 +1314,20 @@ async function requestSearchItems(
   maxResults: number
 ): Promise<WebSearchItem[]> {
   try {
-    const headers = url.includes("mkt=en-US")
-      ? { ...DEFAULT_HEADERS, "Accept-Language": "en-US,en;q=0.9" }
-      : DEFAULT_HEADERS;
+    const isBingRss = url.includes("bing.com/") && /[?&]format=rss(?:&|$)/iu.test(url);
+    const headers = isBingRss
+      ? {
+        ...DEFAULT_HEADERS,
+        // Bing returns its generic HTML homepage when a full browser UA asks
+        // for the RSS URL. A minimal standards-compatible UA plus an explicit
+        // XML Accept header consistently returns the documented feed.
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/rss+xml,application/xml,text/xml;q=0.9,*/*;q=0.5",
+        "Accept-Language": url.includes("mkt=en-US") ? "en-US,en;q=0.9" : "zh-CN,zh;q=0.9"
+      }
+      : url.includes("mkt=en-US")
+        ? { ...DEFAULT_HEADERS, "Accept-Language": "en-US,en;q=0.9" }
+        : DEFAULT_HEADERS;
     const response = await withTimeout(
       request(url, { method: "GET", headers }),
       url.startsWith("https://r.jina.ai/http://www.bing.com/search")
@@ -1117,6 +1345,13 @@ function needsReaderSearch(query: string, items: WebSearchItem[]): boolean {
   if (items.length === 0) return true;
   const relevant = items.filter((item) => matchesEvidenceIntent(query, `${item.title} ${item.url} ${item.snippet}`));
   if (relevant.length === 0) return true;
+  if (isNewsSearchQuery(query)) {
+    const currentNews = relevant.filter((item) => hasStrongSearchSubjectMatch(
+      query,
+      `${item.title} ${item.url} ${item.snippet}`
+    ) && hasConcreteNewsFact(`${item.publishedAt || ""}\n${item.title}\n${item.snippet}`));
+    return currentNews.length < 2;
+  }
   return AUTHORITATIVE_SEARCH_RE.test(query) && !relevant.some((item) => isLikelyAuthoritativeResult(query, item));
 }
 
@@ -1127,7 +1362,6 @@ function matchesEvidenceIntent(query: string, evidence: string): boolean {
 function isLikelyAuthoritativeResult(query: string, item: WebSearchItem): boolean {
   try {
     const hostname = new URL(item.url).hostname.toLowerCase();
-    if (/\.(?:gov|edu)(?:\.[a-z]{2})?$/i.test(hostname) || /\.gov\.cn$/i.test(hostname)) return true;
     const hostAffinity = hasSubjectHostAffinity(query, item.url);
     if (!hostAffinity) return false;
     // An exact subject label in the registrable domain is a much stronger
@@ -1182,6 +1416,14 @@ function hasConcreteVersionFact(body: string): boolean {
         return true;
       });
     });
+}
+
+function hasConcreteNewsFact(body: string): boolean {
+  const text = String(body || "").replace(/\s+/gu, " ").trim();
+  if (!text) return false;
+  const event = /(?:宣布|发布|回应|表示|确认|推出|任命|收购|完成|发生|获得|计划|起诉|批准|签署|警告|承认|投资|呼吁|接受采访|据.{0,12}报道|announc(?:e|ed|ement)|report(?:s|ed|ing)?|said|says|confirm(?:s|ed)?|launch(?:es|ed)?|releas(?:e|ed)|appoint(?:s|ed)?|acquir(?:e|ed)|complet(?:e|ed)|filed|approv(?:e|ed)|signed|interview|plans?|warn(?:s|ed)?|admit(?:s|ted)?|invest(?:s|ed)?|bought|buys?|calls?|urges?|joins?|leaves?|resigns?|cuts?|raises?|drops?|will\s+[a-z])/iu;
+  const dated = /(?:\b20\d{2}[-/.](?:0?[1-9]|1[0-2])[-/.](?:0?[1-9]|[12]\d|3[01])\b|\b(?:mon|tue|wed|thu|fri|sat|sun),?\s+\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+20\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+20\d{2}\b|20\d{2}年(?:0?[1-9]|1[0-2])月(?:0?[1-9]|[12]\d|3[01])日|今天|今日|昨天|昨日|刚刚|\d+\s*(?:分钟|小时|天|周|个月)前|today|yesterday|just\s+now|a\s+few\s+seconds\s+ago|\d+\s*(?:minutes?|hours?|days?|weeks?|months?)\s+ago)/iu;
+  return event.test(text) && dated.test(text);
 }
 
 async function fetchReadableUrlDirect(
@@ -1350,11 +1592,160 @@ function selectRelevantReadableText(text: string, query: string, maxChars: numbe
 }
 
 function parseSearchResults(html: string, sourceUrl: string): WebSearchItem[] {
+  if (sourceUrl.includes("bing.com/") && /<(?:rss|channel)\b/iu.test(html)) {
+    return parseBingNewsRss(html, sourceUrl);
+  }
+  if (sourceUrl.startsWith("https://r.jina.ai/http://www.bing.com/news/search")) {
+    return parseReaderNewsResults(html, sourceUrl);
+  }
   if (sourceUrl.startsWith("https://r.jina.ai/http://www.bing.com/search")) {
     return parseReaderSearchResults(html, sourceUrl);
   }
+  if (sourceUrl.includes("www.so.com/s")) return parseQihooSearchResults(html, sourceUrl);
+  if (sourceUrl.includes("search.brave.com/search")) return parseBraveSearchResults(html, sourceUrl);
   if (sourceUrl.includes("duckduckgo.com")) return parseDuckDuckGoResults(html, sourceUrl);
   return parseBingResults(html, sourceUrl);
+}
+
+function parseBraveSearchResults(html: string, sourceUrl: string): WebSearchItem[] {
+  const items: WebSearchItem[] = [];
+  const starts = Array.from(String(html || "").matchAll(
+    /<div\b(?=[^>]*\bdata-type=["']web["'])(?=[^>]*\bclass=["'][^"']*\bsnippet\b[^"']*["'])[^>]*>/giu
+  ));
+  for (const [index, startMatch] of starts.entries()) {
+    const start = startMatch.index ?? 0;
+    const end = index + 1 < starts.length ? (starts[index + 1].index ?? html.length) : html.length;
+    const block = html.slice(start, end);
+    const anchors = Array.from(block.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/giu));
+    const headline = anchors.find((match) => /\bclass=["'][^"']*\bl1\b[^"']*["']/iu.test(match[1]))
+      || anchors.find((match) => /\bclass=["'][^"']*(?:result-header|result-title)[^"']*["']/iu.test(match[1]));
+    if (!headline) continue;
+    const href = headline[1].match(/\bhref=["']([^"']+)["']/iu)?.[1] || "";
+    const url = resolveSearchUrl(decodeEntities(href), sourceUrl);
+    const titleAttr = headline[2].match(/\btitle=["']([^"']+)["']/iu)?.[1]
+      || block.match(/<div\b[^>]*\bclass=["'][^"']*\btitle\b[^"']*["'][^>]*\btitle=["']([^"']+)["']/iu)?.[1]
+      || "";
+    const title = htmlToReadableText(titleAttr || headline[2]).slice(0, 240);
+    const contentMatch = block.match(/<div\b[^>]*\bclass=["'][^"']*\bcontent\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/iu)
+      || block.match(/<div\b[^>]*\bclass=["'][^"']*\bgeneric-snippet\b[^"']*["'][^>]*>([\s\S]*?)<\/div>/iu);
+    const snippet = contentMatch ? htmlToReadableText(contentMatch[1]).slice(0, 720) : "";
+    const publishedAt = extractRelativePublishedAt(`${snippet} ${block}`);
+    if (isUsableSearchResult(url, title)) {
+      items.push({ title, url, source: domainLabel(url), snippet, publishedAt: publishedAt || undefined });
+    }
+  }
+  return items;
+}
+
+function extractRelativePublishedAt(text: string): string {
+  const normalized = htmlToReadableText(String(text || ""));
+  const english = normalized.match(/\b(\d+)\s*(minutes?|hours?|days?|weeks?|months?)\s+ago\b/iu);
+  if (english) {
+    const amount = Math.max(0, Number.parseInt(english[1], 10) || 0);
+    const rawUnit = english[2].toLowerCase();
+    const singular = rawUnit.replace(/s$/u, "");
+    return `${amount} ${amount === 1 ? singular : `${singular}s`} ago`;
+  }
+  const chinese = normalized.match(/(\d+)\s*(分钟|小时|天|周|个月)前/u);
+  if (chinese) return `${chinese[1]}${chinese[2]}前`;
+  // Chinese date characters are not JavaScript `\w` characters, therefore a
+  // trailing `\b` after “日” fails when the next character is whitespace or
+  // punctuation. Match the complete date directly instead.
+  const absoluteChinese = normalized.match(/(20\d{2})年(0?[1-9]|1[0-2])月(0?[1-9]|[12]\d|3[01])日/u);
+  if (!absoluteChinese) return "";
+  return `${absoluteChinese[1]}-${absoluteChinese[2].padStart(2, "0")}-${absoluteChinese[3].padStart(2, "0")}`;
+}
+
+function parseQihooSearchResults(html: string, sourceUrl: string): WebSearchItem[] {
+  const items: WebSearchItem[] = [];
+  const starts = Array.from(String(html || "").matchAll(/<li\b[^>]*\bclass=["'][^"']*\bres-list\b[^"']*["'][^>]*>/giu));
+  for (const [index, startMatch] of starts.entries()) {
+    const start = startMatch.index ?? 0;
+    const end = index + 1 < starts.length ? (starts[index + 1].index ?? html.length) : html.length;
+    const block = html.slice(start, end);
+    const heading = block.match(/<h3\b[^>]*\bclass=["'][^"']*\bres-title\b[^"']*["'][^>]*>[\s\S]*?<a\b([^>]*)>([\s\S]*?)<\/a>/iu);
+    if (!heading) continue;
+    const attributes = heading[1];
+    const directUrl = attributes.match(/\bdata-mdurl=["']([^"']+)["']/iu)?.[1]
+      || attributes.match(/\bhref=["']([^"']+)["']/iu)?.[1]
+      || "";
+    const url = resolveSearchUrl(decodeEntities(directUrl), sourceUrl);
+    const title = htmlToReadableText(heading[2]).slice(0, 240);
+    const descriptionMatch = block.match(/<p\b[^>]*\bclass=["'][^"']*\bres-desc\b[^"']*["'][^>]*>([\s\S]*?)<\/p>/iu)
+      || block.match(/<span\b[^>]*\bclass=["'][^"']*\bres-list-summary\b[^"']*["'][^>]*>([\s\S]*?)<\/span>/iu);
+    const snippet = descriptionMatch ? htmlToReadableText(descriptionMatch[1]).slice(0, 720) : "";
+    const publishedAt = extractRelativePublishedAt(`${snippet} ${block}`);
+    if (isUsableSearchResult(url, title)) {
+      items.push({ title, url, source: domainLabel(url), snippet, publishedAt: publishedAt || undefined });
+    }
+  }
+  return items;
+}
+
+function parseBingNewsRss(xml: string, sourceUrl: string): WebSearchItem[] {
+  const items: WebSearchItem[] = [];
+  const itemRegex = /<item\b[^>]*>([\s\S]*?)<\/item>/giu;
+  let match: RegExpExecArray | null;
+  while ((match = itemRegex.exec(xml)) !== null) {
+    const block = match[1];
+    const title = xmlElementText(block, "title").slice(0, 240);
+    const rawLink = xmlElementText(block, "link") || xmlElementText(block, "guid");
+    const url = resolveSearchUrl(rawLink, sourceUrl);
+    const description = htmlToReadableText(xmlElementText(block, "description")).slice(0, 420);
+    const sourceName = xmlElementText(block, "source").slice(0, 120);
+    const rawPublishedAt = xmlElementText(block, "pubDate").slice(0, 120);
+    const parsedDate = Date.parse(rawPublishedAt);
+    const publishedAt = Number.isFinite(parsedDate) ? new Date(parsedDate).toISOString() : rawPublishedAt;
+    const snippet = [
+      publishedAt ? `Published: ${publishedAt}` : "",
+      sourceName ? `Publisher: ${sourceName}` : "",
+      description
+    ].filter(Boolean).join(" | ").slice(0, 720);
+    if (isUsableSearchResult(url, title)) {
+      items.push({ title, url, source: domainLabel(url), snippet, publishedAt: publishedAt || undefined });
+    }
+  }
+  return items;
+}
+
+function parseReaderNewsResults(markdown: string, sourceUrl: string): WebSearchItem[] {
+  const items: WebSearchItem[] = [];
+  const headingRegex = /(?:^|\n)##\s+\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)\s*/gu;
+  const matches = Array.from(String(markdown || "").matchAll(headingRegex));
+  for (const [index, match] of matches.entries()) {
+    const title = markdownToPlainText(match[1]).slice(0, 240);
+    const url = resolveSearchUrl(decodeEntities(match[2]), sourceUrl);
+    const start = (match.index ?? 0) + match[0].length;
+    const end = index + 1 < matches.length ? (matches[index + 1].index ?? markdown.length) : markdown.length;
+    const after = markdown.slice(start, end).split(/\n\s*\[!\[Image|\n\s*!\[Image/iu)[0];
+    const description = markdownToPlainText(after).slice(0, 420);
+    const before = markdown.slice(Math.max(0, (match.index ?? 0) - 180), match.index ?? 0);
+    const relativeMatches = Array.from(before.matchAll(/(?:^|\n)\s*(\d+)\s*(m|h|d)(?:\s+on\s+MSN)?\s*(?=\n|$)/giu));
+    const relative = relativeMatches[relativeMatches.length - 1];
+    const publishedAt = relative ? relativeFreshnessText(relative[1], relative[2]) : "";
+    const snippet = [publishedAt ? `Published: ${publishedAt}` : "", description].filter(Boolean).join(" | ");
+    if (isUsableSearchResult(url, title)) {
+      items.push({ title, url, source: domainLabel(url), snippet, publishedAt: publishedAt || undefined });
+    }
+  }
+  return items;
+}
+
+function relativeFreshnessText(amount: string, unit: string): string {
+  const value = Math.max(0, Number.parseInt(amount, 10) || 0);
+  if (unit.toLowerCase() === "m") return `${value} minutes ago`;
+  if (unit.toLowerCase() === "h") return `${value} hours ago`;
+  return `${value} days ago`;
+}
+
+function xmlElementText(block: string, tagName: string): string {
+  const escaped = tagName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const match = String(block || "").match(new RegExp(`<${escaped}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${escaped}>`, "iu"));
+  if (!match) return "";
+  return decodeEntities(match[1]
+    .replace(/^\s*<!\[CDATA\[/u, "")
+    .replace(/\]\]>\s*$/u, ""))
+    .trim();
 }
 
 function parseReaderSearchResults(markdown: string, sourceUrl: string): WebSearchItem[] {
@@ -1425,7 +1816,7 @@ function isUsableSearchResult(url: string, title: string): boolean {
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
-    if (/bing\.com|duckduckgo\.com/i.test(parsed.hostname) && /\/search|\/html/i.test(parsed.pathname)) return false;
+    if (/bing\.com|duckduckgo\.com|search\.brave\.com/i.test(parsed.hostname) && /\/search|\/html/i.test(parsed.pathname)) return false;
     normalizePublicHttpUrl(parsed.href);
     return true;
   } catch {
@@ -1467,6 +1858,7 @@ function extractTitle(html: string): string {
 
 function decodeEntities(text: string): string {
   return text
+    .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")

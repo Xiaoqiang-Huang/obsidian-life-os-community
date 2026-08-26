@@ -3,6 +3,7 @@ export type LicenseSku =
   | "pro_monthly_990"
   | "pro_monthly_1990"
   | "pro_49"
+  | "pro_198"
   | "pro_299"
   | "sponsor_99"
   | "sponsor_199";

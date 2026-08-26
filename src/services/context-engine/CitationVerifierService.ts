@@ -3,6 +3,8 @@ import type { ContextSource } from "./types";
 export interface CitationVerificationOptions {
   requireCitations?: boolean;
   minimumCompleteness?: number;
+  /** Do not count explicit recommendations as source-derived factual claims. */
+  allowUncitedAdvice?: boolean;
 }
 
 export interface CitationVerificationResult {
@@ -27,7 +29,7 @@ export class CitationVerifierService {
     const available = new Set(sources.map((source) => source.citationId).filter((id): id is string => Boolean(id)));
     const citationIds = Array.from(new Set(Array.from(String(answer || "").matchAll(/\[(S\d+)\]/g), (match) => match[1])));
     const invalidCitationIds = citationIds.filter((id) => !available.has(id));
-    const claims = this.factualClaims(answer);
+    const claims = this.factualClaims(answer, options.allowUncitedAdvice === true);
     const citedClaimCount = claims.filter((claim) => {
       const ids = Array.from(claim.matchAll(/\[(S\d+)\]/g), (match) => match[1]);
       return ids.some((id) => available.has(id));
@@ -57,7 +59,7 @@ export class CitationVerifierService {
     };
   }
 
-  private factualClaims(answer: string): string[] {
+  private factualClaims(answer: string, allowUncitedAdvice = false): string[] {
     return String(answer || "")
       .replace(/```[\s\S]*?```/g, " ")
       .replace(/([。！？!?；;])\s*((?:\[S\d+\]\s*)+)/g, "$2$1")
@@ -68,6 +70,11 @@ export class CitationVerifierService {
       .filter((value) => value.length >= 8)
       .filter((value) => !/^#{1,6}\s/.test(value))
       .filter((value) => !/^>\s*(?:引用检查|说明|提示)/.test(value))
-      .filter((value) => !/^(你可以|请问|是否需要|如果你愿意)/.test(value));
+      .filter((value) => !/^(你可以|请问|是否需要|如果你愿意)/.test(value))
+      .filter((value) => {
+        if (!allowUncitedAdvice) return true;
+        const normalized = value.replace(/^\s*(?:[-*•]|\d+[.)、]|[（(]?[一二三四五六七八九十]+[)）、.])\s*/u, "");
+        return !/^(?:下一步(?:建议)?|建议|推荐|可以(?:先|尝试|考虑)|你可以|最好|应当|应该|不妨|优先考虑|接下来|先.{0,24}(?:再|然后|最后))/u.test(normalized);
+      });
   }
 }

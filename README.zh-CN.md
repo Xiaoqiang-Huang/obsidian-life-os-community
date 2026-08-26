@@ -1,4 +1,4 @@
-# Life OS Assistant 0.3.15
+# Life OS Assistant 0.3.16
 
 <div align="center">
 
@@ -6,7 +6,7 @@
 
 [English](README.md) · [**简体中文**](README.zh-CN.md)
 
-![版本](https://img.shields.io/badge/版本-0.3.15-0f172a?style=flat-square)
+![版本](https://img.shields.io/badge/版本-0.3.16-0f172a?style=flat-square)
 ![Obsidian](https://img.shields.io/badge/Obsidian-1.5.0%2B-7c3aed?style=flat-square)
 ![本地优先](https://img.shields.io/badge/数据-本地优先-15803d?style=flat-square)
 ![移动端](https://img.shields.io/badge/移动端-支持-2563eb?style=flat-square)
@@ -17,11 +17,11 @@
 
 Life OS Assistant 把 Obsidian Vault 变成一个相互关联的工作空间，用于管理**今天、任务、日记、知识、记忆、复盘、AI 助手和项目 AI 会话**。用户可读内容仍然保存在 Vault 的 Markdown 中。AI 写入默认关闭；用户可选择预览确认，也可以主动开启“明确指令自动写入”，但只有当前请求点明唯一目标时才会执行。
 
-当前版本：**0.3.15** · Obsidian **1.5.0+** · `isDesktopOnly: false`
+当前版本：**0.3.16** · Obsidian **1.5.0+** · `isDesktopOnly: false`
 
-> **0.3.15 支付可靠性更新：** 可购买的 Pro 商品和金额改为由当前授权服务实时提供，创建订单前会再次核对；服务端目录变化时先刷新页面并要求用户重新确认，避免客户端与服务端 SKU 不一致导致支付失败。
+> **0.3.16 Agent 与授权可靠性更新：** 桌面 AI 助手和微信 Bot 共用一个 Life OS Agent，统一使用已安装 Skill、项目 RAG、通用联网检索与受控写回。Pro 购买会阻止重复订单、重启后安全恢复未完成支付；当前买断价格保持 299 元，并继续兼容历史授权。
 
-> **关于配图：** 下方导览图依据 0.3.15 当前的信息架构和已经实现的工作流生成，全部使用虚构数据和中性 Obsidian 主题。实际界面会随你的 Obsidian 主题、窗口尺寸和已启用功能变化。
+> **关于配图：** 下方导览图依据 0.3.16 当前的信息架构和已经实现的工作流生成，全部使用虚构数据和中性 Obsidian 主题。实际界面会随你的 Obsidian 主题、窗口尺寸和已启用功能变化。
 
 ![Life OS 今日总览](readme-assets/01-today-overview.webp)
 
@@ -192,7 +192,7 @@ Life OS 已把微信 iLink Bot 连接层直接内置到插件中，不需要安�
 
 ### 手动安装
 
-创建 `.obsidian/plugins/personal-life-system/`，从精确语义版本 Tag（例如 `0.3.15`）中复制以下三个文件：
+创建 `.obsidian/plugins/personal-life-system/`，从精确语义版本 Tag（例如 `0.3.16`）中复制以下三个文件：
 
 - `main.js`
 - `manifest.json`

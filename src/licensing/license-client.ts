@@ -70,6 +70,10 @@ interface ApiEnvelope<T> {
   };
 }
 
+function isApiEnvelope<T>(value: unknown): value is ApiEnvelope<T> {
+  return Boolean(value) && typeof value === "object" && typeof (value as { ok?: unknown }).ok === "boolean";
+}
+
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl
     .trim()
@@ -113,9 +117,12 @@ async function api<T>(baseUrl: string, path: string, options: {
   } catch {
     throw new Error(`授权服务连接失败，请检查授权服务地址是否已部署并可访问：${normalizedBaseUrl}`);
   }
-  const payload = response.json as ApiEnvelope<T> | undefined;
-  if (response.status < 200 || response.status >= 300 || !payload?.ok) {
-    throw new Error(payload?.error?.message || `授权服务请求失败：HTTP ${response.status}`);
+  const payload = response.json as unknown;
+  if (!isApiEnvelope<T>(payload)) {
+    throw new Error(`授权服务返回了无法识别的响应：HTTP ${response.status}。请稍后重试或检查授权服务地址。`);
+  }
+  if (response.status < 200 || response.status >= 300 || !payload.ok) {
+    throw new Error(payload.error?.message || `授权服务请求失败：HTTP ${response.status}`);
   }
   return payload.data as T;
 }

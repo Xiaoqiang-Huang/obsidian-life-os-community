@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.3.16 - 2026-08-26
+
+### Added
+
+- Added a shared Life OS Agent runtime for the desktop AI assistant and Weixin Bot, so both entry points use the same intent planning, installed Skills, project resolution, local RAG, web evidence checks, observable execution stages, and writeback tools.
+- Added general multi-source web research with built-in search plus optional Tavily, Brave Search, and SearXNG backends. Search queries can be planned and recovered without vendor-specific answer patches, while unreadable or off-topic pages cannot support factual claims.
+- Added automatic low-cost Life OS knowledge probing for substantive questions, Chinese/English project-directory support, project-memory resolution, richer task mutation, custom-range review, and durable multi-turn Weixin state.
+- Added a non-mutating production Pro authorization-center matrix covering health, the public 299-yuan lifetime catalog, account/admin surfaces, authentication boundaries, missing-order isolation, validation failures, and CORS.
+
+### Changed
+
+- Weixin greetings and deterministic actions avoid unnecessary model calls; ordinary questions normally use one model call, while evidence, Skill, vision, or explicit constraint conflicts permit at most one bounded repair.
+- Installed Skills can be selected naturally by name or alias without inheriting an unrelated desktop default. Project context is inferred only when the user actually refers to personal/project data instead of requiring an exact project name for ordinary questions.
+- The current public lifetime plan remains `pro_299` at CNY 299 for five devices. `pro_198`, `pro_49`, and earlier monthly SKUs remain accepted only for historical purchaser compatibility.
+
+### Fixed
+
+- Fixed Pro purchase double-clicks and active pending orders creating duplicate payment orders.
+- Fixed unfinished orders not resuming polling after the Pro authorization center or Obsidian was reopened. Pending order state is now validated before use, claim tokens cannot be reused for another order, and status updates are persisted after every successful poll.
+- Fixed one transient authorization-service failure permanently stopping payment recovery. Automatic polling now retries a bounded number of times and malformed gateway responses produce an actionable error instead of a raw or ambiguous failure.
+- Fixed general Weixin questions being polluted by an unrelated default project, follow-up web queries losing their subject, installed teacher Skills not being recognized, local evidence from Chinese project directories being skipped, and answers failing closed despite relevant project memory.
+- Fixed the AI assistant history drawer, compact controls, button labels, and settings layout overflowing or becoming unreadable at narrower desktop widths.
+
+### Validation
+
+- Passed the complete plugin service/workflow suite, TypeScript checks, UI class/behavior/overflow guards, Pro purchaser-state compatibility guard, production build, payment-worker tests and type checking.
+- Passed the 14-item non-mutating production authorization-center matrix against `https://license.lifeoskit.com`; no valid order, email code, redeem, activation, personal license, or purchaser data was used.
+- Verified community source/release export, privacy exclusions, delivery synchronization, and Obsidian runtime opening of the Pro authorization center before publishing the release.
+
 ## 0.3.15 - 2026-08-24
 
 ### Fixed
@@ -11,6 +40,7 @@
 
 ### Changed
 
+- New lifetime Pro purchases use the `pro_299` SKU at CNY 299. The briefly published `pro_198` SKU and older `pro_49` SKU remain compatible for pending orders, licenses, redemption codes, and support workflows.
 - The authorization service is now the single source of truth for purchasable Life OS products. Both deployed legacy catalogs and current catalogs are supported without hard-coded client prices.
 - The version comparison page follows the same live catalog. The built-in guide no longer promises a stale fixed amount and directs users to the synchronized authorization center.
 - Existing pending-order recovery, order polling, activation, entitlement verification, license backups, and purchaser state remain unchanged.

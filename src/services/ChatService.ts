@@ -12,7 +12,13 @@ export interface ChatHistoryItem {
   path: string;
   title: string;
   messages: ChatMessage[];
+  channel: "desktop" | "weixin" | string;
+  source: string;
+  projectId: string;
+  updatedAt: string;
 }
+
+export type ChatHistoryChannelFilter = "all" | "desktop" | "weixin";
 
 export interface ChatContextItem {
   label: string;
@@ -22,6 +28,15 @@ export interface ChatContextItem {
 
 export interface SaveConversationOptions {
   date?: string;
+  title?: string;
+  source?: string;
+  channel?: string;
+  projectId?: string;
+  accountId?: string;
+  conversationId?: string;
+  senderId?: string;
+  isGroup?: boolean;
+  updatedAt?: string;
   mode?: string;
   style?: string;
   length?: string;
@@ -32,17 +47,33 @@ export interface SaveConversationOptions {
 export class ChatService {
   constructor(private app: App, private fs: FileSystemService, private assistantName: string, private settings?: PersonalLifeSystemSettings) {}
 
-  async loadHistory(limit = 8): Promise<ChatHistoryItem[]> {
-    const files = this.listHistoryFiles().slice(0, limit);
+  async loadHistory(limit = 8, channel: ChatHistoryChannelFilter = "all"): Promise<ChatHistoryItem[]> {
+    const files = this.listHistoryFiles();
     const history: ChatHistoryItem[] = [];
     for (const file of files) {
+      // WeChat conversations live in their own subtree. Skip those files before
+      // reading when the desktop drawer is selected; otherwise a large remote
+      // history makes merely opening the local history drawer unnecessarily slow.
+      if (channel === "desktop" && file.path.includes("/Weixin/")) continue;
+      const cached = this.app.metadataCache.getFileCache(file)?.frontmatter ?? {};
       const content = await this.app.vault.read(file);
-      const cachedTitle = String(this.app.metadataCache.getFileCache(file)?.frontmatter?.title ?? "").trim();
+      const cachedTitle = String(cached.title ?? "").trim();
+      const source = this.frontmatterValue(content, "source", cached.source) || (file.path.includes("/Weixin/") ? "weixin" : "assistant");
+      const itemChannel = this.normalizeChannel(
+        this.frontmatterValue(content, "channel", cached.channel) || source,
+        file.path
+      );
+      if (channel !== "all" && itemChannel !== channel) continue;
       history.push({
         path: file.path,
         title: cachedTitle || this.frontmatterTitle(content) || file.basename,
-        messages: parseChatMarkdown(content, this.assistantName) as ChatMessage[]
+        messages: parseChatMarkdown(content, this.assistantName) as ChatMessage[],
+        channel: itemChannel,
+        source,
+        projectId: this.frontmatterValue(content, "project_id", cached.project_id),
+        updatedAt: this.frontmatterValue(content, "updated_at", cached.updated_at) || new Date(file.stat.mtime).toISOString()
       });
+      if (history.length >= limit) break;
     }
     return history;
   }
@@ -55,8 +86,11 @@ export class ChatService {
     return true;
   }
 
-  async clearHistory(): Promise<number> {
-    const files = this.listHistoryFiles();
+  async clearHistory(channel: ChatHistoryChannelFilter = "desktop"): Promise<number> {
+    const items = await this.loadHistory(Number.MAX_SAFE_INTEGER, channel);
+    const files = items
+      .map((item) => this.app.vault.getAbstractFileByPath(item.path))
+      .filter((file): file is TFile => file instanceof TFile);
     for (const file of files) {
       await this.app.vault.delete(file);
     }
@@ -72,6 +106,15 @@ export class ChatService {
     await this.app.vault.modify(file, serializeChatMarkdown({
       date,
       assistantName: this.assistantName,
+      title: normalized.title || this.conversationTitle(messages),
+      source: normalized.source || "assistant",
+      channel: normalized.channel || "desktop",
+      projectId: normalized.projectId,
+      accountId: normalized.accountId,
+      conversationId: normalized.conversationId,
+      senderId: normalized.senderId,
+      isGroup: normalized.isGroup,
+      updatedAt: normalized.updatedAt || new Date().toISOString(),
       messages,
       mode: normalized.mode,
       style: normalized.style,
@@ -125,5 +168,35 @@ export class ChatService {
       }
     }
     return raw.replace(/^['"]|['"]$/g, "").trim();
+  }
+
+  private frontmatterValue(content: string, key: string, cached?: unknown): string {
+    const cachedText = String(cached ?? "").trim();
+    if (cachedText) return cachedText;
+    const block = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u)?.[1] ?? "";
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const raw = block.match(new RegExp(`^${escapedKey}:\\s*(.*)$`, "mu"))?.[1]?.trim() ?? "";
+    if (!raw) return "";
+    if (raw.startsWith('"') && raw.endsWith('"')) {
+      try {
+        const parsed = JSON.parse(raw);
+        return typeof parsed === "string" ? parsed.trim() : String(parsed ?? "").trim();
+      } catch {
+        return raw.slice(1, -1).trim();
+      }
+    }
+    return raw.replace(/^['"]|['"]$/g, "").trim();
+  }
+
+  private normalizeChannel(value: string, path: string): "desktop" | "weixin" | string {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "weixin" || path.includes("/Weixin/")) return "weixin";
+    if (!normalized || normalized === "assistant" || normalized === "obsidian" || normalized === "desktop") return "desktop";
+    return normalized;
+  }
+
+  private conversationTitle(messages: ChatMessage[]): string {
+    const first = messages.find((message) => message.role === "user")?.content.replace(/\s+/gu, " ").trim() || "新对话";
+    return first.length > 64 ? `${first.slice(0, 64)}…` : first;
   }
 }

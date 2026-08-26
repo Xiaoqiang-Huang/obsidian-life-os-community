@@ -22,6 +22,21 @@ export interface WeixinAssistantResponse {
   projectId?: string;
   conversationPath?: string;
   writebackStatus?: string;
+  /** Stored in the durable queue for local diagnosis; never rendered to the
+   * Weixin user and never contains prompts, secrets or absolute OS paths. */
+  diagnostics?: WeixinAssistantDiagnostics;
+}
+
+export interface WeixinAssistantDiagnostics {
+  route: string;
+  groundingMode?: "none" | "augment" | "strict";
+  webSearch: boolean;
+  boundProjectId?: string;
+  resolvedProjectId?: string;
+  sourceCount: number;
+  sourcePaths: string[];
+  retrievalStrategy?: string;
+  failureKind?: "none" | "web-evidence-insufficient" | "local-citation-check" | "model";
 }
 
 export interface WeixinAccessSettings {
@@ -833,9 +848,17 @@ function pushSkillAlias(target: string[], value: unknown): void {
  */
 export function getWeixinSkillAliases(skill: WeixinSkillDescriptor): string[] {
   const aliases: string[] = [];
-  const name = cleanText(skill.name, 240).replace(/\.skill$/iu, "").trim();
-  const id = cleanText(skill.id, 240).replace(/[-_]?skill$/iu, "").trim();
+  const rawName = cleanText(skill.name, 240);
+  const name = rawName.replace(/\.skill$/iu, "").trim();
+  const rawId = cleanText(skill.id, 240);
+  const id = rawId.replace(/[-_]?skill$/iu, "").trim();
+  if (rawName) aliases.push(rawName);
   pushSkillAlias(aliases, name);
+  // Keep the stable catalog id as an escape hatch when two installed Skills
+  // normalize to the same friendly name (for example Teach.skill and teach).
+  // Friendly aliases remain first for natural language, while the raw id makes
+  // every catalog entry independently callable.
+  if (rawId && !aliases.some((item) => item.toLowerCase() === rawId.toLowerCase())) aliases.push(rawId);
   pushSkillAlias(aliases, id);
 
   let shortName = name;
@@ -931,6 +954,16 @@ function flexibleSkillAliasPattern(alias: string): string {
     .join("\\s*");
 }
 
+function naturalSkillQuestionSuffix(value: string): string {
+  return value.replace(/^[\s：:,，、的]+/u, "").trim();
+}
+
+function isSubstantiveSkillQuestion(value: string): boolean {
+  const suffix = naturalSkillQuestionSuffix(value);
+  if (!suffix) return false;
+  return /(?:是什么|有哪些|怎么样|怎么|如何|为何|为什么|能否|可否|分析|解答?|回答|讲解?|解释|比较|判断|学习|做|总结|评价|规划|建议|题|方法|思路|框架|流程|步骤|原则|技巧|适用)/u.test(suffix);
+}
+
 /**
  * Resolve an explicit, message-local Skill invocation.
  *
@@ -979,6 +1012,27 @@ export function parseWeixinSkillInvocation(
     }
   }
   if (!prefix) {
+    // An installed Skill is a callable catalog entry, not merely a desktop
+    // toggle. Users naturally ask “陈怀安 资料分析的思路是什么” or
+    // “小 P 资料分析的方法是什么” without first saying “调用 Skill”. Match
+    // the longest complete installed alias (spaces are optional), then require a
+    // substantive question suffix so an ordinary mention such as “很有名” does
+    // not silently switch the answering method.
+    const catalogQuestionMatches = available.flatMap(({ skill, aliases }) => aliases.flatMap((alias) => {
+      const escaped = flexibleSkillAliasPattern(alias);
+      const match = source.match(new RegExp(`^[“"「『]?${escaped}[”"」』]?(?:老师|教练)?\\s*([\\s\\S]+)$`, "iu"));
+      if (!match || !isSubstantiveSkillQuestion(match[1])) return [];
+      return [{ skill, alias, query: naturalSkillQuestionSuffix(match[1]) }];
+    })).sort((a, b) => b.alias.length - a.alias.length);
+    if (catalogQuestionMatches.length > 0) {
+      prefix = {
+        rest: "",
+        naturalKeyword: catalogQuestionMatches[0].alias,
+        naturalQuery: catalogQuestionMatches[0].query
+      };
+    }
+  }
+  if (!prefix) {
     const addressedMatches = available.flatMap(({ skill, aliases }) => aliases.flatMap((alias) => {
       const escaped = flexibleSkillAliasPattern(alias);
       const match = source.match(new RegExp(`^[“\"「『]?${escaped}[”\"」』]?(?:老师|教练)?\\s*(?:(?:[：:,，、]|来|请|帮我|给我)\\s*|(?=(?:是|会)?\\s*(?:怎么|如何)))([\\s\\S]+)$`, "iu"));
@@ -989,6 +1043,37 @@ export function parseWeixinSkillInvocation(
         rest: "",
         naturalKeyword: addressedMatches[0].alias,
         naturalQuery: addressedMatches[0].query
+      };
+    }
+  }
+  if (!prefix) {
+    // Users often put a project/topic before the teacher nickname, for example
+    // “公考项目 正道哥 言语理解怎么学”. Treat an exact installed alias as a
+    // message-local Skill request even when it is not the first token. Keep the
+    // match deterministic and require a substantive request after the alias so
+    // ordinary prose that merely mentions a person does not switch Skills.
+    const embeddedMatches = available.flatMap(({ skill, aliases }) => aliases.flatMap((alias) => {
+      const escaped = flexibleSkillAliasPattern(alias);
+      const match = new RegExp(`[“"「『]?${escaped}[”"」』]?(?:老师|教练)?`, "iu").exec(source);
+      if (!match || match.index <= 0) return [];
+      const suffix = source
+        .slice(match.index + match[0].length)
+        .replace(/^[\s：:,，、的]+/u, "")
+        .trim();
+      if (!isSubstantiveSkillQuestion(suffix)) return [];
+      const prefixText = source.slice(0, match.index).replace(/[\s：:,，、]+$/u, "").trim();
+      if (/(?:听说|听闻|知道|认识|觉得|认为|提到|喜欢|关注)$/u.test(prefixText)) return [];
+      return [{
+        skill,
+        alias,
+        query: [prefixText, suffix].filter(Boolean).join(" ")
+      }];
+    })).sort((a, b) => b.alias.length - a.alias.length);
+    if (embeddedMatches.length > 0) {
+      prefix = {
+        rest: "",
+        naturalKeyword: embeddedMatches[0].alias,
+        naturalQuery: embeddedMatches[0].query
       };
     }
   }
@@ -1015,7 +1100,15 @@ export function parseWeixinSkillInvocation(
   }
 
   const normalizedKeyword = normalizedSkillAlias(keyword);
-  const exact = available.filter(({ skill, aliases }) =>
+  // A stable id is stronger than a normalized friendly alias. Normalization
+  // intentionally removes `.skill`/`-skill`, which is convenient for natural
+  // language but can collapse two distinct installed entries. Resolve the raw
+  // id first so duplicate display names never make a Skill unreachable.
+  const stableCatalogExact = available.filter(({ skill }) => (
+    cleanText(skill.id, 240).toLowerCase() === keyword.toLowerCase()
+    || cleanText(skill.name, 240).toLowerCase() === keyword.toLowerCase()
+  ));
+  const exact = stableCatalogExact.length > 0 ? stableCatalogExact : available.filter(({ skill, aliases }) =>
     normalizedSkillAlias(skill.id) === normalizedKeyword
     || normalizedSkillAlias(skill.name) === normalizedKeyword
     || aliases.some((alias) => normalizedSkillAlias(alias) === normalizedKeyword)

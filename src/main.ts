@@ -97,6 +97,7 @@ import {
   XingceQuestionModal
 } from "./modals";
 import { FileSystemService } from "./services/FileSystemService";
+import { LifeOSAgentService } from "./services/LifeOSAgentService";
 import { ProjectService } from "./services/ProjectService";
 import { AiWorkspaceService } from "./services/AiWorkspaceService";
 import { AutoReviewService, normalizeAutoReviewTime, type AutoReviewTrigger } from "./services/AutoReviewService";
@@ -167,6 +168,7 @@ interface AiEditDomSelectionSnapshot {
 export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin {
   settings: PersonalLifeSystemSettings;
   ai: AiClient;
+  agent: LifeOSAgentService;
   activeChatState: ActiveChatRuntimeState = { messages: [], draftInput: "", updatedAt: 0 };
   private dailyMaintenancePromise: Promise<void> | null = null;
   private dailyMaintenanceRunDate = "";
@@ -232,6 +234,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.installMobileViewportVariables();
     this.registerModalTextareaEnhancer();
     this.ai = new AiClient(() => this.settings);
+    this.agent = new LifeOSAgentService(this.app, () => this.settings, this.ai);
     this.autoReviewService = new AutoReviewService(
       this.app,
       this.fileSystem(),
@@ -978,7 +981,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       saveSettings: () => this.saveSettings(),
       sendProactiveText: (accountId, senderId, conversationId, text, clientId) => this.getWeixinIlinkService()
         .sendProactiveText(accountId, senderId, conversationId, text, clientId)
-    });
+    }, this.agent);
   }
 
   private getWeixinAssistantService(): WeixinAssistantService {

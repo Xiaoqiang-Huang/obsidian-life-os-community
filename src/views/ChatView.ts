@@ -10,9 +10,8 @@ import { createModalShell } from "../components/ModalShell";
 import { CHAT_VIEW_TYPE } from "../constants";
 import type PersonalLifeSystemPlugin from "../main";
 import { ChatContextService, type ChatContextBundle, type ChatContextStatusCard } from "../services/ChatContextService";
-import { CitationVerifierService } from "../services/context-engine/CitationVerifierService";
 import type { ContextSource } from "../services/context-engine/types";
-import { ChatService, type ChatHistoryItem } from "../services/ChatService";
+import { ChatService, type ChatHistoryChannelFilter, type ChatHistoryItem } from "../services/ChatService";
 import { parseKnowledgeWritebackCandidate, parseMemoryWritebackCandidate, type KnowledgeWritebackCandidate, type MemoryWritebackCandidate } from "../services/ChatWritebackParser";
 import { FileSystemService } from "../services/FileSystemService";
 import { ProjectDocumentService } from "../services/ProjectDocumentService";
@@ -30,6 +29,7 @@ import { buildImportedAiSkillPackageMarkdown, buildImportedAiSkillRecord, compos
 import { LlmWikiIntakeService, type LlmWikiSaveInput, type LlmWikiSaveResult } from "../services/LlmWikiIntakeService";
 import { LlmWikiPathService } from "../services/LlmWikiPathService";
 import { LlmWikiUndoService } from "../services/LlmWikiUndoService";
+import type { LifeOSAgentBuildMessagesInput } from "../services/LifeOSAgentService";
 import { CHAT_IMPORT_ACCEPT, buildImportedDocumentsContextMarkdown, buildImportedDocumentsMarkdown, buildImportedDocumentsSummary, formatAttachmentSize, formatImportedDocumentReference, readImportedFile, saveImportedFileToVault, type ImportedDocument } from "../services/DocumentImportService";
 import { PdfOcrService } from "../services/PdfOcrService";
 import { buildNumericEvidenceMarkdown, extractNumericEvidence, hasNumericIntent, type NumericEvidence } from "../services/NumericEvidenceService";
@@ -186,6 +186,7 @@ export class LifeOSChatView extends ItemView {
   private webSearchSelectEl: HTMLSelectElement | null = null;
   private webSearchSummaryEl: HTMLElement | null = null;
   private activeDrawerKind: "history" | "context" | null = null;
+  private historyChannelFilter: ChatHistoryChannelFilter = "all";
   private contextCards: ChatContextStatusCard[] = [];
   private mode: UiChatMode;
   private contextMode: UiChatContextMode;
@@ -1722,23 +1723,43 @@ export class LifeOSChatView extends ItemView {
     const drawer = this.openSideDrawer("history", "lifeos-chat-history-drawer");
     this.historyDrawerEl = drawer;
     const header = drawer.createDiv({ cls: "lifeos-chat-drawer-header" });
-    header.createEl("h2", { text: "聊天历史" });
-    const headerActions = header.createDiv({ cls: "lifeos-chat-drawer-actions" });
+    const title = header.createDiv({ cls: "lifeos-chat-drawer-title" });
+    const titleIcon = title.createSpan({ cls: "lifeos-chat-drawer-title-icon", attr: { "aria-hidden": "true" } });
+    setIcon(titleIcon, "messages-square");
+    title.createEl("h2", { text: "聊天历史" });
+    const closeButton = createButton(header, "收起", () => {
+      this.closeSideDrawer();
+    }, { ghost: true, icon: "panel-left-close", className: "lifeos-chat-drawer-close" });
+    closeButton.title = "收起聊天历史";
+
+    const toolbar = drawer.createDiv({ cls: "lifeos-chat-drawer-toolbar" });
+    const filter = toolbar.createEl("select", {
+      cls: "lifeos-history-channel-filter",
+      attr: { "aria-label": "筛选聊天来源" }
+    });
+    [
+      { value: "all", label: "全部来源" },
+      { value: "desktop", label: "内置助手" },
+      { value: "weixin", label: "微信" }
+    ].forEach((option) => filter.createEl("option", option));
+    filter.value = this.historyChannelFilter;
     const list = drawer.createDiv({ cls: "lifeos-history-list" });
-    const clearButton = createButton(headerActions, "清空历史", () => void this.clearHistory(service, list, clearButton), {
+    const clearButton = createButton(toolbar, "清空", () => void this.clearHistory(service, list, clearButton), {
       ghost: true,
       icon: "trash-2",
       className: "lifeos-button-danger lifeos-history-clear-button"
     });
-    createButton(headerActions, "收起", () => {
-      this.closeSideDrawer();
-    }, { ghost: true });
+    clearButton.title = "清空当前筛选结果";
+    filter.onchange = () => {
+      this.historyChannelFilter = filter.value as ChatHistoryChannelFilter;
+      void this.renderHistoryList(list, service, clearButton);
+    };
     await this.renderHistoryList(list, service, clearButton);
   }
 
   private async renderHistoryList(parent: HTMLElement, service: ChatService, clearButton?: HTMLButtonElement): Promise<void> {
     parent.empty();
-    const items = await service.loadHistory(50);
+    const items = await service.loadHistory(50, this.historyChannelFilter);
     if (clearButton) clearButton.disabled = items.length === 0;
     if (items.length === 0) {
       createEmptyState(parent, { icon: "messages-square", title: "还没有历史对话", description: "开始提问后，这里会显示最近的本地对话。", actions: [], compact: true });
@@ -1750,27 +1771,40 @@ export class LifeOSChatView extends ItemView {
   private renderHistoryItem(parent: HTMLElement, item: ChatHistoryItem, service: ChatService, clearButton?: HTMLButtonElement): void {
     const row = parent.createDiv({ cls: "lifeos-history-entry" });
     const button = row.createEl("button", { cls: "lifeos-history-item", attr: { type: "button" } });
-    button.createSpan({ cls: "lifeos-history-title", text: this.historyTitle(item) });
-    button.createSpan({ cls: "lifeos-history-subtitle", text: this.formatHistoryTime(item.title) });
+    const historyTitle = this.historyTitle(item);
+    button.title = historyTitle;
+    const heading = button.createSpan({ cls: "lifeos-history-heading" });
+    heading.createSpan({ cls: `lifeos-history-channel is-${item.channel}`, text: item.channel === "weixin" ? "微信" : "内置" });
+    heading.createSpan({ cls: "lifeos-history-title", text: historyTitle });
+    const scope = item.projectId ? ` · 项目 ${item.projectId}` : "";
+    button.createSpan({ cls: "lifeos-history-subtitle", text: `${this.formatHistoryTime(item.updatedAt || item.title)}${scope}` });
     button.onclick = () => {
       this.messages = item.messages.length > 0 ? item.messages : this.messages;
+      if (item.projectId && item.projectId !== this.selectedProjectScopeId) {
+        this.selectedProjectScopeId = item.projectId;
+        this.refreshComposerControls();
+      }
       this.resetContextCompression();
       this.renderMessages();
       this.scrollLogToBottom();
       this.persistActiveChatState();
       this.closeSideDrawer();
     };
-    createButton(row, "删除", async () => {
+    const deleteButton = createButton(row, "删除", async () => {
       if (!window.confirm(`确认删除这条聊天历史吗？\n${this.historyTitle(item)}`)) return;
       const deleted = await service.deleteHistoryItem(item.path);
       new Notice(deleted ? "聊天历史已删除。" : "这条聊天历史已经不存在。");
       await this.renderHistoryList(parent, service, clearButton);
     }, { ghost: true, icon: "trash-2", className: "lifeos-button-danger lifeos-history-delete" });
+    deleteButton.title = "删除这条对话";
   }
 
   private async clearHistory(service: ChatService, list: HTMLElement, clearButton: HTMLButtonElement): Promise<void> {
-    if (!window.confirm("确认清空所有聊天历史吗？当前正在输入的内容不会被清空。")) return;
-    const count = await service.clearHistory();
+    const scopeLabel = this.historyChannelFilter === "all"
+      ? "全部来源（内置助手与微信）"
+      : this.historyChannelFilter === "weixin" ? "微信" : "内置助手";
+    if (!window.confirm(`确认清空${scopeLabel}的聊天历史吗？当前正在输入的内容不会被清空。`)) return;
+    const count = await service.clearHistory(this.historyChannelFilter);
     new Notice(count > 0 ? `已清空 ${count} 条聊天历史。` : "没有可清空的聊天历史。");
     await this.renderHistoryList(list, service, clearButton);
   }
@@ -2578,7 +2612,7 @@ export class LifeOSChatView extends ItemView {
       if (willSearchWeb) {
         this.updateMessageActivity(assistant, "web", "active", "正在根据当前问题搜索网页");
       }
-      this.lastContextBundle = await this.contextService().buildContextBundle({
+      this.lastContextBundle = await this.plugin.agent.buildContext({
         userMessage: contextQuestion,
         contextMode: this.contextMode,
         maxChars: this.contextBudgetForRequest(requestProfile),
@@ -2650,7 +2684,7 @@ export class LifeOSChatView extends ItemView {
         ? `已定位 ${this.lastContextBundle.sources.length} 个来源（含 ${webSourceCount} 个网页），正在请求模型...`
         : `已定位 ${this.lastContextBundle.sources.length} 个可核对来源，正在请求模型...`);
 
-      const aiMessages = this.buildAiMessages(
+      const agentInput = this.buildAgentTurnInput(
         content || "请分析这些导入文件。",
         this.lastContextBundle.promptContext,
         documents,
@@ -2659,6 +2693,11 @@ export class LifeOSChatView extends ItemView {
         documentEditPromptContext,
         requestProfile
       );
+      const preparedAgentTurn = await this.plugin.agent.prepare({
+        ...agentInput,
+        contextBundle: this.lastContextBundle
+      });
+      const aiMessages = preparedAgentTurn.messages;
       estimatedInputTokens = this.estimateAiMessagesTokens(aiMessages);
       const selectedSkillNames = getAiSkills(
         this.selectedSkillIds,
@@ -2692,12 +2731,12 @@ export class LifeOSChatView extends ItemView {
         this.streamTimedOut = true;
         this.abortController.abort();
       }, 90000);
-      const result = await this.plugin.ai.completeStream(
+      const result = await this.plugin.agent.completeStream(
+        preparedAgentTurn,
         {
           temperature: this.mode === "exam" ? 0.25 : 0.45,
           model: this.visionRequestModel(documents),
-          reasoningEffort: this.reasoningEffort,
-          messages: aiMessages
+          reasoningEffort: this.reasoningEffort
         },
         {
           onStart: () => {
@@ -2761,7 +2800,7 @@ export class LifeOSChatView extends ItemView {
         },
         this.abortController.signal
       );
-      resultUsage = result.usage;
+      resultUsage = result.response.usage;
 
       if (!result.ok && runState.status !== "interrupted") {
         runState.status = "error";
@@ -2964,7 +3003,7 @@ export class LifeOSChatView extends ItemView {
     const bundle = this.lastContextBundle;
     if (!bundle || !content.trim() || !this.shouldRequireCitationVerification(profile)) return content;
 
-    const verification = new CitationVerifierService().verify(content, bundle.sources, {
+    const verification = this.plugin.agent.verifyAnswer(content, bundle.sources, {
       requireCitations: true,
       minimumCompleteness: 0.6
     });
@@ -2982,6 +3021,26 @@ export class LifeOSChatView extends ItemView {
     documentEditMarkdown = "",
     requestProfile = this.profileChatRequest(content, documents)
   ): Array<{ role: "system" | "user" | "assistant"; content: AiMessageContent }> {
+    return this.plugin.agent.buildMessages(this.buildAgentTurnInput(
+      content,
+      context,
+      documents,
+      importedMarkdown,
+      numericEvidenceMarkdown,
+      documentEditMarkdown,
+      requestProfile
+    ));
+  }
+
+  private buildAgentTurnInput(
+    content: string,
+    context: string,
+    documents: ImportedDocument[] = [],
+    importedMarkdown = "",
+    numericEvidenceMarkdown = "",
+    documentEditMarkdown = "",
+    requestProfile = this.profileChatRequest(content, documents)
+  ): LifeOSAgentBuildMessagesInput {
     const history = this.recentAgentHistory();
     const selectedSkills = getAiSkills(this.selectedSkillIds, this.importedAiSkills, this.plugin.settings.aiSkillOverrides);
     const skillPrompt = this.compactSkillPrompt(composeAiSkillPrompt(
@@ -3028,10 +3087,8 @@ export class LifeOSChatView extends ItemView {
         "回答前检查：是否覆盖了问题的每个部分、每个关键事实是否有来源、引用编号是否真实存在。"
       ].join("\n")
       : "本轮没有可核对的本地来源；涉及用户个人事实时必须说明资料不足，不得凭空补全。";
-    const userPrompt = [
-      "# 当前请求",
-      content,
-      "# 回答原则",
+    // The shared Agent core renders "# 当前请求" before these channel rules.
+    const answerInstructions = [
       `${modeHint} 回复风格：${STYLE_LABELS[this.style]}，长度：${LENGTH_LABELS[this.length]}。`,
       "先正面回答当前请求，再补充依据或下一步。不要把会话摘要、上下文清单或旧任务复述成答案。",
       "输出使用 Obsidian Markdown；数学公式必须用 $...$（行内）或 $$...$$（块级），不要使用 \\(...\\) 或 \\[...\\]。",
@@ -3039,39 +3096,48 @@ export class LifeOSChatView extends ItemView {
       examCoachingPrompt,
       workflowRules,
       citationRules,
-      compressedHistory,
-      context ? `# 与当前请求相关的 Life OS 证据\n${context}` : "",
-      requestProfile.documentEdit ? documentEditMarkdown : "",
-      importedMarkdown ? `# 本轮导入文件\n${importedMarkdown}` : "",
-      requestProfile.numeric
-        ? numericEvidenceMarkdown || "## Candidate numeric evidence\nNo numeric evidence was extracted from the imported files or user input."
-        : "",
-      "# 完成标准",
       this.currentWritebackMode() === "explicit-auto"
         ? "只处理“当前请求”。若证据与问题无关，忽略证据并直接回答；若用户明确指定写入目标，给出完整结构化写回内容，由插件自动执行；目标含糊时等待用户选择。"
         : "只处理“当前请求”。若证据与问题无关，忽略证据并直接回答；若用户要求写入或改文档，先给完整预览，等待插件确认。"
-    ].filter(Boolean).join("\n\n");
+    ].filter(Boolean);
     const imageParts = documents
       .filter((document) => document.kind === "image" && document.dataUrl && this.canUseVisionModel())
       .map((document) => ({
         type: "image_url" as const,
         image_url: { url: document.dataUrl!, detail: "auto" as const }
       }));
-    const userContent: AiMessageContent = imageParts.length > 0
-      ? [{ type: "text", text: userPrompt }, ...imageParts]
-      : userPrompt;
-    return [
-      {
-        role: "system",
-        content: [
-          buildSystemPrompt({ ...this.plugin.settings, assistantStyle: this.style, assistantVerbosity: this.length }),
-          selectedSkillGuard,
-          skillPrompt
-        ].filter(Boolean).join("\n\n")
-      },
-      ...history,
-      { role: "user", content: userContent }
-    ];
+    return {
+      channel: "desktop",
+      content,
+      history,
+      context,
+      projectLabel: this.selectedProjectScopeId || "全部项目",
+      projectScopeId: this.selectedProjectScopeId,
+      selectedSkillIds: this.selectedSkillIds,
+      defaultSkillId: this.plugin.settings.defaultAiSkillId,
+      assistantStyle: this.style,
+      assistantVerbosity: this.length,
+      modeHint,
+      maxHistoryMessages: 4,
+      maxHistoryChars: 8_000,
+      skillPromptOverride: skillPrompt,
+      systemInstructions: [selectedSkillGuard],
+      answerInstructions,
+      promptSections: [
+        compressedHistory ? { content: compressedHistory } : { content: "" },
+        requestProfile.documentEdit && documentEditMarkdown
+          ? { title: "目标文档与编辑约束", content: documentEditMarkdown }
+          : { content: "" },
+        importedMarkdown ? { title: "本轮导入文件", content: importedMarkdown } : { content: "" },
+        requestProfile.numeric
+          ? {
+              title: "Candidate numeric evidence",
+              content: numericEvidenceMarkdown || "No numeric evidence was extracted from the imported files or user input."
+            }
+          : { content: "" }
+      ],
+      imageParts
+    };
   }
 
   private recentAgentHistory(): Array<{ role: "user" | "assistant"; content: string }> {
@@ -4117,7 +4183,16 @@ export class LifeOSChatView extends ItemView {
   }
 
   private saveOptions(status: ChatRunStatus, contextSources?: string[]) {
-    return { mode: this.mode, style: this.style, length: this.length, status, contextSources };
+    return {
+      mode: this.mode,
+      style: this.style,
+      length: this.length,
+      status,
+      contextSources,
+      source: "assistant",
+      channel: "desktop",
+      projectId: this.selectedProjectScopeId
+    };
   }
 
   private normalizeStyle(style: AssistantStyle): UiChatStyle {
@@ -4138,8 +4213,13 @@ export class LifeOSChatView extends ItemView {
 
   private formatHistoryTime(title: string): string {
     const match = title.match(/(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})/);
-    if (!match) return title;
-    const [, year, month, day, hour, minute] = match;
+    const parsed = !match && /^\d{4}-\d{2}-\d{2}T/u.test(title) ? new Date(title) : null;
+    if (!match && (!parsed || Number.isNaN(parsed.getTime()))) return title;
+    const year = match?.[1] ?? String(parsed!.getFullYear());
+    const month = match?.[2] ?? String(parsed!.getMonth() + 1).padStart(2, "0");
+    const day = match?.[3] ?? String(parsed!.getDate()).padStart(2, "0");
+    const hour = match?.[4] ?? String(parsed!.getHours()).padStart(2, "0");
+    const minute = match?.[5] ?? String(parsed!.getMinutes()).padStart(2, "0");
     const date = `${year}-${month}-${day}`;
     const now = today();
     if (date === now) return `今天 ${hour}:${minute}`;
@@ -4151,6 +4231,10 @@ export class LifeOSChatView extends ItemView {
   }
 
   private historyTitle(item: ChatHistoryItem): string {
+    const metadataTitle = item.title.trim();
+    if (metadataTitle && !/^\d{4}-\d{2}-\d{2}-\d{4}$/u.test(metadataTitle) && !/^Life OS Chat\b/iu.test(metadataTitle)) {
+      return metadataTitle.length > 38 ? `${metadataTitle.slice(0, 38)}...` : metadataTitle;
+    }
     const first = item.messages.find((message) => message.role === "user")?.content.trim();
     if (!first) return "新对话";
     const normalized = first.replace(/\s+/g, " ");
