@@ -14,12 +14,18 @@ import {
 } from "../licensing/payment-catalog";
 import { resolveLicenseStatus } from "../licensing/entitlement";
 import { verifyLicenseEntitlementToken } from "../licensing/entitlement-token";
+import {
+  parseStoredPendingOrder,
+  shouldResumeOrderPolling,
+  storedOrderClaimTokenFor
+} from "../licensing/order-recovery";
 import type PersonalLifeSystemPlugin from "../main";
 import { createLifeOSShell } from "../components/LifeOSComponent";
 import { localizeLifeOsPathParts, normalizeDirectoryLanguage } from "../settings";
 import { ensureFile } from "../utils";
 
 const ORDER_POLL_INTERVAL_MS = 8000;
+const MAX_CONSECUTIVE_POLL_FAILURES = 3;
 const ENTITLEMENT_CLOCK_SKEW_NOTICE =
   "授权已生成，但当前电脑时间和授权服务器时间不一致。请同步系统时间后再点激活；兑换码不要重复输入，可到账号中心复制授权码。";
 
@@ -43,6 +49,8 @@ export class ProLicenseView extends ItemView {
   private pollTimer: number | null = null;
   private isPolling = false;
   private pollRequestInFlight = false;
+  private consecutivePollFailures = 0;
+  private orderCreationInFlight = false;
   private copyFallbackText = "";
   private licenseIssueMessage = "";
   private purchaseCatalog: LifeOsPurchaseCatalog = { monthly: null, lifetime: null };
@@ -66,10 +74,14 @@ export class ProLicenseView extends ItemView {
   async onOpen(): Promise<void> {
     await this.render();
     void this.refreshPurchaseCatalog(false);
+    if (this.pendingOrder && shouldResumeOrderPolling(this.pendingOrder.order.status)) {
+      this.startPolling(this.pendingOrder.order.id);
+    }
   }
 
   async onClose(): Promise<void> {
     this.purchaseCatalogRequestId += 1;
+    this.orderCreationInFlight = false;
     this.stopPolling();
   }
 
@@ -168,14 +180,13 @@ export class ProLicenseView extends ItemView {
   private renderPurchase(parent: HTMLElement): void {
     const section = parent.createDiv({ cls: "lifeos-pro-section" });
     this.sectionTitle(section, "购买 Pro", "qr-code");
-    this.renderTrialCard(section);
-    this.purchaseCatalogHost = section.createDiv({ cls: "lifeos-pro-catalog-host" });
-    this.renderPurchaseCatalog(this.purchaseCatalogHost);
-
     const restoredOrder = this.pendingOrder ?? this.restorePendingOrderFromSettings();
     if (restoredOrder && !this.pendingOrder) {
       this.pendingOrder = restoredOrder;
     }
+    this.renderTrialCard(section);
+    this.purchaseCatalogHost = section.createDiv({ cls: "lifeos-pro-catalog-host" });
+    this.renderPurchaseCatalog(this.purchaseCatalogHost);
 
     if (this.pendingOrder) {
       this.renderPaymentPanel(section, this.pendingOrder);
@@ -301,7 +312,12 @@ export class ProLicenseView extends ItemView {
     card.createDiv({ cls: "lifeos-pro-product-price", text: product.price });
     card.createEl("p", { text: product.description });
     card.createDiv({ cls: "lifeos-pro-product-meta", text: product.maxDevices });
-    this.button(card, "选择支付宝支付", "qr-code", () => void this.createOrder(product), true);
+    const purchase = this.button(card, "选择支付宝支付", "qr-code", () => void this.createOrder(product), true);
+    const hasActiveOrder = Boolean(this.pendingOrder && shouldResumeOrderPolling(this.pendingOrder.order.status));
+    purchase.disabled = this.orderCreationInFlight || hasActiveOrder;
+    if (hasActiveOrder) {
+      purchase.title = "已有待处理订单，请先完成支付或等待订单结束。";
+    }
   }
 
   private renderPaymentPanel(parent: HTMLElement, result: CreateOrderResult): void {
@@ -337,11 +353,20 @@ export class ProLicenseView extends ItemView {
   }
 
   private async createOrder(product: LifeOsPurchaseProduct): Promise<void> {
+    if (this.orderCreationInFlight) {
+      new Notice("订单正在创建，请勿重复点击。");
+      return;
+    }
+    if (this.pendingOrder && shouldResumeOrderPolling(this.pendingOrder.order.status)) {
+      new Notice("已有待处理订单，请先完成支付或等待订单结束。");
+      return;
+    }
     const email = this.plugin.settings.licenseEmail.trim();
     if (!email.includes("@")) {
       new Notice("请先填写有效邮箱。");
       return;
     }
+    this.orderCreationInFlight = true;
     try {
       const client = this.client;
       const latestCatalog = await this.loadPurchaseCatalog(client);
@@ -376,6 +401,8 @@ export class ProLicenseView extends ItemView {
         return;
       }
       new Notice(error instanceof Error ? error.message : String(error));
+    } finally {
+      this.orderCreationInFlight = false;
     }
   }
 
@@ -429,6 +456,7 @@ export class ProLicenseView extends ItemView {
     this.pollRequestInFlight = true;
     try {
       const result = await this.client.pollOrder(orderId, this.orderClaimTokenFor(orderId));
+      this.consecutivePollFailures = 0;
       if (result.order.status === "paid" && result.licenseKey) {
         this.stopPolling();
         this.pendingOrder = this.pendingOrder
@@ -464,7 +492,12 @@ export class ProLicenseView extends ItemView {
       }
       if (result.order.status === "paid" && !result.licenseKey) {
         this.stopPolling();
+        this.pendingOrder = this.pendingOrder
+          ? { ...this.pendingOrder, order: result.order }
+          : this.pendingOrder;
+        this.plugin.settings.licenseLastOrderSnapshot = JSON.stringify(result.order);
         this.licenseIssueMessage = "订单已支付，但当前设备缺少订单校验信息。请打开账号中心，用购买邮箱找回授权码后在本页激活。";
+        await this.plugin.saveSettings();
         new Notice(this.licenseIssueMessage, 8000);
         await this.render();
         return;
@@ -473,11 +506,18 @@ export class ProLicenseView extends ItemView {
         ? { ...this.pendingOrder, order: result.order }
         : null;
       this.plugin.settings.licenseLastOrderSnapshot = JSON.stringify(result.order);
+      await this.plugin.saveSettings();
       new Notice(`订单状态：${this.orderStatusText(result.order)}`);
       await this.render();
     } catch (error) {
-      this.stopPolling();
-      new Notice(error instanceof Error ? error.message : String(error));
+      this.consecutivePollFailures += 1;
+      const message = error instanceof Error ? error.message : String(error);
+      if (this.isPolling && this.consecutivePollFailures < MAX_CONSECUTIVE_POLL_FAILURES) {
+        new Notice(`订单状态检查暂时失败，将自动重试（${this.consecutivePollFailures}/${MAX_CONSECUTIVE_POLL_FAILURES}）：${message}`, 6000);
+      } else {
+        this.stopPolling();
+        new Notice(message);
+      }
     } finally {
       this.pollRequestInFlight = false;
     }
@@ -485,22 +525,32 @@ export class ProLicenseView extends ItemView {
 
   private restorePendingOrderFromSettings(): CreateOrderResult | null {
     if (!this.plugin.settings.licenseLastOrderId || !this.plugin.settings.licenseLastOrderSnapshot || !this.plugin.settings.licenseLastPaymentSnapshot) return null;
-    try {
-      return {
-        order: JSON.parse(this.plugin.settings.licenseLastOrderSnapshot) as PaymentOrder,
-        payment: JSON.parse(this.plugin.settings.licenseLastPaymentSnapshot) as CreateOrderResult["payment"],
-        orderClaimToken: this.plugin.settings.licenseLastOrderClaimToken || undefined
-      };
-    } catch {
+    const restored = parseStoredPendingOrder({
+      orderId: this.plugin.settings.licenseLastOrderId,
+      orderSnapshot: this.plugin.settings.licenseLastOrderSnapshot,
+      paymentSnapshot: this.plugin.settings.licenseLastPaymentSnapshot,
+      orderClaimToken: this.plugin.settings.licenseLastOrderClaimToken
+    });
+    if (!restored) {
       this.clearPendingOrderSettings();
       void this.plugin.saveSettings();
       return null;
     }
+    if (this.isTerminalOrderStatus(restored.order.status)) {
+      this.clearPendingOrderSettings();
+      void this.plugin.saveSettings();
+      return null;
+    }
+    return restored;
   }
 
   private orderClaimTokenFor(orderId: string): string | undefined {
     if (this.pendingOrder?.order.id === orderId && this.pendingOrder.orderClaimToken) return this.pendingOrder.orderClaimToken;
-    return this.plugin.settings.licenseLastOrderClaimToken || undefined;
+    return storedOrderClaimTokenFor(
+      orderId,
+      this.plugin.settings.licenseLastOrderId,
+      this.plugin.settings.licenseLastOrderClaimToken
+    );
   }
 
   private clearPendingOrderSettings(): void {
@@ -554,6 +604,7 @@ export class ProLicenseView extends ItemView {
 
   private startPolling(orderId: string): void {
     this.stopPolling();
+    this.consecutivePollFailures = 0;
     this.isPolling = true;
     this.pollTimer = window.setInterval(() => {
       void this.pollExistingOrder(orderId);

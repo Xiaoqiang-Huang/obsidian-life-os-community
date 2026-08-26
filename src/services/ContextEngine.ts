@@ -1,5 +1,10 @@
 ﻿import type { App } from "obsidian";
-import type { PersonalLifeSystemSettings } from "../settings";
+import {
+  localizeLifeOsPathParts,
+  normalizeDirectoryLanguage,
+  type DirectoryLanguage,
+  type PersonalLifeSystemSettings
+} from "../settings";
 import type { LifeOSTask } from "../types";
 import { parseTaskLine } from "../utils/markdown";
 import { LlmWikiContextService } from "./LlmWikiContextService";
@@ -39,6 +44,9 @@ const KNOWLEDGE_EXCERPT_CHARS = 900;
 const PROJECT_DOCUMENT_SCAN_LIMIT = 80;
 const PROJECT_DOCUMENT_SECTION_LIMIT = 12;
 const PROJECT_DOCUMENT_EXCERPT_CHARS = 1600;
+const PROJECT_AI_WORKSPACE_SCAN_LIMIT = 60;
+const PROJECT_AI_WORKSPACE_SECTION_LIMIT = 14;
+const PROJECT_AI_WORKSPACE_EXCERPT_CHARS = 1900;
 
 export class ContextEngine {
   private readonly app: App;
@@ -83,13 +91,14 @@ export class ContextEngine {
       maxResults: mode === "graph" ? 16 : mode === "vector" ? 12 : 10
     });
     const shouldIncludeProjectOverview = Boolean(input.projectScopeId) || /项目|任务|进度|待办|project|task/i.test(input.userMessage);
-    const [summarySections, currentNoteSections, urlSections, webSearchSections, projectSections, projectDocumentSections, coreSections, graphSections] = await Promise.all([
+    const [summarySections, currentNoteSections, urlSections, webSearchSections, projectSections, projectDocumentSections, projectAiWorkspaceSections, coreSections, graphSections] = await Promise.all([
       this.summaries.getSections({ mode, date: input.date, inventory: scopedInventory }),
       this.currentNoteSections(scopedInventory),
       this.urlSections(input.userMessage, input.fetchUrl),
       this.webSearchSections(input.webSearchQuery ?? input.userMessage, input.searchWeb, input.webSearchMode),
       shouldIncludeProjectOverview ? this.projectTaskSections(inventory, input.projectScopeId) : Promise.resolve([]),
       this.projectDocumentSections(inventory, input.projectScopeId, input.userMessage),
+      this.projectAiWorkspaceSections(inventory, input.projectScopeId, input.userMessage),
       this.coreContextSections(scopedInventory, input.date),
       mode === "graph"
         ? this.graphContext.build({ userMessage: input.userMessage, date: input.date, inventory: scopedInventory })
@@ -107,6 +116,7 @@ export class ContextEngine {
         ...webSearchSections,
         ...projectSections,
         ...projectDocumentSections,
+        ...projectAiWorkspaceSections,
         ...graphSections,
         ...coreSections,
         ...summarySections
@@ -121,17 +131,25 @@ export class ContextEngine {
     projectScopeId?: string
   ): ContextInventoryItem[] {
     if (!projectScopeId) return inventory;
-    const projectsRoot = this.normalizePath(`${this.rootFolder}/Projects/`);
-    const selectedProjectRoot = this.normalizePath(`${this.rootFolder}/Projects/${projectScopeId}/`);
-    const projectsIndex = this.normalizePath(`${this.rootFolder}/Projects/index.md`);
-    const openTasks = this.normalizePath(`${this.rootFolder}/Tasks/open.md`);
-    const doneTasks = this.normalizePath(`${this.rootFolder}/Tasks/done.md`);
+    const projectsRoots = this.directoryRoots("Projects");
+    const selectedProjectRoots = this.directoryRoots("Projects", projectScopeId);
+    const projectsIndexes = new Set(this.pathVariants("Projects", "index.md"));
+    const openTasks = new Set(this.pathVariants("Tasks", "open.md"));
+    const doneTasks = new Set(this.pathVariants("Tasks", "done.md"));
+    const aiWorkspaceRoots = [
+      ...this.directoryRoots("Projects", "AIWorkspace", "Project Memory", projectScopeId),
+      ...this.directoryRoots("Projects", "AIWorkspace", "Session Notes", projectScopeId),
+      ...this.directoryRoots("Projects", "AIWorkspace", "Handoffs", projectScopeId)
+    ];
 
     return inventory.filter((item) => {
       const path = this.normalizePath(item.path);
-      if (path === openTasks || path === doneTasks) return false;
-      if (path === projectsIndex) return true;
-      if (path.startsWith(projectsRoot)) return path.startsWith(selectedProjectRoot);
+      if (openTasks.has(path) || doneTasks.has(path)) return false;
+      if (projectsIndexes.has(path)) return true;
+      if (projectsRoots.some((root) => path.startsWith(root))) {
+        return selectedProjectRoots.some((root) => path.startsWith(root))
+          || aiWorkspaceRoots.some((root) => path.startsWith(root));
+      }
       return true;
     });
   }
@@ -140,14 +158,37 @@ export class ContextEngine {
     return path.replace(/\\/g, "/");
   }
 
+  /**
+   * Search both directory languages. A Vault can change its preferred
+   * language after creation, so limiting reads to the current setting would
+   * make existing Chinese (or English) data disappear from RAG.
+   */
+  private pathVariants(...parts: string[]): string[] {
+    const preferred = normalizeDirectoryLanguage(this.settings.directoryLanguage);
+    const languages: DirectoryLanguage[] = preferred === "zh" ? ["zh", "en"] : ["en", "zh"];
+    return Array.from(new Set(languages.map((language) => this.normalizePath([
+      this.rootFolder,
+      ...localizeLifeOsPathParts(parts, language)
+    ].filter(Boolean).join("/")))));
+  }
+
+  private directoryRoots(...parts: string[]): string[] {
+    return this.pathVariants(...parts).map((path) => `${path.replace(/\/+$/u, "")}/`);
+  }
+
+  private findInventoryItem(inventory: ContextInventoryItem[], ...parts: string[]): ContextInventoryItem | undefined {
+    const candidates = new Set(this.pathVariants(...parts));
+    return inventory.find((item) => candidates.has(this.normalizePath(item.path)));
+  }
+
   private async llmWikiSections(): Promise<ContextSection[]> {
     return new LlmWikiContextService(this.app, this.settings).buildContextEngineSections();
   }
 
   private async projectTaskSections(inventory: ContextInventoryItem[], projectScopeId?: string): Promise<ContextSection[]> {
-    const projectsItem = inventory.find((item) => item.path === `${this.rootFolder}/Projects/index.md`);
-    const openItem = inventory.find((item) => item.path === `${this.rootFolder}/Tasks/open.md`);
-    const doneItem = inventory.find((item) => item.path === `${this.rootFolder}/Tasks/done.md`);
+    const projectsItem = this.findInventoryItem(inventory, "Projects", "index.md");
+    const openItem = this.findInventoryItem(inventory, "Tasks", "open.md");
+    const doneItem = this.findInventoryItem(inventory, "Tasks", "done.md");
     if (!projectsItem && !openItem && !doneItem) return [];
 
     const [projectsMarkdown, openMarkdown, doneMarkdown] = await Promise.all([
@@ -162,7 +203,7 @@ export class ContextEngine {
 
     const overview = buildProjectOverview(projects, openTasks, doneTasks);
     const content = formatProjectOverviewForAi(overview, { projectScopeId });
-    const sourcePath = projectsItem?.path ?? openItem?.path ?? doneItem?.path ?? `${this.rootFolder}/Projects/index.md`;
+    const sourcePath = projectsItem?.path ?? openItem?.path ?? doneItem?.path ?? this.pathVariants("Projects", "index.md")[0];
 
     return [{
       title: "项目任务概览",
@@ -180,13 +221,13 @@ export class ContextEngine {
 
   private async projectDocumentSections(inventory: ContextInventoryItem[], projectScopeId?: string, userMessage = ""): Promise<ContextSection[]> {
     if (!projectScopeId) return [];
-    const projectsItem = inventory.find((item) => item.path === `${this.rootFolder}/Projects/index.md`);
+    const projectsItem = this.findInventoryItem(inventory, "Projects", "index.md");
     const projects = parseProjectIndex(await this.readInventoryContent(projectsItem));
     const projectName = projects.find((project) => project.id === projectScopeId)?.name ?? projectScopeId;
-    const documentsRoot = `${this.rootFolder}/Projects/${projectScopeId}/Documents/`;
+    const documentsRoots = this.directoryRoots("Projects", projectScopeId, "Documents");
     const keywords = this.knowledgeKeywords(userMessage);
     const items = inventory
-      .filter((item) => item.path.startsWith(documentsRoot) && item.path.toLowerCase().endsWith(".md"))
+      .filter((item) => documentsRoots.some((root) => this.normalizePath(item.path).startsWith(root)) && item.path.toLowerCase().endsWith(".md"))
       .sort((a, b) => b.mtime - a.mtime || a.path.localeCompare(b.path))
       .slice(0, PROJECT_DOCUMENT_SCAN_LIMIT);
     const ranked: Array<{ item: ContextInventoryItem; content: string; score: number }> = [];
@@ -222,6 +263,65 @@ export class ContextEngine {
       });
     }
 
+    return sections;
+  }
+
+  private async projectAiWorkspaceSections(
+    inventory: ContextInventoryItem[],
+    projectScopeId?: string,
+    userMessage = ""
+  ): Promise<ContextSection[]> {
+    if (!projectScopeId) return [];
+    const projectsItem = this.findInventoryItem(inventory, "Projects", "index.md");
+    const projects = parseProjectIndex(await this.readInventoryContent(projectsItem));
+    const projectName = projects.find((project) => project.id === projectScopeId)?.name ?? projectScopeId;
+    const roots = [
+      { kind: "项目共享记忆", priority: 94, roots: this.directoryRoots("Projects", "AIWorkspace", "Project Memory", projectScopeId) },
+      { kind: "项目会话记录", priority: 91, roots: this.directoryRoots("Projects", "AIWorkspace", "Session Notes", projectScopeId) },
+      { kind: "项目交接文档", priority: 90, roots: this.directoryRoots("Projects", "AIWorkspace", "Handoffs", projectScopeId) }
+    ];
+    const keywords = this.knowledgeKeywords(userMessage);
+    const candidates: Array<{ item: ContextInventoryItem; kind: string; priority: number }> = [];
+    for (const item of inventory) {
+      const path = this.normalizePath(item.path);
+      if (!path.toLowerCase().endsWith(".md")) continue;
+      const owner = roots.find((entry) => entry.roots.some((root) => path.startsWith(root)));
+      if (owner) candidates.push({ item, kind: owner.kind, priority: owner.priority });
+    }
+    candidates.sort((a, b) => {
+      const aScore = this.projectDocumentScore(a.item, "", keywords);
+      const bScore = this.projectDocumentScore(b.item, "", keywords);
+      return bScore - aScore || b.priority - a.priority || b.item.mtime - a.item.mtime || a.item.path.localeCompare(b.item.path);
+    });
+
+    const sections: ContextSection[] = [];
+    for (const candidate of candidates.slice(0, PROJECT_AI_WORKSPACE_SCAN_LIMIT)) {
+      const markdown = await this.readInventoryContent(candidate.item);
+      const content = this.relevantMarkdownPassages(markdown, keywords, PROJECT_AI_WORKSPACE_EXCERPT_CHARS);
+      if (!content) continue;
+      const sectionContent = [
+        `# ${candidate.kind}：${projectName}`,
+        `项目ID：${projectScopeId}`,
+        `路径：${candidate.item.path}`,
+        "",
+        content
+      ].join("\n");
+      sections.push({
+        title: `${candidate.kind}：${projectName} / ${candidate.item.title}`,
+        content: sectionContent,
+        priority: candidate.priority,
+        source: candidate.item.path,
+        sourceInfo: {
+          path: candidate.item.path,
+          title: candidate.item.title,
+          type: "project",
+          excerpt: content.slice(0, 240),
+          updatedAt: candidate.item.mtime || undefined,
+          trust: 0.9
+        }
+      });
+      if (sections.length >= PROJECT_AI_WORKSPACE_SECTION_LIMIT) break;
+    }
     return sections;
   }
 
@@ -349,7 +449,7 @@ export class ContextEngine {
       .sort((a, b) => b.mtime - a.mtime || a.path.localeCompare(b.path));
     if (items.length === 0) return [];
 
-    const rootPath = `${this.rootFolder}/Knowledge`;
+    const rootPath = this.pathVariants("Knowledge")[0];
     const broad = this.hasBroadKnowledgeIntent(userMessage);
     const keywords = this.knowledgeKeywords(userMessage);
     const catalogLines = items.slice(0, KNOWLEDGE_CATALOG_LIMIT).map((item) => {
@@ -433,9 +533,11 @@ export class ContextEngine {
   private isKnowledgeContextItem(item: ContextInventoryItem): boolean {
     const lower = item.path.toLowerCase();
     if (!lower.endsWith(".md")) return false;
-    if (!lower.includes("/knowledge/")) return false;
-    if (lower.endsWith("/knowledge/index.md")) return false;
-    if (lower.includes("/knowledge/llmwiki/trash/")) return false;
+    const knowledgeRoots = this.directoryRoots("Knowledge").map((path) => path.toLowerCase());
+    if (!knowledgeRoots.some((root) => lower.startsWith(root.toLowerCase()))) return false;
+    if (this.pathVariants("Knowledge", "index.md").some((path) => lower === path.toLowerCase())) return false;
+    const trashRoots = this.directoryRoots("Knowledge", "LLMWiki", "Trash").map((path) => path.toLowerCase());
+    if (trashRoots.some((root) => lower.startsWith(root))) return false;
     return true;
   }
 
@@ -639,21 +741,21 @@ export class ContextEngine {
 
   private async coreContextSections(inventory: ContextInventoryItem[], date?: string): Promise<ContextSection[]> {
     const sections: ContextSection[] = [];
-    const openTasks = inventory.find((item) => item.path === `${this.rootFolder}/Tasks/open.md`);
+    const openTasks = this.findInventoryItem(inventory, "Tasks", "open.md");
     if (openTasks) {
       const section = await this.sectionFromInventoryItem(openTasks, "未完成待办", 82);
       if (section) sections.push(section);
     }
 
-    const coreMemoryPaths = ["profile.md", "current-projects.md"].map((name) => `${this.rootFolder}/Memory/Core/${name}`);
-    for (const [index, path] of coreMemoryPaths.entries()) {
-      const item = inventory.find((candidate) => candidate.path === path);
+    const coreMemoryNames = ["profile.md", "current-projects.md"];
+    for (const [index, name] of coreMemoryNames.entries()) {
+      const item = this.findInventoryItem(inventory, "Memory", "Core", name);
       if (!item) continue;
       const section = await this.sectionFromInventoryItem(item, `Core memory: ${item.title}`, 78 - index);
       if (section) sections.push(section);
     }
 
-    const checkin = date ? inventory.find((item) => item.path === `${this.rootFolder}/Exam/Checkins/${date}.md`) : undefined;
+    const checkin = date ? this.findInventoryItem(inventory, "Exam", "Checkins", `${date}.md`) : undefined;
     if (checkin) {
       const section = await this.sectionFromInventoryItem(checkin, "Exam checkin", 54);
       if (section) sections.push(section);
@@ -704,12 +806,13 @@ export class ContextEngine {
 
   private sourceType(path: string): ContextSource["type"] {
     const lower = path.toLowerCase();
-    if (lower.includes("/memory/summaries/") || lower.includes("summary") || lower.includes("/weekly/") || lower.includes("/monthly/")) return "summary";
-    if (lower.includes("/daily/")) return "daily";
-    if (lower.includes("/tasks/")) return "task";
-    if (lower.includes("/knowledge/llmwiki/")) return "llm-wiki";
-    if (lower.includes("/memory/")) return "memory";
-    if (lower.includes("/knowledge/")) return "knowledge";
+    if (lower.includes("/memory/summaries/") || lower.includes("/记忆/总结/") || lower.includes("summary") || lower.includes("/weekly/") || lower.includes("/周复盘/") || lower.includes("/monthly/") || lower.includes("/月复盘/")) return "summary";
+    if (lower.includes("/daily/") || lower.includes("/日记/")) return "daily";
+    if (lower.includes("/tasks/") || lower.includes("/任务/")) return "task";
+    if (lower.includes("/knowledge/llmwiki/") || lower.includes("/知识库/llmwiki/")) return "llm-wiki";
+    if (lower.includes("/memory/") || lower.includes("/记忆/")) return "memory";
+    if (lower.includes("/knowledge/") || lower.includes("/知识库/")) return "knowledge";
+    if (lower.includes("/projects/") || lower.includes("/项目/")) return "project";
     return "graph";
   }
 

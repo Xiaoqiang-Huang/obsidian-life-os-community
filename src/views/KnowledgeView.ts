@@ -1840,7 +1840,8 @@ export class KnowledgeView extends ItemView {
     const response = await requestUrl({
       url,
       method: options.method ?? "GET",
-      headers: options.headers
+      headers: options.headers,
+      body: options.body
     });
     return { text: response.text, status: response.status };
   }

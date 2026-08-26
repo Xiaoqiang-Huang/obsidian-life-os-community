@@ -22,6 +22,21 @@ export interface WeixinAssistantResponse {
   projectId?: string;
   conversationPath?: string;
   writebackStatus?: string;
+  /** Stored in the durable queue for local diagnosis; never rendered to the
+   * Weixin user and never contains prompts, secrets or absolute OS paths. */
+  diagnostics?: WeixinAssistantDiagnostics;
+}
+
+export interface WeixinAssistantDiagnostics {
+  route: string;
+  groundingMode?: "none" | "augment" | "strict";
+  webSearch: boolean;
+  boundProjectId?: string;
+  resolvedProjectId?: string;
+  sourceCount: number;
+  sourcePaths: string[];
+  retrievalStrategy?: string;
+  failureKind?: "none" | "web-evidence-insufficient" | "local-citation-check" | "model";
 }
 
 export interface WeixinAccessSettings {
@@ -42,7 +57,7 @@ export interface WeixinCommand {
   args: string[];
 }
 
-export type WeixinLifeOSPeriod = "today" | "week" | "month";
+export type WeixinLifeOSPeriod = "today" | "week" | "month" | "custom";
 export type WeixinLifeOSActionSource = "command" | "natural" | "semantic";
 export type WeixinLifeOSAction =
   | { kind: "diary-add"; content: string; source: WeixinLifeOSActionSource }
@@ -51,8 +66,10 @@ export type WeixinLifeOSAction =
   | { kind: "task-list"; source: WeixinLifeOSActionSource }
   | { kind: "task-add"; title: string; due?: string; source: WeixinLifeOSActionSource }
   | { kind: "task-complete"; query: string; source: WeixinLifeOSActionSource }
-  | { kind: "review-generate"; period: WeixinLifeOSPeriod; source: WeixinLifeOSActionSource }
-  | { kind: "summary-generate"; period: WeixinLifeOSPeriod; source: WeixinLifeOSActionSource }
+  | { kind: "task-update"; query: string; title: string; due?: string; source: WeixinLifeOSActionSource }
+  | { kind: "task-delete"; query: string; source: WeixinLifeOSActionSource }
+  | { kind: "review-generate"; period: WeixinLifeOSPeriod; start?: string; end?: string; source: WeixinLifeOSActionSource }
+  | { kind: "summary-generate"; period: WeixinLifeOSPeriod; start?: string; end?: string; source: WeixinLifeOSActionSource }
   | { kind: "link-save"; url: string; title: string; collection?: string; source: WeixinLifeOSActionSource }
   | { kind: "knowledge-save"; title: string; content: string; source: WeixinLifeOSActionSource }
   | { kind: "reminder-add"; when: string; content: string; source: WeixinLifeOSActionSource }
@@ -368,17 +385,18 @@ function parseNaturalLinkSavePayload(value: string): { url: string; title: strin
   if (!urlMatch) return null;
   const hasSaveIntent = /(?:收藏|保存|存入|存到|收录|加入|放进)/u.test(source);
   const hasLinkTarget = /(?:链接|网址|网页|文章|知识库|收藏夹)/u.test(source);
-  if (!hasSaveIntent || !hasLinkTarget) return null;
+  const hasNamedDestination = /(?:存到|保存到|存入|收录到|加入|放进)\s*[^，。！？!?]{1,40}(?:里|中|分类|目录)?\s*$/u.test(source);
+  if (!hasSaveIntent || (!hasLinkTarget && !hasNamedDestination)) return null;
 
   const url = urlMatch[0].replace(/[，。；;！!？?）)】\]]+$/u, "");
-  const title = source
+  const title = hasLinkTarget ? source
     .replace(urlMatch[0], " ")
     .replace(/^(?:帮我把|请把|麻烦把|帮我|麻烦|请|把)\s*/u, "")
     .replace(/(?:这个|这篇|该)?(?:链接|网址|网页|文章)/gu, " ")
     .replace(/(?:收藏|保存|存入|存到|收录|加入|放进)(?:到|至|进)?(?:我的)?(?:知识库|收藏夹)?(?:里|中)?/gu, " ")
     .replace(/[：:,，。；;！!？?（）()【】\[\]]+/gu, " ")
     .replace(/\s+/gu, " ")
-    .trim();
+    .trim() : "";
   return { url, title: cleanText(title, 240) };
 }
 
@@ -435,6 +453,54 @@ function commandAction(source: string): WeixinLifeOSAction | null {
   return null;
 }
 
+function parseNaturalTaskPayload(value: string): { title: string; due?: string } {
+  const clean = value.replace(/^[：:,，|｜\s]+|[：:,，|｜\s]+$/gu, "").trim();
+  const [separatedTitle, separatedDue] = splitOnce(clean);
+  if (separatedDue) return { title: separatedTitle, due: separatedDue };
+
+  const prefix = clean.match(/^((?:今天|今晚|今夜|明天|明晚|后天|后晚)(?:(?:早上|上午|中午|下午|傍晚|晚上|夜里|凌晨)?\s*(?:\d{1,2}(?::|[.．])\d{1,2}|\d{1,2}点半|\d{1,2}点(?:\d{1,2}分?)?))?|(?:周|星期)[一二三四五六日天](?:(?:早上|上午|中午|下午|傍晚|晚上|夜里|凌晨)?\s*(?:\d{1,2}(?::|[.．])\d{1,2}|\d{1,2}点半|\d{1,2}点(?:\d{1,2}分?)?))?|\d{1,4}\s*(?:分钟|小时|天)后)\s*(.{2,})$/u);
+  if (prefix) return { title: prefix[2].trim(), due: prefix[1].trim() };
+
+  const suffix = clean.match(/^(.{2,}?)[，,；;|｜]\s*((?:今天|今晚|今夜|明天|明晚|后天|后晚|(?:周|星期)[一二三四五六日天]).*)$/u);
+  return suffix ? { title: suffix[1].trim(), due: suffix[2].trim() } : { title: clean };
+}
+
+function parseReviewDatePart(value: string, reference: Date): { date: Date | null; explicitYear: boolean } {
+  const source = cleanText(value, 40).replace(/\s+/gu, "");
+  let match = source.match(/^(?:(\d{4})[-/.年])?(\d{1,2})[-/.月](\d{1,2})日?$/u);
+  if (!match) return { date: null, explicitYear: false };
+  const explicitYear = Boolean(match[1]);
+  const year = Number(match[1] || reference.getFullYear());
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day, 12, 0, 0, 0);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return { date: null, explicitYear };
+  }
+  return { date, explicitYear };
+}
+
+export function resolveWeixinReviewWindow(
+  startValue: string,
+  endValue: string,
+  reference = new Date()
+): { start: string; end: string; error: string } {
+  const safeReference = Number.isFinite(reference.getTime()) ? reference : new Date();
+  const start = parseReviewDatePart(startValue, safeReference);
+  const end = parseReviewDatePart(endValue, safeReference);
+  if (!start.date || !end.date) return { start: "", end: "", error: "无法识别复盘日期，请使用‘8月1日到8月20日’或‘2026-08-01 到 2026-08-20’。" };
+  if (end.date.getTime() < start.date.getTime() && !end.explicitYear) {
+    end.date.setFullYear(end.date.getFullYear() + 1);
+  }
+  if (end.date.getTime() < start.date.getTime()) return { start: "", end: "", error: "复盘结束日期不能早于开始日期。" };
+  const format = (date: Date) => [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0")
+  ].join("-");
+  return { start: format(start.date), end: format(end.date), error: "" };
+}
+
 /**
  * Parse only strong, user-authored Life OS actions. Ordinary discussion that
  * merely mentions a feature intentionally falls through to normal Q&A.
@@ -453,18 +519,28 @@ export function parseWeixinLifeOSAction(value: unknown): WeixinLifeOSAction | nu
     return { kind: "diary-generate", source: "natural" };
   }
 
-  if (/^(?:请|帮我|麻烦)?\s*(?:打开|查看|看看|看一下|读一下|读取|告诉我)(?:一下)?(?:今天|今日|当天)(?:的)?日记(?:内容)?\s*$/u.test(source)) {
+  if (
+    /^(?:请|帮我|麻烦)?\s*(?:打开|查看|看看|看一下|读一下|读取|告诉我)(?:一下)?(?:今天|今日|当天)(?:的)?日记(?:内容)?\s*$/u.test(source)
+    || /^(?:请|帮我|麻烦)?\s*(?:看看|看一下|告诉我|总结一下)?(?:我)?(?:今天|今日|当天)(?:都)?做了什么(?:事)?[。！!？?\s]*$/u.test(source)
+  ) {
     return { kind: "diary-read", date: "today", source: "natural" };
+  }
+
+  if (
+    /^(?:请|帮我|麻烦)?\s*(?:打开|查看|看看|看一下|读一下|读取|告诉我)(?:一下)?(?:昨天|昨日)(?:的)?日记(?:内容)?\s*$/u.test(source)
+    || /^(?:请|帮我|麻烦)?\s*(?:看看|看一下|告诉我|总结一下)?(?:我)?(?:昨天|昨日)(?:都)?做了什么(?:事)?[。！!？?\s]*$/u.test(source)
+  ) {
+    return { kind: "diary-read", date: "yesterday", source: "natural" };
   }
 
   let match = source.match(/^(?:记日记|写日记|记录到日记|把(?:这段|下面|这些)?(?:内容)?记到日记(?:里)?|帮我记(?:到)?日记)\s*[：:,，]?\s*([\s\S]+)$/u);
   if (match) return { kind: "diary-add", content: match[1].trim(), source: "natural" };
   match = source.match(/^(?:添加|新建|创建|帮我加|记下)(?:一个|一条)?(?:待办|任务)\s*[：:,，]?\s*([\s\S]+)$/u);
   if (match) {
-    const [title, due] = splitOnce(match[1]);
-    return due
-      ? { kind: "task-add", title, due, source: "natural" }
-      : { kind: "task-add", title, source: "natural" };
+    const task = parseNaturalTaskPayload(match[1]);
+    return task.due
+      ? { kind: "task-add", title: task.title, due: task.due, source: "natural" }
+      : { kind: "task-add", title: task.title, source: "natural" };
   }
   if (/^(?:查看|列出|显示|看看|告诉我)(?:我的|当前|未完成|还有哪些)?(?:待办|任务)(?:有哪些|列表)?\s*$/u.test(source)) {
     return { kind: "task-list", source: "natural" };
@@ -472,7 +548,29 @@ export function parseWeixinLifeOSAction(value: unknown): WeixinLifeOSAction | nu
   match = source.match(/^(?:完成|勾选|标记完成)(?:这个|这条)?(?:待办|任务)\s*[：:,，]?\s*([\s\S]+)$/u);
   if (match) return { kind: "task-complete", query: match[1].trim(), source: "natural" };
 
-  match = source.match(/^(?:帮我|请)?\s*(复盘|总结)\s*(今天|今日|本周|这周|本月|这个月)(?:的(?:工作|进展|情况))?\s*$/u);
+  match = source.match(/^(?:把\s*)?(?:待办|任务)\s*([^：:,，]{1,80}?)\s*(?:改成|改为|修改为|更新为)\s*([\s\S]+)$/u)
+    || source.match(/^(?:修改|更新)(?:待办|任务)\s*([^：:,，]{1,80})\s*[：:,，]\s*([\s\S]+)$/u);
+  if (match) {
+    const task = parseNaturalTaskPayload(match[2]);
+    return task.due
+      ? { kind: "task-update", query: match[1].trim(), title: task.title, due: task.due, source: "natural" }
+      : { kind: "task-update", query: match[1].trim(), title: task.title, source: "natural" };
+  }
+  match = source.match(/^(?:删除|取消|移除)(?:这个|这条)?(?:待办|任务)\s*[：:,，]?\s*([\s\S]+)$/u);
+  if (match) return { kind: "task-delete", query: match[1].trim(), source: "natural" };
+
+  match = source.match(/^(?:帮我|请)?\s*(复盘|总结)\s*(?:从)?\s*([^到至]+?)\s*(?:到|至)\s*([^，。！？!?]+?)(?:的(?:工作|进展|情况))?\s*$/u);
+  if (match) {
+    return {
+      kind: match[1] === "复盘" ? "review-generate" : "summary-generate",
+      period: "custom",
+      start: match[2].trim(),
+      end: match[3].trim(),
+      source: "natural"
+    };
+  }
+
+  match = source.match(/^(?:帮我|请)?\s*(复盘|总结)\s*(今天|今日|本周|这周|本月|这个月)(?:的?(?:工作|进展|情况))?\s*$/u);
   if (match) {
     const period = actionPeriod(match[2]) || "today";
     return match[1] === "复盘"
@@ -490,7 +588,9 @@ export function parseWeixinLifeOSAction(value: unknown): WeixinLifeOSAction | nu
   match = source.match(/^(?:把|帮我把)?(?:这段|这些|下面的)?(?:内容|资料|笔记)?\s*(?:存入|保存到|加入|放进)(?:我的)?知识库(?:里)?\s*[：:,，]?\s*([\s\S]+)$/u);
   if (match) {
     const [title, content] = splitOnce(match[1]);
-    return { kind: "knowledge-save", title, content, source: "natural" };
+    return content
+      ? { kind: "knowledge-save", title, content, source: "natural" }
+      : { kind: "knowledge-save", title: "微信知识", content: title, source: "natural" };
   }
   const reminder = parseNaturalReminderAction(source);
   if (reminder) return reminder;
@@ -545,7 +645,57 @@ export interface WeixinReminderTimeResult {
   error: string;
 }
 
-const NATURAL_REMINDER_TIME = "(?:今天|今晚|今夜|明天|明晚|后天|后晚|周[一二三四五六日天]|星期[一二三四五六日天])?(?:早上|上午|中午|下午|傍晚|晚上|夜里|凌晨)?\\s*(?:\\d{1,2}(?::|[.．])\\d{1,2}|\\d{1,2}点半|\\d{1,2}点(?:\\d{1,2}分?)?)|\\d{1,4}\\s*(?:分钟|小时|天)后";
+const CHINESE_NUMBER_TOKEN = "[零〇一二两三四五六七八九十]{1,4}";
+const NATURAL_REMINDER_TIME = `(?:今天|今晚|今夜|明天|明晚|后天|后晚|周[一二三四五六日天]|星期[一二三四五六日天])?(?:早上|上午|中午|下午|傍晚|晚上|夜里|凌晨)?\\s*(?:\\d{1,2}(?::|[.．])\\d{1,2}|\\d{1,2}点半|\\d{1,2}点(?:\\d{1,2}分?)?|${CHINESE_NUMBER_TOKEN}点(?:半|${CHINESE_NUMBER_TOKEN}分?)?)|(?:\\d{1,4}|${CHINESE_NUMBER_TOKEN})\\s*(?:分钟|小时|天)后|半(?:个)?小时后`;
+
+function chineseInteger(value: string): number | null {
+  const digits: Record<string, number> = {
+    "零": 0,
+    "〇": 0,
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9
+  };
+  if (!value || !new RegExp(`^${CHINESE_NUMBER_TOKEN}$`, "u").test(value)) return null;
+  if (!value.includes("十")) {
+    const converted = Array.from(value).map((item) => digits[item]);
+    return converted.some((item) => item === undefined) ? null : Number(converted.join(""));
+  }
+  const [tensPart, onesPart, ...rest] = value.split("十");
+  if (rest.length > 0) return null;
+  const tens = tensPart ? digits[tensPart] : 1;
+  const ones = onesPart ? digits[onesPart] : 0;
+  return tens === undefined || ones === undefined ? null : tens * 10 + ones;
+}
+
+function normalizeChineseReminderTime(value: string): string {
+  return value
+    .replace(/半(?:个)?小时后/gu, "30分钟后")
+    .replace(new RegExp(`(${CHINESE_NUMBER_TOKEN})(分钟|小时|天)后`, "gu"), (whole, number: string, unit: string) => {
+      const parsed = chineseInteger(number);
+      return parsed === null ? whole : `${parsed}${unit}后`;
+    })
+    .replace(new RegExp(`(${CHINESE_NUMBER_TOKEN})点半`, "gu"), (whole, hour: string) => {
+      const parsed = chineseInteger(hour);
+      return parsed === null ? whole : `${parsed}:30`;
+    })
+    .replace(new RegExp(`(${CHINESE_NUMBER_TOKEN})点(${CHINESE_NUMBER_TOKEN})分?`, "gu"), (whole, hour: string, minute: string) => {
+      const parsedHour = chineseInteger(hour);
+      const parsedMinute = chineseInteger(minute);
+      return parsedHour === null || parsedMinute === null ? whole : `${parsedHour}:${parsedMinute}`;
+    })
+    .replace(new RegExp(`(${CHINESE_NUMBER_TOKEN})点`, "gu"), (whole, hour: string) => {
+      const parsed = chineseInteger(hour);
+      return parsed === null ? whole : `${parsed}:00`;
+    });
+}
 
 function parseNaturalReminderAction(source: string): Extract<WeixinLifeOSAction, { kind: "reminder-add" }> | null {
   if (!/(?:提醒我|记得提醒我|到时提醒我|别忘了提醒我)/u.test(source)) return null;
@@ -571,6 +721,7 @@ function parseNaturalReminderAction(source: string): Extract<WeixinLifeOSAction,
     .replace(/^[\s，,。；;：:|｜]+|[\s，,。；;：:|｜]+$/gu, "")
     .replace(/^(?:要|去|做|一下|这件事)\s*/u, "")
     .trim());
+  content = content.replace(/^(?:提醒我|记得提醒我|到时提醒我|别忘了提醒我)\s*/u, "").trim();
   if (!content) content = "处理提醒事项";
   return { kind: "reminder-add", when, content, source: "natural" };
 }
@@ -588,7 +739,7 @@ function setClock(date: Date, hour: number, minute: number): Date | null {
 
 /** Parse practical local reminder expressions without sending date parsing to AI. */
 export function parseWeixinReminderTime(value: unknown, now = new Date()): WeixinReminderTimeResult {
-  const source = cleanText(value, 120)
+  const source = normalizeChineseReminderTime(cleanText(value, 120))
     .replace(/(\d{1,2})[.．](\d{1,2})/u, "$1:$2")
     .replace(/(\d{1,2})点(\d{1,2})分/u, "$1:$2")
     .replace(/点半/u, ":30")
@@ -697,9 +848,17 @@ function pushSkillAlias(target: string[], value: unknown): void {
  */
 export function getWeixinSkillAliases(skill: WeixinSkillDescriptor): string[] {
   const aliases: string[] = [];
-  const name = cleanText(skill.name, 240).replace(/\.skill$/iu, "").trim();
-  const id = cleanText(skill.id, 240).replace(/[-_]?skill$/iu, "").trim();
+  const rawName = cleanText(skill.name, 240);
+  const name = rawName.replace(/\.skill$/iu, "").trim();
+  const rawId = cleanText(skill.id, 240);
+  const id = rawId.replace(/[-_]?skill$/iu, "").trim();
+  if (rawName) aliases.push(rawName);
   pushSkillAlias(aliases, name);
+  // Keep the stable catalog id as an escape hatch when two installed Skills
+  // normalize to the same friendly name (for example Teach.skill and teach).
+  // Friendly aliases remain first for natural language, while the raw id makes
+  // every catalog entry independently callable.
+  if (rawId && !aliases.some((item) => item.toLowerCase() === rawId.toLowerCase())) aliases.push(rawId);
   pushSkillAlias(aliases, id);
 
   let shortName = name;
@@ -795,6 +954,16 @@ function flexibleSkillAliasPattern(alias: string): string {
     .join("\\s*");
 }
 
+function naturalSkillQuestionSuffix(value: string): string {
+  return value.replace(/^[\s：:,，、的]+/u, "").trim();
+}
+
+function isSubstantiveSkillQuestion(value: string): boolean {
+  const suffix = naturalSkillQuestionSuffix(value);
+  if (!suffix) return false;
+  return /(?:是什么|有哪些|怎么样|怎么|如何|为何|为什么|能否|可否|分析|解答?|回答|讲解?|解释|比较|判断|学习|做|总结|评价|规划|建议|题|方法|思路|框架|流程|步骤|原则|技巧|适用)/u.test(suffix);
+}
+
 /**
  * Resolve an explicit, message-local Skill invocation.
  *
@@ -843,6 +1012,27 @@ export function parseWeixinSkillInvocation(
     }
   }
   if (!prefix) {
+    // An installed Skill is a callable catalog entry, not merely a desktop
+    // toggle. Users naturally ask “陈怀安 资料分析的思路是什么” or
+    // “小 P 资料分析的方法是什么” without first saying “调用 Skill”. Match
+    // the longest complete installed alias (spaces are optional), then require a
+    // substantive question suffix so an ordinary mention such as “很有名” does
+    // not silently switch the answering method.
+    const catalogQuestionMatches = available.flatMap(({ skill, aliases }) => aliases.flatMap((alias) => {
+      const escaped = flexibleSkillAliasPattern(alias);
+      const match = source.match(new RegExp(`^[“"「『]?${escaped}[”"」』]?(?:老师|教练)?\\s*([\\s\\S]+)$`, "iu"));
+      if (!match || !isSubstantiveSkillQuestion(match[1])) return [];
+      return [{ skill, alias, query: naturalSkillQuestionSuffix(match[1]) }];
+    })).sort((a, b) => b.alias.length - a.alias.length);
+    if (catalogQuestionMatches.length > 0) {
+      prefix = {
+        rest: "",
+        naturalKeyword: catalogQuestionMatches[0].alias,
+        naturalQuery: catalogQuestionMatches[0].query
+      };
+    }
+  }
+  if (!prefix) {
     const addressedMatches = available.flatMap(({ skill, aliases }) => aliases.flatMap((alias) => {
       const escaped = flexibleSkillAliasPattern(alias);
       const match = source.match(new RegExp(`^[“\"「『]?${escaped}[”\"」』]?(?:老师|教练)?\\s*(?:(?:[：:,，、]|来|请|帮我|给我)\\s*|(?=(?:是|会)?\\s*(?:怎么|如何)))([\\s\\S]+)$`, "iu"));
@@ -853,6 +1043,37 @@ export function parseWeixinSkillInvocation(
         rest: "",
         naturalKeyword: addressedMatches[0].alias,
         naturalQuery: addressedMatches[0].query
+      };
+    }
+  }
+  if (!prefix) {
+    // Users often put a project/topic before the teacher nickname, for example
+    // “公考项目 正道哥 言语理解怎么学”. Treat an exact installed alias as a
+    // message-local Skill request even when it is not the first token. Keep the
+    // match deterministic and require a substantive request after the alias so
+    // ordinary prose that merely mentions a person does not switch Skills.
+    const embeddedMatches = available.flatMap(({ skill, aliases }) => aliases.flatMap((alias) => {
+      const escaped = flexibleSkillAliasPattern(alias);
+      const match = new RegExp(`[“"「『]?${escaped}[”"」』]?(?:老师|教练)?`, "iu").exec(source);
+      if (!match || match.index <= 0) return [];
+      const suffix = source
+        .slice(match.index + match[0].length)
+        .replace(/^[\s：:,，、的]+/u, "")
+        .trim();
+      if (!isSubstantiveSkillQuestion(suffix)) return [];
+      const prefixText = source.slice(0, match.index).replace(/[\s：:,，、]+$/u, "").trim();
+      if (/(?:听说|听闻|知道|认识|觉得|认为|提到|喜欢|关注)$/u.test(prefixText)) return [];
+      return [{
+        skill,
+        alias,
+        query: [prefixText, suffix].filter(Boolean).join(" ")
+      }];
+    })).sort((a, b) => b.alias.length - a.alias.length);
+    if (embeddedMatches.length > 0) {
+      prefix = {
+        rest: "",
+        naturalKeyword: embeddedMatches[0].alias,
+        naturalQuery: embeddedMatches[0].query
       };
     }
   }
@@ -879,7 +1100,15 @@ export function parseWeixinSkillInvocation(
   }
 
   const normalizedKeyword = normalizedSkillAlias(keyword);
-  const exact = available.filter(({ skill, aliases }) =>
+  // A stable id is stronger than a normalized friendly alias. Normalization
+  // intentionally removes `.skill`/`-skill`, which is convenient for natural
+  // language but can collapse two distinct installed entries. Resolve the raw
+  // id first so duplicate display names never make a Skill unreachable.
+  const stableCatalogExact = available.filter(({ skill }) => (
+    cleanText(skill.id, 240).toLowerCase() === keyword.toLowerCase()
+    || cleanText(skill.name, 240).toLowerCase() === keyword.toLowerCase()
+  ));
+  const exact = stableCatalogExact.length > 0 ? stableCatalogExact : available.filter(({ skill, aliases }) =>
     normalizedSkillAlias(skill.id) === normalizedKeyword
     || normalizedSkillAlias(skill.name) === normalizedKeyword
     || aliases.some((alias) => normalizedSkillAlias(alias) === normalizedKeyword)

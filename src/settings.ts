@@ -73,6 +73,7 @@ export type AssistantVerbosity = "brief" | "normal" | "detailed";
 export type ChatMode = "chat" | "diary" | "review" | "exam";
 export type ChatContextMode = "smart" | "semantic" | "global";
 export type WebSearchMode = "auto" | "always" | "off";
+export type WebSearchProviderType = "built-in" | "tavily" | "brave" | "searxng";
 export type ChatSendBehavior = "enterToSend" | "modEnterToSend";
 export type ChatWritebackMode = "off" | "confirm" | "explicit-auto";
 export type WeixinBotPermission = "read-only" | "confirm" | "explicit-auto";
@@ -530,6 +531,10 @@ export interface PersonalLifeSystemSettings {
   defaultChatMode: ChatMode;
   defaultChatContextMode: ChatContextMode;
   defaultWebSearchMode: WebSearchMode;
+  /** Optional higher-coverage backend; built-in search remains the no-key fallback. */
+  webSearchProvider: WebSearchProviderType;
+  webSearchApiKey: string;
+  webSearchEndpoint: string;
   defaultAiSkillIds: string[];
   inlineAiSkillIds: string[];
   importedAiSkills: ImportedAiSkillRecord[];
@@ -592,6 +597,10 @@ export function normalizeThemeStyle(value: string | undefined | null): ThemeStyl
 export function normalizeBrowserCapturePort(value: unknown): number {
   const port = Math.floor(Number(value));
   return Number.isFinite(port) && port >= 1024 && port <= 65535 ? port : 27183;
+}
+
+export function normalizeWebSearchProvider(value: unknown): WebSearchProviderType {
+  return value === "tavily" || value === "brave" || value === "searxng" ? value : "built-in";
 }
 
 export function normalizeWeixinSenderPolicy(value: unknown): WeixinSenderPolicy {
@@ -1170,6 +1179,9 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   defaultChatMode: "chat",
   defaultChatContextMode: "smart",
   defaultWebSearchMode: "auto",
+  webSearchProvider: "built-in",
+  webSearchApiKey: "",
+  webSearchEndpoint: "",
   defaultAiSkillIds: ["lifeos-general"],
   inlineAiSkillIds: ["lifeos-general"],
   importedAiSkills: [],

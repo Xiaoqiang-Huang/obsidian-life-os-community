@@ -1,7 +1,7 @@
 ﻿import { App, Notice, PluginSettingTab, setIcon } from "obsidian";
 import type PersonalLifeSystemPlugin from "./main";
 import { Setting } from "obsidian";
-import type { AiProviderType, AiReasoningEffort, AssistantStyle, AssistantVerbosity, ChatContextMode, ChatMode, ChatSendBehavior, ChatWritebackMode, DirectoryLanguage, DisplayLanguage, ExamProfileType, HeatmapRange, LlmWikiCompileDepth, LlmWikiLongMaterialMode, LlmWikiSensitiveDefault, PdfOcrEngine, ThemeStyle, WeixinBotPermission, WeixinSenderPolicy } from "./settings";
+import type { AiProviderType, AiReasoningEffort, AssistantStyle, AssistantVerbosity, ChatContextMode, ChatMode, ChatSendBehavior, ChatWritebackMode, DirectoryLanguage, DisplayLanguage, ExamProfileType, HeatmapRange, LlmWikiCompileDepth, LlmWikiLongMaterialMode, LlmWikiSensitiveDefault, PdfOcrEngine, ThemeStyle, WebSearchProviderType, WeixinBotPermission, WeixinSenderPolicy } from "./settings";
 import { analyzeAiConnectionTestModels, DEFAULT_SETTINGS, EXAM_PROFILE_OPTIONS, getAiProviderPreset, getExamChatModeLabel, getExamProfileLabel, getStoredAiApiKey, getStoredAiProviderConfig, getThemeStyleClasses, normalizeAiApiKeyInput, normalizeBrowserCapturePort, normalizeChatWritebackMode, normalizeThemeStyle, setStoredAiApiKey, setStoredAiProviderConfig, THEME_STYLES, validateAiProviderConfig } from "./settings";
 import { requireProFeature, resolveLicenseStatus } from "./licensing/entitlement";
 import { createImportedAiSkills, getAiSkillCategories, getAiSkills, getAiSkillsByCategory, normalizeAiSkillIds } from "./services/AiSkillService";
@@ -625,6 +625,55 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       this.plugin.settings.defaultChatContextMode = value;
       await this.saveImmediate("默认上下文模式已保存。");
     });
+    this.select<WebSearchProviderType>(
+      card,
+      "联网检索后端",
+      "内置搜索无需 Key；Tavily 可返回提取后的网页正文，Brave 扩大搜索覆盖，SearXNG 可接入自建实例。配置后会与内置搜索并行，仍经过网址安全、正文相关性和多来源校验。",
+      this.plugin.settings.webSearchProvider ?? "built-in",
+      [
+        ["built-in", "内置搜索（无需配置）"],
+        ["tavily", "Tavily（正文提取，推荐）"],
+        ["brave", "Brave Search"],
+        ["searxng", "SearXNG（自建）"]
+      ],
+      async (value) => {
+        this.plugin.settings.webSearchProvider = value;
+        await this.saveImmediate("联网检索后端已保存。");
+        this.display();
+      }
+    );
+    if (this.plugin.settings.webSearchProvider === "tavily" || this.plugin.settings.webSearchProvider === "brave") {
+      const keyRow = this.row(
+        card,
+        "联网检索 API Key",
+        this.plugin.settings.webSearchProvider === "tavily"
+          ? "只发送给 api.tavily.com；Key 保存在当前 Vault 的插件设置中，不写入 Markdown。"
+          : "只通过请求头发送给 api.search.brave.com；Key 保存在当前 Vault 的插件设置中。"
+      );
+      const keyInput = keyRow.createEl("input", {
+        cls: "lifeos-input",
+        attr: { type: "password", autocomplete: "off", "aria-label": "联网检索 API Key" }
+      });
+      keyInput.value = this.plugin.settings.webSearchApiKey || "";
+      keyInput.onblur = async () => {
+        this.plugin.settings.webSearchApiKey = keyInput.value.trim();
+        await this.saveImmediate("联网检索 API Key 已保存。");
+      };
+    }
+    if (this.plugin.settings.webSearchProvider === "searxng") {
+      const endpoint = this.text(
+        card,
+        "SearXNG 地址",
+        "填写实例根地址或 /search 地址，例如 https://search.example.com。Life OS 仅请求 JSON 搜索结果。",
+        this.plugin.settings.webSearchEndpoint || "",
+        (value) => { this.plugin.settings.webSearchEndpoint = value; }
+      );
+      endpoint.setAttr("placeholder", "https://search.example.com");
+      endpoint.onblur = async () => {
+        this.plugin.settings.webSearchEndpoint = endpoint.value.trim();
+        await this.saveImmediate("SearXNG 地址已保存。");
+      };
+    }
     this.select<AssistantStyle>(card, "默认回复风格", "控制 AI 的语气，Chat 页仍可临时切换。", this.plugin.settings.assistantStyle, [["warm-companion", "温和"], ["concise-executor", "简洁"], ["strict-coach", "严格"]], async (value) => {
       this.plugin.settings.assistantStyle = value;
       await this.saveImmediate("默认回复风格已保存。");

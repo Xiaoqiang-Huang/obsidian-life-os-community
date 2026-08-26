@@ -9,6 +9,15 @@ export interface DailyReviewInput {
 export interface ChatRecordInput {
   date: string;
   assistantName: string;
+  title?: string;
+  source?: string;
+  channel?: string;
+  projectId?: string;
+  accountId?: string;
+  conversationId?: string;
+  senderId?: string;
+  isGroup?: boolean;
+  updatedAt?: string;
   mode?: string;
   style?: string;
   length?: string;
@@ -110,20 +119,37 @@ export function serializeChatMarkdown(input: ChatRecordInput): string {
     })
     .join("\n\n");
   const contextSources = input.contextSources?.length
-    ? `context_sources:\n${input.contextSources.map((source) => `  - ${source}`).join("\n")}`
+    ? `context_sources:\n${input.contextSources.map((source) => `  - ${yamlScalar(source)}`).join("\n")}`
     : "context_sources: []";
   const frontmatter = [
     "---",
     "type: chat",
     `date: ${input.date}`,
+    input.title ? `title: ${yamlScalar(input.title)}` : "",
+    input.source ? `source: ${yamlScalar(input.source)}` : "",
+    input.channel ? `channel: ${yamlScalar(input.channel)}` : "",
+    input.projectId !== undefined ? `project_id: ${yamlScalar(input.projectId)}` : "",
+    input.accountId !== undefined ? `account_id: ${yamlScalar(input.accountId)}` : "",
+    input.conversationId !== undefined ? `conversation_id: ${yamlScalar(input.conversationId)}` : "",
+    input.senderId !== undefined ? `sender_id: ${yamlScalar(input.senderId)}` : "",
+    input.isGroup !== undefined ? `is_group: ${input.isGroup ? "true" : "false"}` : "",
+    input.updatedAt ? `updated_at: ${yamlScalar(input.updatedAt)}` : "",
     `mode: ${input.mode ?? "chat"}`,
     `style: ${input.style ?? ""}`,
     `length: ${input.length ?? ""}`,
     `status: ${input.status ?? "completed"}`,
     contextSources,
     "---"
-  ].join("\n");
+  ].filter(Boolean).join("\n");
   return `${frontmatter}\n\n# ${input.assistantName} Chat ${input.date}\n\n${body}\n`;
+}
+
+function yamlScalar(value: string): string {
+  const text = String(value ?? "");
+  if (text && /^[A-Za-z0-9_./@+-]+$/u.test(text) && !/^(?:true|false|null|yes|no|on|off)$/iu.test(text)) {
+    return text;
+  }
+  return JSON.stringify(text);
 }
 
 export function parseChatMarkdown(markdown: string, assistantName: string): Array<{ role: "user" | "ai"; content: string }> {

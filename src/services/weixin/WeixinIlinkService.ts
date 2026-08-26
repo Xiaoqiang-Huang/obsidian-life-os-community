@@ -481,7 +481,7 @@ function baseInfo(): { channel_version: string; bot_agent: string } {
   return { channel_version: CHANNEL_VERSION, bot_agent: "LifeOS/0.3.14" };
 }
 
-function splitReply(value: string): string[] {
+export function splitWeixinReply(value: string): string[] {
   const source = value.trim();
   if (!source) return [];
   const result: string[] = [];
@@ -664,7 +664,7 @@ export class WeixinIlinkService {
     if (!runtime || !runtime.status.connected || !runtime.stored.token) {
       throw new Error("对应微信账号当前未连接，请保持 Obsidian 和微信 Bot 运行。");
     }
-    const chunks = splitReply(formatWeixinPlainTextReply(text));
+    const chunks = splitWeixinReply(formatWeixinPlainTextReply(text));
     for (let index = 0; index < chunks.length; index += 1) {
       await this.sendText(
         runtime,
@@ -1355,7 +1355,7 @@ export class WeixinIlinkService {
       const result = await this.options.handleMessage(inbound);
       if (this.accounts.get(runtime.stored.accountId) !== runtime) return;
       const reply = formatWeixinPlainTextReply(result.reply) || "处理完成。";
-      const chunks = splitReply(reply);
+      const chunks = splitWeixinReply(reply);
       for (let index = 0; index < chunks.length; index += 1) {
         await this.sendText(
           runtime,
@@ -1409,7 +1409,7 @@ export class WeixinIlinkService {
         }
         try {
           const reply = formatWeixinPlainTextReply(item.response.reply) || "处理完成。";
-          const chunks = splitReply(reply);
+          const chunks = splitWeixinReply(reply);
           for (let index = 0; index < chunks.length; index += 1) {
             await this.sendText(
               runtime,

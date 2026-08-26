@@ -64,6 +64,48 @@ export class TaskService {
     return line;
   }
 
+  async updateOpenTask(
+    task: LifeOSTask,
+    data: { title: string; dueDate?: string }
+  ): Promise<string> {
+    const title = data.title.trim();
+    if (!title) throw new Error("任务标题不能为空");
+    const file = await ensureFile(this.app, this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
+    const content = await this.app.vault.read(file);
+    const lines = content.split(/\r?\n/u);
+    const index = lines.findIndex((line) => line.trim() === task.line.trim());
+    if (index < 0) throw new Error("待办已变化或已不存在，请重新查看待办后操作。");
+
+    const sourceLine = lines[index].trim();
+    const body = sourceLine.replace(/^-\s*\[[ xX]\]\s+/u, "");
+    if (!body.startsWith(task.text)) throw new Error("无法安全识别待办标题，未修改。");
+    const blockId = body.match(/\s+(\^[^\s]+)\s*$/u)?.[1] || "";
+    const metadata = body
+      .slice(task.text.length)
+      .replace(/\s*\^[^\s]+\s*$/u, "")
+      .replace(/\s*📅\s*20\d{2}-\d{2}-\d{2}/gu, "")
+      .trim();
+    const nextDueDate = data.dueDate === undefined ? task.date : data.dueDate.trim();
+    const due = nextDueDate ? ` 📅 ${nextDueDate}` : "";
+    const nextLine = `- [ ] ${title}${metadata ? ` ${metadata}` : ""}${due}${blockId ? ` ${blockId}` : ""}`;
+    lines[index] = nextLine;
+    await this.app.vault.modify(file, lines.join("\n"));
+    return nextLine;
+  }
+
+  async deleteOpenTask(task: LifeOSTask): Promise<void> {
+    const file = await ensureFile(this.app, this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
+    const content = await this.app.vault.read(file);
+    const lines = content.split(/\r?\n/u);
+    const index = lines.findIndex((line) => line.trim() === task.line.trim());
+    if (index < 0) throw new Error("待办已变化或已不存在，请重新查看待办后操作。");
+
+    let end = index + 1;
+    while (end < lines.length && /^(?:\s{2,}|\t)\S/u.test(lines[end])) end += 1;
+    lines.splice(index, end - index);
+    await this.app.vault.modify(file, lines.join("\n"));
+  }
+
   async undoCompleteTask(originalOpenLine: string): Promise<void> {
     const openFile = await ensureFile(this.app, this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
     const doneFile = await ensureFile(this.app, this.fs.path("Tasks", "done.md"), DONE_TASKS_FALLBACK);

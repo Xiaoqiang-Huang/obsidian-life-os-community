@@ -25,6 +25,13 @@ export interface WeixinConversationState {
   version: 1;
   updatedAt: string;
   lastStandaloneQuery: string;
+  /**
+   * Last user turn that carries the actual topic rather than a capability
+   * complaint or a referential follow-up such as “你不能联网搜索吗”. Keeping
+   * this separately prevents a second follow-up from overwriting the subject
+   * needed to rewrite the next retrieval query.
+   */
+  lastSubstantiveQuery: string;
   lastSkillIds: string[];
   recentImages: WeixinStoredImage[];
   pendingOperation: WeixinPendingOperation | null;
@@ -46,6 +53,7 @@ function emptyState(): WeixinConversationState {
     version: 1,
     updatedAt: new Date(0).toISOString(),
     lastStandaloneQuery: "",
+    lastSubstantiveQuery: "",
     lastSkillIds: [],
     recentImages: [],
     pendingOperation: null
@@ -137,11 +145,16 @@ export class WeixinConversationStateService {
     return changed;
   }
 
-  async rememberStandaloneQuery(request: WeixinInboundRequest, query: string): Promise<void> {
+  async rememberStandaloneQuery(
+    request: WeixinInboundRequest,
+    query: string,
+    options: { substantive?: boolean } = {}
+  ): Promise<void> {
     const clean = String(query || "").trim().slice(0, 12_000);
     if (!clean) return;
     await this.update(request, (state) => {
       state.lastStandaloneQuery = clean;
+      if (options.substantive !== false) state.lastSubstantiveQuery = clean;
     });
   }
 
@@ -181,6 +194,7 @@ export class WeixinConversationStateService {
           version: 1,
           updatedAt: String(parsed.updatedAt || state.updatedAt),
           lastStandaloneQuery: String(parsed.lastStandaloneQuery || "").slice(0, 12_000),
+          lastSubstantiveQuery: String(parsed.lastSubstantiveQuery || parsed.lastStandaloneQuery || "").slice(0, 12_000),
           lastSkillIds: Array.isArray(parsed.lastSkillIds)
             ? parsed.lastSkillIds.map(String).filter(Boolean).slice(0, 8)
             : [],
@@ -273,6 +287,7 @@ export class WeixinConversationStateService {
         version: 1,
         updatedAt: String(parsed.updatedAt || new Date(0).toISOString()),
         lastStandaloneQuery: String(parsed.lastStandaloneQuery || "").slice(0, 12_000),
+        lastSubstantiveQuery: String(parsed.lastSubstantiveQuery || parsed.lastStandaloneQuery || "").slice(0, 12_000),
         lastSkillIds: Array.isArray(parsed.lastSkillIds) ? parsed.lastSkillIds.map(String).filter(Boolean).slice(0, 8) : [],
         recentImages: Array.isArray(parsed.recentImages)
           ? parsed.recentImages.map((item) => this.normalizeStoredImage(item)).filter((item): item is WeixinStoredImage => Boolean(item))

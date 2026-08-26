@@ -85,7 +85,8 @@ export class WeixinInboundQueueService {
         reply: String(response.reply || "").slice(0, 200_000),
         projectId: response.projectId,
         conversationPath: response.conversationPath,
-        writebackStatus: response.writebackStatus
+        writebackStatus: response.writebackStatus,
+        diagnostics: this.normalizeDiagnostics(response.diagnostics)
       };
       entry.lastError = "";
     });
@@ -165,7 +166,8 @@ export class WeixinInboundQueueService {
           reply: String(responseRecord.reply).slice(0, 200_000),
           projectId: String(responseRecord.projectId || "") || undefined,
           conversationPath: String(responseRecord.conversationPath || "") || undefined,
-          writebackStatus: String(responseRecord.writebackStatus || "") || undefined
+          writebackStatus: String(responseRecord.writebackStatus || "") || undefined,
+          diagnostics: this.normalizeDiagnostics(responseRecord.diagnostics)
         }
         : null;
       const status = ["pending", "processing", "responded", "delivered", "failed"].includes(String(parsed.status))
@@ -255,6 +257,26 @@ export class WeixinInboundQueueService {
 
   private errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error || "未知错误");
+  }
+
+  private normalizeDiagnostics(value: unknown): WeixinAssistantResponse["diagnostics"] {
+    const record = asRecord(value);
+    const route = String(record.route || "").trim().slice(0, 80);
+    if (!route) return undefined;
+    const failure = String(record.failureKind || "none");
+    const allowedFailures = new Set(["none", "web-evidence-insufficient", "local-citation-check", "model"]);
+    return {
+      route,
+      webSearch: record.webSearch === true,
+      boundProjectId: String(record.boundProjectId || "").slice(0, 200) || undefined,
+      resolvedProjectId: String(record.resolvedProjectId || "").slice(0, 200) || undefined,
+      sourceCount: Math.max(0, Math.min(10_000, Number(record.sourceCount || 0))),
+      sourcePaths: Array.isArray(record.sourcePaths)
+        ? record.sourcePaths.map((item) => String(item || "").slice(0, 500)).filter(Boolean).slice(0, 24)
+        : [],
+      retrievalStrategy: String(record.retrievalStrategy || "").slice(0, 160) || undefined,
+      failureKind: (allowedFailures.has(failure) ? failure : "none") as NonNullable<WeixinAssistantResponse["diagnostics"]>["failureKind"]
+    };
   }
 
   private stableHash(value: string): string {
