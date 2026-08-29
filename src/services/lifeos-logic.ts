@@ -72,7 +72,8 @@ export function completeTaskMarkdown(openContent: string, doneContent: string, t
   const doneBlock = [
     doneLine,
     `  - completed: ${completedAt}`,
-    ...taskMetadataLines(taskLine)
+    ...taskMetadataLines(taskLine),
+    ...userTaskDetailLines(removed.removedBodyLines)
   ].join("\n");
   return {
     openContent: removed.content,
@@ -92,10 +93,16 @@ export function undoTaskMarkdown(openContent: string, doneContent: string, origi
     .replace(/\s*✅\s*20\d{2}-\d{2}-\d{2}/g, "")
     .replace(/\s+\^/, " ^")
     .trim();
+  const openBlock = [openLine, ...userTaskDetailLines(removed.removedBodyLines)].join("\n");
   return {
-    openContent: openContent.includes(openLine) ? openContent : appendLine(openContent, openLine),
+    openContent: openContent.includes(openLine) ? openContent : appendLine(openContent, openBlock),
     doneContent: ensureTrailingNewline(removed.content)
   };
+}
+
+export function deleteTaskMarkdown(content: string, taskLine: string): { content: string; removed: boolean } {
+  const result = removeTaskBlock(content, taskLine);
+  return { content: result.content, removed: Boolean(result.removedLine) };
 }
 
 export function carryoverOpenTasks(content: string, today: string, tomorrow: string): { content: string; count: number } {
@@ -347,7 +354,7 @@ function splitMemoryCandidateBlocks(markdown: string): Array<{ raw: string; line
   return blocks;
 }
 
-function removeTaskBlock(content: string, taskLine: string): { content: string; removedLine: string } {
+function removeTaskBlock(content: string, taskLine: string): { content: string; removedLine: string; removedBodyLines: string[] } {
   const lines = content.split(/\r?\n/);
   const targetId = taskLine.match(/\^([A-Za-z0-9_-]+)/)?.[1];
   const targetTrimmed = taskLine.trim();
@@ -365,10 +372,18 @@ function removeTaskBlock(content: string, taskLine: string): { content: string; 
       end = cursor;
     }
     const removedLine = line.trim();
+    const removedBodyLines = lines.slice(index + 1, end + 1);
     lines.splice(index, end - index + 1);
-    return { content: ensureTrailingNewline(lines.join("\n")), removedLine };
+    return { content: ensureTrailingNewline(lines.join("\n")), removedLine, removedBodyLines };
   }
-  return { content, removedLine: "" };
+  return { content, removedLine: "", removedBodyLines: [] };
+}
+
+function userTaskDetailLines(lines: string[]): string[] {
+  return lines.filter((line) => {
+    const field = line.trim().match(/^[-*]\s+([^:：]+)[:：]/u)?.[1]?.trim().toLowerCase();
+    return !field || !["completed", "source", "project", "priority"].includes(field);
+  });
 }
 
 function comparableTaskLine(line: string): string {

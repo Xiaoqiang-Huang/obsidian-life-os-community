@@ -68,6 +68,7 @@ export type WeixinLifeOSAction =
   | { kind: "task-complete"; query: string; source: WeixinLifeOSActionSource }
   | { kind: "task-update"; query: string; title: string; due?: string; source: WeixinLifeOSActionSource }
   | { kind: "task-delete"; query: string; source: WeixinLifeOSActionSource }
+  | { kind: "task-clear-all"; source: WeixinLifeOSActionSource }
   | { kind: "review-generate"; period: WeixinLifeOSPeriod; start?: string; end?: string; source: WeixinLifeOSActionSource }
   | { kind: "summary-generate"; period: WeixinLifeOSPeriod; start?: string; end?: string; source: WeixinLifeOSActionSource }
   | { kind: "link-save"; url: string; title: string; collection?: string; source: WeixinLifeOSActionSource }
@@ -407,7 +408,7 @@ function commandAction(source: string): WeixinLifeOSAction | null {
   let match = source.match(/^\/lifeos\s+diary(?:\s+([\s\S]+))?$/iu);
   if (match) return { kind: "diary-add", content: cleanText(match[1], 100_000), source: "command" };
 
-  match = source.match(/^\/lifeos\s+todo(?:\s+(list|add|done))?(?:\s+([\s\S]+))?$/iu);
+  match = source.match(/^\/lifeos\s+todo(?:\s+(list|add|done|clear))?(?:\s+([\s\S]+))?$/iu);
   if (match) {
     const operation = (match[1] || "list").toLowerCase();
     const payload = cleanText(match[2], 100_000);
@@ -418,6 +419,7 @@ function commandAction(source: string): WeixinLifeOSAction | null {
         : { kind: "task-add", title, source: "command" };
     }
     if (operation === "done") return { kind: "task-complete", query: payload, source: "command" };
+    if (operation === "clear") return { kind: "task-clear-all", source: "command" };
     return { kind: "task-list", source: "command" };
   }
 
@@ -544,6 +546,12 @@ export function parseWeixinLifeOSAction(value: unknown): WeixinLifeOSAction | nu
   }
   if (/^(?:查看|列出|显示|看看|告诉我)(?:我的|当前|未完成|还有哪些)?(?:待办|任务)(?:有哪些|列表)?\s*$/u.test(source)) {
     return { kind: "task-list", source: "natural" };
+  }
+  if (
+    /^(?:请|帮我|麻烦)?\s*(?:清空|清除|删除|移除)(?:掉)?(?:全部|所有)(?:的)?(?:未完成|待完成|待办)(?:任务)?\s*$/u.test(source)
+    || /^(?:请|帮我|麻烦)?\s*(?:把|将)(?:全部|所有)(?:的)?(?:未完成|待完成|待办)(?:任务)?(?:清空|清除|删除|移除)(?:掉)?\s*$/u.test(source)
+  ) {
+    return { kind: "task-clear-all", source: "natural" };
   }
   match = source.match(/^(?:完成|勾选|标记完成)(?:这个|这条)?(?:待办|任务)\s*[：:,，]?\s*([\s\S]+)$/u);
   if (match) return { kind: "task-complete", query: match[1].trim(), source: "natural" };

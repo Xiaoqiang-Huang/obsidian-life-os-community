@@ -16,6 +16,8 @@ export async function generateLegacyReport(
   plugin: IPlugin,
   period: "daily" | "weekly" | "monthly"
 ): Promise<void> {
+  const feature = period === "daily" ? "aiDiarySummary" : "aiReviewGenerate";
+  if (!requireProFeature(plugin, feature)) return;
   if (period === "daily") {
     await generateDailySummary(app, plugin);
     return;

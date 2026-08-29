@@ -40,6 +40,7 @@ import {
   normalizeChatWritebackMode,
   normalizePaddleOcrEndpoint,
   normalizePdfOcrEngine,
+  normalizeHiddenSidebarItems,
   normalizeTaskFormDraft,
   normalizeThemeStyle,
   normalizeUiFrameworkSettings,
@@ -132,6 +133,8 @@ export interface ActiveChatRuntimeState {
   messages: ChatMessage[];
   draftInput: string;
   updatedAt: number;
+  /** Isolates pending Agent writes, attachments and task memory per visible chat. */
+  sessionId?: string;
 }
 
 interface AiEditRuntimeDiagnostics {
@@ -234,7 +237,17 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.installMobileViewportVariables();
     this.registerModalTextareaEnhancer();
     this.ai = new AiClient(() => this.settings);
-    this.agent = new LifeOSAgentService(this.app, () => this.settings, this.ai);
+    this.agent = new LifeOSAgentService(
+      this.app,
+      () => this.settings,
+      this.ai,
+      () => hasProAccess(
+        this.settings.licenseSnapshot,
+        new Date(),
+        this.settings.licenseEntitlementToken
+      ),
+      () => this.saveSettings()
+    );
     this.autoReviewService = new AutoReviewService(
       this.app,
       this.fileSystem(),
@@ -496,58 +509,63 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     });
 
     // ── 备考命令 ──
+    const runWhenExamModuleEnabled = (action: () => void) => (checking: boolean): boolean => {
+      if (!this.settings.enableExamModule) return false;
+      if (!checking) action();
+      return true;
+    };
     this.addCommand({
       id: "new-xingce-question",
       name: "新增备考错题",
-      callback: () => new XingceQuestionModal(this.app, this).open()
+      checkCallback: runWhenExamModuleEnabled(() => new XingceQuestionModal(this.app, this).open())
     });
 
     this.addCommand({
       id: "new-interview-practice",
       name: "打开备考练习",
-      callback: () => new InterviewPracticeModal(this.app, this).open()
+      checkCallback: runWhenExamModuleEnabled(() => new InterviewPracticeModal(this.app, this).open())
     });
 
     this.addCommand({
       id: "xingce-stats",
       name: "备考练习统计",
-      callback: () => void this.showXingceStats()
+      checkCallback: runWhenExamModuleEnabled(() => void this.showXingceStats())
     });
 
     this.addCommand({
       id: "exam-checkin",
       name: "学习打卡",
-      callback: () => void this.showCheckinModal()
+      checkCallback: runWhenExamModuleEnabled(() => void this.showCheckinModal())
     });
 
     this.addCommand({
       id: "exam-goals",
       name: "学习目标管理",
-      callback: () => void this.showGoalsList()
+      checkCallback: runWhenExamModuleEnabled(() => void this.showGoalsList())
     });
 
     this.addCommand({
       id: "exam-today-tasks",
       name: "今日学习任务",
-      callback: () => void this.showTodayTasks()
+      checkCallback: runWhenExamModuleEnabled(() => void this.showTodayTasks())
     });
 
     this.addCommand({
       id: "exam-interview-trends",
       name: "备考练习趋势",
-      callback: () => void this.showInterviewTrends()
+      checkCallback: runWhenExamModuleEnabled(() => void this.showInterviewTrends())
     });
 
     this.addCommand({
       id: "exam-upload-material",
       name: "上传学习资料",
-      callback: () => void this.showUploadMaterial()
+      checkCallback: runWhenExamModuleEnabled(() => void this.showUploadMaterial())
     });
 
     this.addCommand({
       id: "exam-training-plan",
       name: "今日训练计划",
-      callback: () => void this.showTrainingPlan()
+      checkCallback: runWhenExamModuleEnabled(() => void this.showTrainingPlan())
     });
 
     // ── 报告命令 ──
@@ -669,6 +687,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.settings.examProfileType = normalizeExamProfileType(this.settings.examProfileType);
     this.settings.customExamProfileName = this.settings.customExamProfileName ?? "";
     this.settings.lastTaskDraft = normalizeTaskFormDraft((storedData as Record<string, unknown>).lastTaskDraft);
+    this.settings.hiddenSidebarItems = normalizeHiddenSidebarItems((storedData as Record<string, unknown>).hiddenSidebarItems);
     this.settings.customAiSkillCategories = normalizeCustomAiSkillCategories((storedData as Record<string, unknown>).customAiSkillCategories);
     this.settings.importedAiSkills = normalizeImportedAiSkillRecords(storedImportedAiSkills);
     this.settings.aiSkillOverrides = normalizeAiSkillOverrides(storedAiSkillOverrides);
@@ -804,6 +823,11 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     if (!this.settings.browserCaptureEnabled) return this.browserCaptureServer.getStatus();
     const port = normalizeBrowserCapturePort(this.settings.browserCapturePort);
     this.settings.browserCapturePort = port;
+    const hasProjectMutationAccess = (): boolean => hasProAccess(
+      this.settings.licenseSnapshot,
+      new Date(),
+      this.settings.licenseEntitlementToken
+    );
     return this.browserCaptureServer.start({
       port,
       token: this.settings.browserCaptureToken,
@@ -812,6 +836,9 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
         return projects.map((project) => ({ id: project.id, name: project.name }));
       },
       createProject: async (input) => {
+        if (!hasProjectMutationAccess()) {
+          throw new Error("当前授权不包含项目管理；请在 Obsidian 的 Life OS 授权中心激活 Pro。");
+        }
         const project = await this.createProjectService().createProject({
           name: input.name,
           goal: input.goal,
@@ -821,6 +848,9 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
         return { id: project.id, name: project.name };
       },
       capture: async (request, options, onProgress) => {
+        if (!hasProjectMutationAccess()) {
+          throw new Error("当前授权不包含项目管理；请在 Obsidian 的 Life OS 授权中心激活 Pro。");
+        }
         const projects = await this.createProjectService().loadProjects();
         if (!projects.some((project) => project.id === request.projectId)) {
           throw new Error("目标项目不存在，请在浏览器扩展中刷新项目列表。");
@@ -979,6 +1009,11 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   private createWeixinAssistantService(): WeixinAssistantService {
     return new WeixinAssistantService(this.app, this.settings, this.ai, {
       saveSettings: () => this.saveSettings(),
+      hasWriteEntitlement: () => hasProAccess(
+        this.settings.licenseSnapshot,
+        new Date(),
+        this.settings.licenseEntitlementToken
+      ),
       sendProactiveText: (accountId, senderId, conversationId, text, clientId) => this.getWeixinIlinkService()
         .sendProactiveText(accountId, senderId, conversationId, text, clientId)
     }, this.agent);
@@ -1027,6 +1062,15 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   }
 
   async refreshTrackedAiWorkspaceSessions(showNotice = false): Promise<void> {
+    const hasAccess = hasProAccess(
+      this.settings.licenseSnapshot,
+      new Date(),
+      this.settings.licenseEntitlementToken
+    );
+    if (!hasAccess) {
+      if (showNotice) requireProFeature(this, "projectManagement");
+      return;
+    }
     if (this.aiWorkspaceSyncRunning) {
       if (showNotice) new Notice("正在检查已跟踪会话，请稍候。", 3000);
       return;

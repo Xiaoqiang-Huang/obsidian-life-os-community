@@ -5,6 +5,7 @@ import { createEmptyState } from "../components/EmptyState";
 import { createHeroHeader } from "../components/HeroHeader";
 import { createLifeOSShell } from "../components/LifeOSComponent";
 import { AI_WORKSPACE_VIEW_TYPE } from "../constants";
+import { requireProFeature } from "../licensing/entitlement";
 import type PersonalLifeSystemPlugin from "../main";
 import {
   AiWorkspaceBindingModal,
@@ -15,6 +16,7 @@ import {
   AiWorkspaceImportModal,
   AiWorkspacePromptModal
 } from "../modals/AiWorkspaceModals";
+import { AiWorkspacePromptStudioModal } from "../modals/AiWorkspacePromptStudioModal";
 import { NewProjectModal } from "../modals/NewProjectModal";
 import { AiWorkspaceService } from "../services/AiWorkspaceService";
 import {
@@ -270,7 +272,10 @@ export class AiWorkspaceView extends ItemView {
       ghost: true
     });
     createButton(actions, "刷新", () => void this.render(), { icon: "refresh-cw", ghost: true });
-    createButton(actions, "检查会话更新", () => void this.plugin.refreshTrackedAiWorkspaceSessions(true), {
+    createButton(actions, "检查会话更新", () => {
+      if (!requireProFeature(this.plugin, "projectManagement")) return;
+      void this.plugin.refreshTrackedAiWorkspaceSessions(true);
+    }, {
       icon: "radio-tower",
       ghost: true
     });
@@ -395,7 +400,10 @@ export class AiWorkspaceView extends ItemView {
         this.activeTab = "sessions";
         void this.render();
       }, { icon: "messages-square", primary: true });
-      createButton(actions, "迁移会话或项目", () => new AiWorkspaceContinuationModal(this.app, this.plugin, service, latest).open(), {
+      createButton(actions, "迁移会话或项目", () => {
+        if (!requireProFeature(this.plugin, "projectDocuments")) return;
+        new AiWorkspaceContinuationModal(this.app, this.plugin, service, latest).open();
+      }, {
         icon: "arrow-right-left",
         ghost: true
       });
@@ -443,6 +451,7 @@ export class AiWorkspaceView extends ItemView {
     });
     const toolActions = tools.createDiv({ cls: "lifeos-ai-workspace-inline-actions" });
     createButton(toolActions, "更新项目记忆", () => void (async () => {
+      if (!requireProFeature(this.plugin, "projectDocuments")) return;
       const memories = await service.refreshProjectMemory(project.id);
       new Notice(`项目记忆已更新：${memories.length} 个来源文件。`, 5000);
       await this.render();
@@ -468,6 +477,10 @@ export class AiWorkspaceView extends ItemView {
     for (const [value, label] of permissions) select.createEl("option", { value, text: label });
     select.value = state.agentPermission;
     select.addEventListener("change", () => void (async () => {
+      if (!requireProFeature(this.plugin, "projectManagement")) {
+        select.value = state.agentPermission;
+        return;
+      }
       await service.setAgentPermission(select.value as AiWorkspaceAgentPermission);
       new Notice("Life OS Agent 权限已更新。", 4000);
       await this.render();
@@ -573,6 +586,10 @@ export class AiWorkspaceView extends ItemView {
     }
     lifecycle.value = session.lifecycle;
     lifecycle.addEventListener("change", () => void (async () => {
+      if (!requireProFeature(this.plugin, "projectManagement")) {
+        lifecycle.value = session.lifecycle;
+        return;
+      }
       await service.setSessionLifecycle(
         session.id,
         lifecycle.value as AiWorkspaceSessionSummary["lifecycle"]
@@ -585,6 +602,7 @@ export class AiWorkspaceView extends ItemView {
         actions,
         session.tracking.enabled ? "暂停自动跟踪" : "开启自动跟踪",
         () => void (async () => {
+          if (!requireProFeature(this.plugin, "projectManagement")) return;
           await service.setSessionTracking(session.id, !session.tracking.enabled);
           new Notice(session.tracking.enabled ? "已暂停自动跟踪。" : "已开启自动跟踪。", 4000);
           await this.render();
@@ -604,7 +622,10 @@ export class AiWorkspaceView extends ItemView {
       );
     }
     createButton(actions, "AI 整理", () => void this.analyzeSession(session, service), { icon: "sparkles", ghost: true });
-    createButton(actions, "迁移到其他工具", () => new AiWorkspaceContinuationModal(this.app, this.plugin, service, session).open(), {
+    createButton(actions, "迁移到其他工具", () => {
+      if (!requireProFeature(this.plugin, "projectDocuments")) return;
+      new AiWorkspaceContinuationModal(this.app, this.plugin, service, session).open();
+    }, {
       icon: "arrow-right-left",
       primary: true
     });
@@ -794,7 +815,7 @@ export class AiWorkspaceView extends ItemView {
       new Notice("这条对话的完整内容已复制。", 4000);
     })(), { icon: "copy", ghost: true });
     if (message.role !== "tool") {
-      createButton(messageActions, "存入提示词库", () => new AiWorkspacePromptModal(this.app, service, projects, {
+      createButton(messageActions, "存入提示词库", () => new AiWorkspacePromptModal(this.app, service, this.plugin, projects, {
         title: this.promptTitleFromMessage(message),
         body: message.content,
         scope: "project",
@@ -1393,16 +1414,20 @@ export class AiWorkspaceView extends ItemView {
       new Notice("完整交接文档已复制，可直接交给另一个 AI。", 4500);
     })(), { icon: "copy", primary: true });
     createButton(selectorActions, "导出 Markdown", () => void (async () => {
+      if (!requireProFeature(this.plugin, "projectDocuments")) return;
       const file = await service.saveHandoffDocument(handoff);
       await this.app.workspace.getLeaf(true).openFile(file);
       new Notice("交接文档已导出。", 4000);
     })(), { icon: "file-down", ghost: true });
-    createButton(selectorActions, "迁移到其他工具", () => new AiWorkspaceContinuationModal(
-      this.app,
-      this.plugin,
-      service,
-      session
-    ).open(), { icon: "arrow-right-left", ghost: true });
+    createButton(selectorActions, "迁移到其他工具", () => {
+      if (!requireProFeature(this.plugin, "projectDocuments")) return;
+      new AiWorkspaceContinuationModal(
+        this.app,
+        this.plugin,
+        service,
+        session
+      ).open();
+    }, { icon: "arrow-right-left", ghost: true });
 
     const layout = parent.createDiv({ cls: "lifeos-ai-workspace-handoff-grid" });
     const document = createCard(layout, "lifeos-panel lifeos-ai-workspace-panel lifeos-ai-workspace-handoff-document");
@@ -1459,13 +1484,17 @@ export class AiWorkspaceView extends ItemView {
     addendumCopy.createEl("p", {
       text: handoff.userAddendum || "尚未补充只有你能确认的限制、验收口径或接手说明。"
     });
-    createButton(addendum, handoff.userAddendum ? "编辑补充" : "添加补充", () => new AiWorkspaceHandoffAddendumModal(
-      this.app,
-      service,
-      session,
-      handoff.userAddendum,
-      () => this.render()
-    ).open(), { icon: "square-pen", ghost: true });
+    createButton(addendum, handoff.userAddendum ? "编辑补充" : "添加补充", () => {
+      if (!requireProFeature(this.plugin, "projectDocuments")) return;
+      new AiWorkspaceHandoffAddendumModal(
+        this.app,
+        service,
+        this.plugin,
+        session,
+        handoff.userAddendum,
+        () => this.render()
+      ).open();
+    }, { icon: "square-pen", ghost: true });
     const supporting = document.createEl("details", {
       cls: "lifeos-ai-workspace-handoff-supporting"
     });
@@ -1490,12 +1519,16 @@ export class AiWorkspaceView extends ItemView {
       icon: "sparkles",
       primary: true
     });
-    createButton(documentActions, "用本地工具生成", () => new AiWorkspaceHandoffGeneratorModal(
-      this.app,
-      service,
-      session,
-      () => this.render()
-    ).open(), { icon: "terminal", ghost: true });
+    createButton(documentActions, "用本地工具生成", () => {
+      if (!requireProFeature(this.plugin, "projectDocuments")) return;
+      new AiWorkspaceHandoffGeneratorModal(
+        this.app,
+        service,
+        this.plugin,
+        session,
+        () => this.render()
+      ).open();
+    }, { icon: "terminal", ghost: true });
     createButton(documentActions, "打开当前会话", () => {
       this.activeTab = "sessions";
       this.selectedRevisionId = session.currentRevisionId;
@@ -1548,11 +1581,26 @@ export class AiWorkspaceView extends ItemView {
     const copy = header.createDiv();
     copy.createEl("h2", { text: "提示词库" });
     copy.createEl("p", { text: "常用提示词单独版本化；全局提示词和项目专属提示词在这里统一查找。" });
-    createButton(header, "新建提示词", () => new AiWorkspacePromptModal(this.app, service, projects, {
-      scope: "project",
-      projectId: project.id,
-      tool: "any"
-    }, () => this.render()).open(), { icon: "plus", primary: true });
+    const headerActions = header.createDiv({ cls: "lifeos-ai-workspace-prompt-head-actions" });
+    createButton(headerActions, "AI 生成提示词", () => {
+      if (!requireProFeature(this.plugin, "aiContextEngine")) return;
+      new AiWorkspacePromptStudioModal(
+        this.app,
+        this.plugin,
+        service,
+        projects,
+        { mode: "generate", projectId: project.id },
+        () => this.render()
+      ).open();
+    }, { icon: "wand-sparkles", primary: true });
+    createButton(headerActions, "手动新建", () => {
+      if (!requireProFeature(this.plugin, "projectDocuments")) return;
+      new AiWorkspacePromptModal(this.app, service, this.plugin, projects, {
+        scope: "project",
+        projectId: project.id,
+        tool: "any"
+      }, () => this.render()).open();
+    }, { icon: "plus", ghost: true });
     const search = parent.createEl("input", {
       cls: "lifeos-input lifeos-glass-input lifeos-ai-workspace-prompt-search",
       attr: { type: "search", placeholder: "搜索标题或标签" }
@@ -1593,18 +1641,50 @@ export class AiWorkspaceView extends ItemView {
     for (const tag of prompt.tags) badges.createSpan({ text: tag });
     const markdown = await service.readPrompt(prompt);
     const body = item.createDiv({ cls: "lifeos-ai-workspace-prompt-preview" });
-    renderMarkdownDisplay(this.app, this, body, this.stripPromptFrontmatter(markdown), prompt.versionPaths[prompt.currentVersion - 1]);
+    renderMarkdownDisplay(this.app, this, body, this.stripPromptFrontmatter(markdown), service.promptVersionPath(prompt));
     const actions = item.createDiv({ cls: "lifeos-ai-workspace-inline-actions" });
+    createButton(actions, "AI 优化", () => {
+      if (!requireProFeature(this.plugin, "aiContextEngine")) return;
+      new AiWorkspacePromptStudioModal(
+        this.app,
+        this.plugin,
+        service,
+        projects,
+        {
+          mode: "optimize",
+          prompt,
+          body: this.stripPromptFrontmatter(markdown).replace(/^# .+\n+/u, "")
+        },
+        () => this.render()
+      ).open();
+    }, { icon: "wand-sparkles", primary: true });
     createButton(actions, "复制", () => void (async () => {
       await navigator.clipboard.writeText(this.stripPromptFrontmatter(markdown));
       await service.markPromptUsed(prompt.id);
       new Notice("提示词已复制。", 4000);
-    })(), { icon: "copy", primary: true });
-    createButton(actions, "保存新版本", () => new AiWorkspacePromptModal(this.app, service, projects, {
-      ...prompt,
-      body: this.stripPromptFrontmatter(markdown).replace(/^# .+\n+/u, "")
-    }, () => this.render()).open(), { icon: "git-commit-horizontal", ghost: true });
+    })(), { icon: "copy", ghost: true });
+    createButton(actions, "保存新版本", () => {
+      if (!requireProFeature(this.plugin, "projectDocuments")) return;
+      new AiWorkspacePromptModal(this.app, service, this.plugin, projects, {
+        ...prompt,
+        body: this.stripPromptFrontmatter(markdown).replace(/^# .+\n+/u, "")
+      }, () => this.render()).open();
+    }, { icon: "git-commit-horizontal", ghost: true });
+    if (prompt.currentVersion > 1) {
+      createButton(actions, "撤销上次修改", () => void (async () => {
+        if (!requireProFeature(this.plugin, "projectDocuments")) return;
+        if (!window.confirm(`恢复「${prompt.title}」的上一个版本吗？当前版本文件仍会保留。`)) return;
+        try {
+          const restored = await service.rollbackPrompt(prompt.id);
+          new Notice(`已恢复到 v${restored.currentVersion}。`, 5000);
+          await this.render();
+        } catch (error) {
+          new Notice(error instanceof Error ? error.message : "提示词版本恢复失败。", 7000);
+        }
+      })(), { icon: "undo-2", ghost: true });
+    }
     createButton(actions, "归档", () => void (async () => {
+      if (!requireProFeature(this.plugin, "projectDocuments")) return;
       await service.archivePrompt(prompt.id);
       await this.render();
     })(), { icon: "archive", ghost: true });
@@ -1653,6 +1733,7 @@ export class AiWorkspaceView extends ItemView {
     if (pending.length === 0) return;
     const actions = parent.createDiv({ cls: "lifeos-ai-workspace-inline-actions" });
     createButton(actions, "确认写入日报", () => void (async () => {
+      if (!requireProFeature(this.plugin, "aiWriteback")) return;
       const file = await service.confirmDailyFacts(Array.from(selected));
       if (!file) {
         new Notice("请选择要写入日报的项目事实。");
@@ -1662,6 +1743,7 @@ export class AiWorkspaceView extends ItemView {
       await this.render();
     })(), { icon: "notebook-pen", primary: true });
     createButton(actions, "忽略所选", () => void (async () => {
+      if (!requireProFeature(this.plugin, "projectManagement")) return;
       await service.dismissDailyFacts(Array.from(selected));
       await this.render();
     })(), { icon: "x", ghost: true });
@@ -1720,16 +1802,19 @@ export class AiWorkspaceView extends ItemView {
   }
 
   private openImport(project: LifeOSProject, service: AiWorkspaceService, autoScan = false): void {
+    if (!requireProFeature(this.plugin, "projectManagement")) return;
     new AiWorkspaceImportModal(
       this.app,
       project,
       service,
+      this.plugin,
       (results) => this.refreshAfterImportResults(results),
       autoScan
     ).open();
   }
 
   private openBinding(project: LifeOSProject, service: AiWorkspaceService): void {
+    if (!requireProFeature(this.plugin, "projectManagement")) return;
     new AiWorkspaceBindingModal(this.app, project, service, this.plugin, async (action) => {
       await this.render();
       if (action === "scan") this.openImport(project, this.service(), true);
@@ -1737,6 +1822,7 @@ export class AiWorkspaceView extends ItemView {
   }
 
   private openNewProjectWizard(): void {
+    if (!requireProFeature(this.plugin, "projectManagement")) return;
     new NewProjectModal(
       this.app,
       this.plugin,
@@ -1757,6 +1843,7 @@ export class AiWorkspaceView extends ItemView {
   }
 
   private async analyzeSession(session: AiWorkspaceSessionSummary, service: AiWorkspaceService): Promise<void> {
+    if (!requireProFeature(this.plugin, "aiContextEngine")) return;
     new Notice("正在分段整理会话；长会话会先分块再汇总。", 5000);
     try {
       await service.analyzeSessionWithAi(session.id);
@@ -1771,6 +1858,7 @@ export class AiWorkspaceView extends ItemView {
     session: AiWorkspaceSessionSummary,
     service: AiWorkspaceService
   ): Promise<void> {
+    if (!requireProFeature(this.plugin, "aiContextEngine")) return;
     new Notice("正在用内置 AI 重建当前版本交接；原交接会保留到新结果校验通过。", 5000);
     try {
       const result = await service.generateHandoffWithAi(session.id, session.currentRevisionId);
@@ -1888,6 +1976,7 @@ export class AiWorkspaceView extends ItemView {
       });
       const actions = row.createDiv({ cls: "lifeos-ai-workspace-inline-actions" });
       createButton(actions, status === "confirmed" ? "取消确认" : "确认", () => void (async () => {
+        if (!requireProFeature(this.plugin, "projectManagement")) return;
         await service.setAnalysisItemStatus(
           session.id,
           kind,
@@ -1898,6 +1987,7 @@ export class AiWorkspaceView extends ItemView {
       })(), { icon: status === "confirmed" ? "undo-2" : "check", primary: status !== "confirmed", ghost: status === "confirmed" });
       if (status !== "dismissed") {
         createButton(actions, "忽略", () => void (async () => {
+          if (!requireProFeature(this.plugin, "projectManagement")) return;
           await service.setAnalysisItemStatus(session.id, kind, item.text, "dismissed");
           await this.render();
         })(), { icon: "x", ghost: true });

@@ -6,6 +6,7 @@ import type {
   PersonalLifeSystemSettings
 } from "../../settings";
 import type { ChatMessage, LifeOSProject } from "../../types";
+import { hasProAccess } from "../../licensing/entitlement";
 import { today } from "../../utils/dates";
 import { ensureFile, ensureFolder, readFile } from "../../utils/vault";
 import { applyWritebackItems, type WritebackItem } from "../../writeback-preview";
@@ -73,6 +74,7 @@ import {
   resolveWeixinConversationSkillIds,
   resolveWeixinLinkFollowUp,
   requiresWeixinStrictGrounding,
+  shouldBindPendingWeixinImages,
   shouldProbeWeixinKnowledge,
   shouldReuseWeixinImages,
   shouldUseWeixinBoundProject,
@@ -129,6 +131,7 @@ type WeixinProposalAction =
   | { kind: "task-complete"; taskLine: string; title: string; operationId?: string }
   | { kind: "task-update"; taskLine: string; title: string; dueDate?: string; operationId?: string }
   | { kind: "task-delete"; taskLine: string; title: string; operationId?: string }
+  | { kind: "task-clear-all"; taskLines: string[]; operationId?: string }
   | { kind: "review-save"; facts: PeriodReviewFacts; draft: string; operationId?: string }
   | { kind: "daily-digest-save"; digest: WeixinDailyDigest; operationId?: string }
   | { kind: "reminder-add"; routeRef: string; dueAt: string; content: string; reminderId?: string; operationId?: string }
@@ -150,6 +153,7 @@ interface WeixinWritebackProposal {
 
 export interface WeixinAssistantServiceOptions {
   saveSettings: () => Promise<void>;
+  hasWriteEntitlement?: () => boolean;
   sendProactiveText?: (
     accountId: string,
     senderId: string,
@@ -218,7 +222,17 @@ export class WeixinAssistantService {
     this.dailyJournal = new WeixinDailyJournalService(app, this.fs, settings);
     this.conversationState = new WeixinConversationStateService(app, this.fs);
     this.inboundQueue = new WeixinInboundQueueService(app, this.fs);
-    this.agent = agent ?? new LifeOSAgentService(app, () => settings, ai);
+    this.agent = agent ?? new LifeOSAgentService(
+      app,
+      () => settings,
+      ai,
+      () => hasProAccess(
+        settings.licenseSnapshot,
+        new Date(),
+        settings.licenseEntitlementToken
+      ),
+      () => this.options.saveSettings()
+    );
   }
 
   async handleMessage(request: WeixinInboundRequest): Promise<WeixinAssistantResponse> {
@@ -276,6 +290,9 @@ export class WeixinAssistantService {
     await this.inboundQueue.markProcessing(durableRequest);
     try {
       const response = await this.processAuthorizedMessage(durableRequest);
+      await this.conversationState.markImagesReferenceable(durableRequest).catch((error) => {
+        console.warn(`[Life OS] Weixin image lifecycle finalize failed for ${durableRequest.messageId}`, error);
+      });
       await this.inboundQueue.markResponded(durableRequest, response);
       return response;
     } catch (error) {
@@ -339,7 +356,7 @@ export class WeixinAssistantService {
       return {
         reply: [
           `已收到 ${receivedImages} 张图片，当前共暂存 ${count} 张。`,
-          "请继续发送一段文字说明要做什么；下一条消息会自动带上这些图片。",
+          "请继续发送一段文字说明要对图片做什么；只有明确提到图片或题目时，下一条消息才会绑定这些图片。",
           "如果不想继续处理，直接说“取消图片”即可。图片会作为当前会话附件保存，之后仍可说“用另一种方法解前面那道题”。"
         ].join("\n")
       };
@@ -372,9 +389,24 @@ export class WeixinAssistantService {
       return this.handleCommand(request, earlyCommand.name, earlyCommand.args);
     }
     if (earlyCommand?.name === "new") this.clearPendingImagesForRequest(request);
-    let effectiveRequest = weixinCommandKeepsPendingImages(request.content)
-      ? request
-      : this.consumePendingImages(request);
+    let effectiveRequest = request;
+    if (!weixinCommandKeepsPendingImages(request.content)) {
+      if (receivedImages > 0) {
+        // A text+image message is already an explicit binding. Never merge an
+        // older staged batch into it.
+        this.clearPendingImagesForRequest(request);
+      } else if (shouldBindPendingWeixinImages(request.content)) {
+        effectiveRequest = this.consumePendingImages(request);
+      } else {
+        // A new unrelated topic closes unbound images. Processed images remain
+        // referenceable through explicit wording such as “上一张图”.
+        this.clearPendingImagesForRequest(request);
+        await this.conversationState.archivePendingImages(request);
+      }
+    }
+    if (getWeixinImageContentParts(effectiveRequest.media).length > 0) {
+      await this.conversationState.bindPendingImages(effectiveRequest);
+    }
     const fastReply = getWeixinFastReply(effectiveRequest.content);
     if (fastReply && getWeixinImageContentParts(effectiveRequest.media).length === 0) {
       const result: WeixinAssistantResponse = { reply: fastReply };
@@ -388,9 +420,12 @@ export class WeixinAssistantService {
     let skillInvocation = parseWeixinSkillInvocation(effectiveRequest.content, availableSkills);
     if (
       getWeixinImageContentParts(effectiveRequest.media).length === 0
-      && shouldReuseWeixinImages(effectiveRequest.content, Boolean(skillInvocation))
+      && shouldReuseWeixinImages(effectiveRequest.content)
     ) {
       effectiveRequest = await this.conversationState.hydrateRecentImages(effectiveRequest);
+      if (getWeixinImageContentParts(effectiveRequest.media).length > 0) {
+        await this.conversationState.bindPendingImages(effectiveRequest);
+      }
     }
     if (skillInvocation?.error === "ambiguous") {
       skillInvocation = await this.resolveAmbiguousSkillInvocation(effectiveRequest, skillInvocation, availableSkills);
@@ -454,9 +489,12 @@ export class WeixinAssistantService {
     if (
       semanticRoute?.skillIds.length
       && getWeixinImageContentParts(effectiveRequest.media).length === 0
-      && shouldReuseWeixinImages(effectiveRequest.content, true)
+      && shouldReuseWeixinImages(effectiveRequest.content)
     ) {
       effectiveRequest = await this.conversationState.hydrateRecentImages(effectiveRequest);
+      if (getWeixinImageContentParts(effectiveRequest.media).length > 0) {
+        await this.conversationState.bindPendingImages(effectiveRequest);
+      }
     }
 
     const projects = await this.projects.loadProjects();
@@ -606,7 +644,12 @@ export class WeixinAssistantService {
         ? this.settings.visionAiModel.trim() || undefined
         : await this.resolveWeixinTextModel(),
       reasoningEffort: executionPlan.reasoningEffort,
-      temperature: 0.35
+      temperature: 0.35,
+      // Remote mutations are owned by the durable Weixin proposal adapter.
+      // Keeping the shared core read-only prevents in-memory confirmations or
+      // a direct executor from bypassing restart-safe channel authorization.
+      permissionMode: "read-only",
+      explicitWriteIntent: false
     });
     if (!response.ok || !response.text.trim()) {
       throw new WeixinModelRequestError(response.error || "AI 未返回内容。");
@@ -718,6 +761,7 @@ export class WeixinAssistantService {
       !this.settings.weixinBotEnabled
       || !this.settings.weixinDailyDigestEnabled
       || this.settings.weixinPermissionMode === "read-only"
+      || !this.canWriteToLifeOS()
     ) return base;
     if (!this.ai.isConfigured()) return { ...base, status: "not-configured" };
     if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)) throw new Error("微信日终总结日期格式无效。");
@@ -800,7 +844,7 @@ export class WeixinAssistantService {
       if (count === 0) {
         return { reply: "当前没有等待配对的图片。先发送图片，再发送问题即可。" };
       }
-      return { reply: `当前会话保存了 ${count} 张最近图片。下一条说明用途的文字会自动带上图片；之后说“用小P解前面那道题”也能继续引用。` };
+      return { reply: `当前会话保存了 ${count} 张最近图片。请在下一条明确说明“分析这张图”或“解这道题”后再处理；之后也可说“用小P解前面那道题”显式引用。` };
     }
     if (name === "cancel-image") {
       const removed = this.pendingImages.clearRequest(request);
@@ -1228,7 +1272,7 @@ export class WeixinAssistantService {
             "tools 是本轮需要读取的数据源：最新外部事实、官网、新闻选择 web-search；用户自己的日记、任务、记忆、项目和知识库选择 lifeos-search；明确要求结合两者时可以同时选择。普通闲聊留空。",
             "结合最近对话补全代词、日期和未完成操作，但不得把旧话题强加给新问题。",
             "只输出一个 JSON 对象，不要 Markdown：",
-            '{"intent":"chat|diary-add|diary-read|diary-generate|task-list|task-add|task-complete|task-update|task-delete|review-generate|summary-generate|link-save|knowledge-save|reminder-add|reminder-list|reminder-cancel","confidence":0,"skillId":"","skillConfidence":0,"query":"","title":"","content":"","when":"","date":"today|yesterday|YYYY-MM-DD","period":"today|week|month","url":"","collection":"","id":"","tools":["web-search|lifeos-search"]}'
+            '{"intent":"chat|diary-add|diary-read|diary-generate|task-list|task-add|task-complete|task-update|task-delete|task-clear-all|review-generate|summary-generate|link-save|knowledge-save|reminder-add|reminder-list|reminder-cancel","confidence":0,"skillId":"","skillConfidence":0,"query":"","title":"","content":"","when":"","date":"today|yesterday|YYYY-MM-DD","period":"today|week|month","url":"","collection":"","id":"","tools":["web-search|lifeos-search"]}'
           ].join("\n")
         },
         {
@@ -1292,6 +1336,7 @@ export class WeixinAssistantService {
       source
     };
     if (intent === "task-delete") return { kind: intent, query: String(record.query || record.id || record.title || query).trim(), source };
+    if (intent === "task-clear-all") return { kind: intent, source };
     if (intent === "review-generate" || intent === "summary-generate") return { kind: intent, period, source };
     if (intent === "link-save") {
       const url = String(record.url || original.match(/https?:\/\/[^\s]+/iu)?.[0] || "").trim();
@@ -1462,6 +1507,18 @@ export class WeixinAssistantService {
       });
     }
 
+    if (action.kind === "task-clear-all") {
+      const open = await tasks.loadOpenTasks();
+      if (open.length === 0) return { reply: "当前没有未完成待办，无需清空。" };
+      return this.prepareMutation(
+        request,
+        project,
+        `完整备份后清空全部 ${open.length} 条未完成待办`,
+        { action: { kind: "task-clear-all", taskLines: open.map((task) => task.line) } },
+        { forceConfirm: true }
+      );
+    }
+
     if (action.kind === "review-generate") {
       const result = await this.generatePeriodReview(action.period, action.start, action.end, request.timestamp);
       const mutation = await this.prepareMutation(request, project, `保存${this.periodLabel(action.period)}复盘`, {
@@ -1549,13 +1606,15 @@ export class WeixinAssistantService {
     request: WeixinInboundRequest,
     project: LifeOSProject | null,
     summary: string,
-    payload: { item?: WritebackItem; action?: WeixinProposalAction }
+    payload: { item?: WritebackItem; action?: WeixinProposalAction },
+    options: { forceConfirm?: boolean } = {}
   ): Promise<WeixinAssistantResponse> {
+    if (!this.canWriteToLifeOS()) return this.writeEntitlementBlockedResponse();
     const executablePayload = this.withMutationOperationId(request, payload);
     const isApprovedPrivate = !request.isGroup
       && this.settings.weixinApprovedSenders.some((sender) => sender.key === weixinSenderKey(request));
     const explicitTypedAction = parseWeixinLifeOSAction(request.content);
-    const canAutoApply = isApprovedPrivate && (
+    const canAutoApply = !options.forceConfirm && isApprovedPrivate && (
       this.settings.weixinPermissionMode === "explicit-auto"
       || (this.settings.weixinPermissionMode === "confirm" && Boolean(explicitTypedAction))
     );
@@ -1575,6 +1634,7 @@ export class WeixinAssistantService {
   }
 
   private async executeProposalPayload(payload: { item?: WritebackItem; action?: WeixinProposalAction }): Promise<string> {
+    if (!this.canWriteToLifeOS()) throw new Error(this.writeEntitlementBlockedMessage());
     if (payload.item) {
       const marker = `lifeos-weixin-writeback:${payload.item.id}`;
       const item = payload.item.content.includes(marker)
@@ -1658,6 +1718,18 @@ export class WeixinAssistantService {
       }
       await service.deleteOpenTask(current);
       return "已删除未完成待办。";
+    }
+    if (action.kind === "task-clear-all") {
+      const service = new TaskService(this.app, this.fs);
+      const open = await service.loadOpenTasks();
+      if (open.length === 0) return "当前没有未完成待办；该操作已经完成或无需执行。";
+      const expected = [...action.taskLines].sort();
+      const actual = open.map((task) => task.line).sort();
+      if (expected.length !== actual.length || expected.some((line, index) => line !== actual[index])) {
+        throw new Error("未完成待办在确认前已变化。为避免误删，请重新发起清空操作并再次确认。");
+      }
+      const result = await service.archiveAndClearOpenTasks();
+      return `已完整备份并清空 ${result.cleared} 条未完成待办。备份文件：${result.backupPath}`;
     }
     if (action.kind === "review-save") {
       const service = new PeriodReviewService(this.app, this.fs, this.settings);
@@ -2245,6 +2317,8 @@ export class WeixinAssistantService {
     return {
       channel: "weixin",
       content: currentRequest || "用户发送了图片或附件，没有附带文字。请直接观察并回答图片内容。",
+      sessionId: `weixin:${weixinConversationKey(request)}`,
+      turnId: request.messageId,
       history: recent,
       context: promptContext,
       projectLabel: project ? `${project.name}（${project.id}）` : "未绑定项目",
@@ -2523,6 +2597,9 @@ export class WeixinAssistantService {
     if (this.settings.weixinPermissionMode === "read-only") {
       return { status: "blocked", note: "当前机器人为只读模式，未写入 Life OS。可在设置中改为“写入前确认”。" };
     }
+    if (!this.canWriteToLifeOS()) {
+      return { status: "blocked", note: this.writeEntitlementBlockedMessage() };
+    }
     const item = this.writebackItem(envelope, project);
     if (!item) {
       return { status: "blocked", note: "写入目标不明确或不在 Life OS 安全目录内，未执行写入。" };
@@ -2638,6 +2715,7 @@ export class WeixinAssistantService {
   ): Promise<WeixinAssistantResponse> {
     const normalizedId = id.trim().toUpperCase();
     if (!/^WB-\d{6}$/u.test(normalizedId)) return { reply: "待写入编号格式不正确。" };
+    if (approve && !this.canWriteToLifeOS()) return this.writeEntitlementBlockedResponse();
     const path = this.proposalPath(normalizedId);
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) return { reply: "没有找到该待写入内容，可能已过期或编号错误。" };
@@ -2674,6 +2752,30 @@ export class WeixinAssistantService {
 
   private proposalPath(id: string): string {
     return this.fs.path("Chat", "Weixin", "Pending", `${id}.json`);
+  }
+
+  private canWriteToLifeOS(): boolean {
+    try {
+      if (this.options.hasWriteEntitlement) return this.options.hasWriteEntitlement() === true;
+      return hasProAccess(
+        this.settings.licenseSnapshot,
+        new Date(),
+        this.settings.licenseEntitlementToken
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private writeEntitlementBlockedMessage(): string {
+    return "AI 写回需要有效的 Pro 授权。当前仍可问答和读取 Life OS；请在 Pro 授权中心激活后重试。";
+  }
+
+  private writeEntitlementBlockedResponse(): WeixinAssistantResponse {
+    return {
+      reply: this.writeEntitlementBlockedMessage(),
+      writebackStatus: "blocked"
+    };
   }
 
   private isExplicitWriteRequest(content: string): boolean {

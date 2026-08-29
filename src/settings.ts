@@ -1,5 +1,6 @@
 import type { LicenseStateSnapshot } from "./licensing/license-types";
 import type { AiSkillCustomCategory, AiSkillOverride, ImportedAiSkillRecord } from "./services/AiSkillService";
+import type { LifeOSNavKey } from "./types";
 
 export type AiProviderType =
   | "auto"
@@ -232,6 +233,30 @@ export type LlmWikiLongMaterialMode = "ask" | "quick" | "deep" | "save-only";
 export type LlmWikiSensitiveDefault = "local-only" | "ask" | "allow";
 export type DirectoryLanguage = "zh" | "en";
 export type ExamProfileType = "civil-service" | "postgraduate" | "law" | "teacher" | "custom";
+
+export const SIDEBAR_CONFIGURABLE_ITEMS: Array<{ key: Exclude<LifeOSNavKey, "settings">; label: string }> = [
+  { key: "chat", label: "AI 助手" },
+  { key: "dashboard", label: "今日行动" },
+  { key: "tasks", label: "任务" },
+  { key: "diary", label: "日记" },
+  { key: "checkins", label: "学习打卡" },
+  { key: "knowledge", label: "知识库" },
+  { key: "memory", label: "记忆" },
+  { key: "review", label: "复盘" },
+  { key: "workspace", label: "项目上下文" },
+  { key: "guide", label: "使用手册" },
+  { key: "proCompare", label: "版本对比" },
+  { key: "pro", label: "Pro 授权" }
+];
+
+export function normalizeHiddenSidebarItems(value: unknown): LifeOSNavKey[] {
+  const allowed = new Set<LifeOSNavKey>(SIDEBAR_CONFIGURABLE_ITEMS.map((item) => item.key));
+  return Array.from(new Set(
+    (Array.isArray(value) ? value : [])
+      .map((item) => String(item || "") as LifeOSNavKey)
+      .filter((item) => allowed.has(item))
+  ));
+}
 
 export interface TaskFormDraft {
   title: string;
@@ -557,6 +582,9 @@ export interface PersonalLifeSystemSettings {
   viewLayout: ViewLayout;
   sidebarCollapsed: boolean;
   sidebarDirectoryCollapsed: boolean;
+  hiddenSidebarItems: LifeOSNavKey[];
+  /** Display preference only; completed task records remain in done.md. */
+  taskManagerShowCompleted: boolean;
   backgroundImagePath: string;
   browserCaptureEnabled: boolean;
   browserCaptureSetupVersion: number;
@@ -1161,7 +1189,7 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   heatmapIncludeTasks: true,
   heatmapIncludeCheckins: true,
   heatmapIncludeSummaries: true,
-  enableExamModule: true,
+  enableExamModule: false,
   enableLlmWiki: true,
   llmWikiShortCompileDepth: "standard",
   llmWikiLongMaterialMode: "ask",
@@ -1201,6 +1229,8 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   viewLayout: "main",
   sidebarCollapsed: false,
   sidebarDirectoryCollapsed: false,
+  hiddenSidebarItems: [],
+  taskManagerShowCompleted: true,
   backgroundImagePath: "",
   browserCaptureEnabled: true,
   browserCaptureSetupVersion: 1,

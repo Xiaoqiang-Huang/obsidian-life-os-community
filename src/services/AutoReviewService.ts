@@ -87,7 +87,7 @@ export class AutoReviewService {
   ) {
     this.periodReviews = new PeriodReviewService(app, fs, settings);
     this.now = options.now ?? (() => new Date());
-    this.hasEntitlement = options.hasEntitlement ?? (() => true);
+    this.hasEntitlement = options.hasEntitlement ?? (() => false);
   }
 
   async runDue(trigger: AutoReviewTrigger = "timer"): Promise<AutoReviewRunResult> {

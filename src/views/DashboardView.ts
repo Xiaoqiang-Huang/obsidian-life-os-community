@@ -14,6 +14,7 @@ import { FileSystemService } from "../services/FileSystemService";
 import { PeriodReviewService } from "../services/PeriodReviewService";
 import { AutoReviewService } from "../services/AutoReviewService";
 import { TaskService } from "../services/TaskService";
+import { LlmWikiQueueService } from "../services/LlmWikiQueueService";
 import { getExamProfileLabel } from "../settings";
 import { currentDateLabel, today } from "../utils/dates";
 
@@ -48,7 +49,10 @@ export class LifeOSDashboardView extends ItemView {
     const openTasks = await tasks.loadOpenTasks();
     const date = today();
     const todayFile = this.app.vault.getAbstractFileByPath(this.plugin.getTodayNotePath(date));
-    const checkinFile = this.app.vault.getAbstractFileByPath(fs.path("Exam", "Checkins", `${date}.md`));
+    const examEnabled = this.plugin.settings.enableExamModule === true;
+    const checkinFile = examEnabled
+      ? this.app.vault.getAbstractFileByPath(fs.path("Exam", "Checkins", `${date}.md`))
+      : null;
     const summaryFile = this.app.vault.getAbstractFileByPath(fs.path("Memory", "Summaries", "Daily", `${date}.md`));
     const periodReviews = new PeriodReviewService(this.app, fs, this.plugin.settings).listReviews("daily");
     const pendingReviewDrafts = (await new AutoReviewService(this.app, fs, this.plugin.settings, this.plugin.ai).listDrafts())
@@ -57,7 +61,22 @@ export class LifeOSDashboardView extends ItemView {
     const hasTodayNote = todayFile instanceof TFile;
     const hasCheckin = checkinFile instanceof TFile;
     const hasReview = summaryFile instanceof TFile || periodReviews.some((item) => item.window.start === date && item.window.end === date);
-    const recommendation = this.getTodayRecommendation(openTasks.length, hasTodayNote, hasCheckin, hasReview, pendingReviewDrafts.length);
+    const recommendation = this.getTodayRecommendation(
+      openTasks.length,
+      hasTodayNote,
+      hasCheckin,
+      hasReview,
+      pendingReviewDrafts.length,
+      examEnabled
+    );
+    const heroActions = [
+      ...(examEnabled
+        ? [{ label: "立即打卡", icon: "graduation-cap", primary: true, onClick: () => void this.plugin.showCheckinModal() }]
+        : []),
+      { label: "快速记录", icon: "pencil-line", primary: !examEnabled, onClick: () => new QuickCaptureModal(this.app, this.plugin).open() },
+      { label: "新建任务", icon: "plus", onClick: () => new NewTaskModal(this.app, this.plugin, () => this.render()).open() },
+      { label: "打开今日日记", icon: "book-open", onClick: () => void this.plugin.openTodayNote(false) }
+    ];
 
     createHeroHeader(main, {
       kicker: "今日行动",
@@ -65,12 +84,7 @@ export class LifeOSDashboardView extends ItemView {
       description: "先完成一件重要的小事。",
       meta: currentDateLabel(),
       icon: "sparkles",
-      actions: [
-        { label: "立即打卡", icon: "graduation-cap", primary: true, onClick: () => void this.plugin.showCheckinModal() },
-        { label: "快速记录", icon: "pencil-line", onClick: () => new QuickCaptureModal(this.app, this.plugin).open() },
-        { label: "新建任务", icon: "plus", onClick: () => new NewTaskModal(this.app, this.plugin, () => this.render()).open() },
-        { label: "打开今日日记", icon: "book-open", onClick: () => void this.plugin.openTodayNote(false) }
-      ]
+      actions: heroActions
     });
 
     const workspace = main.createDiv({ cls: "lifeos-dashboard-grid" });
@@ -82,16 +96,20 @@ export class LifeOSDashboardView extends ItemView {
     const statGrid = center.createDiv({ cls: "lifeos-grid lifeos-stat-grid" });
     createStatCard(statGrid, "待处理任务", String(openTasks.length), "purple", "check-square");
     createStatCard(statGrid, "今日日记", hasTodayNote ? "已创建" : "待开始", "blue", "book-open");
-    createStatCard(statGrid, `${getExamProfileLabel(this.plugin.settings)}打卡`, hasCheckin ? "已打卡" : "待打卡", "green", "graduation-cap");
+    if (examEnabled) {
+      createStatCard(statGrid, `${getExamProfileLabel(this.plugin.settings)}打卡`, hasCheckin ? "已打卡" : "待打卡", "green", "graduation-cap");
+    } else {
+      createStatCard(statGrid, "待确认复盘", String(pendingReviewDrafts.length), "green", "clipboard-check");
+    }
     createStatCard(statGrid, "本周复盘", String(weeklySummaryCount), "orange", "bar-chart-3");
 
-    this.renderRecommendedAction(center, recommendation, hasCheckin);
-    this.renderLlmWikiReminder(center, fs);
+    this.renderRecommendedAction(center, recommendation, hasCheckin, examEnabled);
+    await this.renderLlmWikiReminder(center, fs);
     this.renderTodayTasks(center, tasks, openTasks, hasTodayNote ? todayFile : null);
 
     const statusGrid = center.createDiv({ cls: "lifeos-status-grid" });
     this.renderDailyCard(statusGrid, hasTodayNote);
-    this.renderCheckinCard(statusGrid, hasCheckin);
+    if (examEnabled) this.renderCheckinCard(statusGrid, hasCheckin);
     this.renderReviewCard(statusGrid, hasReview, pendingReviewDrafts.length);
 
     this.renderAssistant(right);
@@ -99,38 +117,51 @@ export class LifeOSDashboardView extends ItemView {
     this.renderWorkflowGuide(right);
   }
 
-  private getTodayRecommendation(taskCount: number, hasTodayNote: boolean, hasCheckin: boolean, hasReview: boolean, pendingReviewCount = 0): { title: string; description: string } {
+  private getTodayRecommendation(
+    taskCount: number,
+    hasTodayNote: boolean,
+    hasCheckin: boolean,
+    hasReview: boolean,
+    pendingReviewCount = 0,
+    examEnabled = false
+  ): { title: string; description: string } {
     if (!hasTodayNote && taskCount === 0) {
       return { title: "先给今天开一个轻入口", description: "建议先创建今日日记，或者用快速记录写下第一条想法。Life OS 会把记录、任务和记忆慢慢整理起来。" };
     }
     if (taskCount > 0) {
       return { title: `今天有 ${taskCount} 个待处理任务`, description: "先完成最小的一件事，再回到今日日记补一句复盘。" };
     }
-    if (!hasCheckin) return { title: `今天建议先完成一次${getExamProfileLabel(this.plugin.settings)}打卡`, description: "记录一次学习动作，就能让长期趋势更完整。" };
+    if (examEnabled && !hasCheckin) return { title: `今天建议先完成一次${getExamProfileLabel(this.plugin.settings)}打卡`, description: "记录一次学习动作，就能让长期趋势更完整。" };
     if (pendingReviewCount > 0) return { title: "今日复盘草稿正在等你确认", description: "AI 已整理事实和引用；审核、补充后再保存为正式复盘。" };
     if (!hasReview) return { title: "今天已经有记录，可以做一次简短复盘", description: "复盘不用很长，三句话也足够沉淀今天的状态。" };
     return { title: "今天的核心记录已经完整", description: "保持这个节奏，明天打开时会更容易接上当前状态。" };
   }
 
-  private renderRecommendedAction(parent: HTMLElement, recommendation: { title: string; description: string }, hasCheckin: boolean): void {
+  private renderRecommendedAction(
+    parent: HTMLElement,
+    recommendation: { title: string; description: string },
+    hasCheckin: boolean,
+    examEnabled: boolean
+  ): void {
+    const shouldRecommendCheckin = examEnabled && !hasCheckin;
     const card = createCard(parent, "lifeos-recommendation-card lifeos-card-primary");
     const copy = card.createDiv({ cls: "lifeos-recommendation-copy" });
     copy.createDiv({ cls: "lifeos-kicker", text: "今日推荐行动" });
-    copy.createEl("h2", { text: hasCheckin ? recommendation.title : `今天建议先完成一次${getExamProfileLabel(this.plugin.settings)}打卡` });
-    copy.createEl("p", { text: hasCheckin ? recommendation.description : "记录一次学习动作，就能让长期趋势更完整。" });
+    copy.createEl("h2", { text: recommendation.title });
+    copy.createEl("p", { text: recommendation.description });
     const actions = card.createDiv({ cls: "lifeos-recommendation-actions" });
-    createButton(actions, hasCheckin ? "快速记录" : "立即打卡", () => {
-      if (hasCheckin) new QuickCaptureModal(this.app, this.plugin).open();
-      else void this.plugin.showCheckinModal();
-    }, { primary: true, icon: hasCheckin ? "pencil-line" : "graduation-cap" });
+    createButton(actions, shouldRecommendCheckin ? "立即打卡" : "快速记录", () => {
+      if (shouldRecommendCheckin) void this.plugin.showCheckinModal();
+      else new QuickCaptureModal(this.app, this.plugin).open();
+    }, { primary: true, icon: shouldRecommendCheckin ? "graduation-cap" : "pencil-line" });
     createButton(actions, "打开今日日记", () => void this.plugin.openTodayNote(false), { ghost: true, icon: "book-open" });
     createButton(actions, "新建任务", () => new NewTaskModal(this.app, this.plugin, () => this.render()).open(), { ghost: true, icon: "plus" });
   }
 
-  private renderLlmWikiReminder(parent: HTMLElement, fs: FileSystemService): void {
+  private async renderLlmWikiReminder(parent: HTMLElement, fs: FileSystemService): Promise<void> {
     if (this.plugin.settings.llmWikiDashboardReminder === false) return;
 
-    const count = this.countLlmWikiPending(fs);
+    const count = await new LlmWikiQueueService(this.app, fs).countPending();
     if (count <= 0) return;
 
     const card = createCard(parent, "lifeos-panel lifeos-llmwiki-dashboard-reminder");
@@ -298,16 +329,4 @@ export class LifeOSDashboardView extends ItemView {
       }).length;
   }
 
-  private countLlmWikiPending(fs: FileSystemService): number {
-    const prefixes = [
-      fs.path("Knowledge", "LLMWiki", "Raw", "Inbox") + "/",
-      fs.path("Knowledge", "LLMWiki", "Wiki", "Drafts") + "/"
-    ];
-
-    return this.app.vault.getMarkdownFiles()
-      .filter((file) => file.basename !== "index")
-      .filter((file) => file.path.endsWith(".md"))
-      .filter((file) => prefixes.some((prefix) => file.path.startsWith(prefix)))
-      .length;
-  }
 }

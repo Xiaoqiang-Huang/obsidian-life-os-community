@@ -2,7 +2,8 @@
 import type PersonalLifeSystemPlugin from "./main";
 import { Setting } from "obsidian";
 import type { AiProviderType, AiReasoningEffort, AssistantStyle, AssistantVerbosity, ChatContextMode, ChatMode, ChatSendBehavior, ChatWritebackMode, DirectoryLanguage, DisplayLanguage, ExamProfileType, HeatmapRange, LlmWikiCompileDepth, LlmWikiLongMaterialMode, LlmWikiSensitiveDefault, PdfOcrEngine, ThemeStyle, WebSearchProviderType, WeixinBotPermission, WeixinSenderPolicy } from "./settings";
-import { analyzeAiConnectionTestModels, DEFAULT_SETTINGS, EXAM_PROFILE_OPTIONS, getAiProviderPreset, getExamChatModeLabel, getExamProfileLabel, getStoredAiApiKey, getStoredAiProviderConfig, getThemeStyleClasses, normalizeAiApiKeyInput, normalizeBrowserCapturePort, normalizeChatWritebackMode, normalizeThemeStyle, setStoredAiApiKey, setStoredAiProviderConfig, THEME_STYLES, validateAiProviderConfig } from "./settings";
+import { analyzeAiConnectionTestModels, DEFAULT_SETTINGS, EXAM_PROFILE_OPTIONS, getAiProviderPreset, getExamChatModeLabel, getExamProfileLabel, getStoredAiApiKey, getStoredAiProviderConfig, getThemeStyleClasses, normalizeAiApiKeyInput, normalizeBrowserCapturePort, normalizeChatWritebackMode, normalizeHiddenSidebarItems, normalizeThemeStyle, setStoredAiApiKey, setStoredAiProviderConfig, SIDEBAR_CONFIGURABLE_ITEMS, THEME_STYLES, validateAiProviderConfig } from "./settings";
+import type { LifeOSNavKey } from "./types";
 import { requireProFeature, resolveLicenseStatus } from "./licensing/entitlement";
 import { createImportedAiSkills, getAiSkillCategories, getAiSkills, getAiSkillsByCategory, normalizeAiSkillIds } from "./services/AiSkillService";
 import { getUiThemeFamilies, getUiThemeMeta, getUiThemesByFamily } from "./ui/theme";
@@ -1284,30 +1285,106 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     this.toggle(card, "启用备考模块", "显示学习打卡、目标、任务和资料等备考入口。", this.plugin.settings.enableExamModule, async (value) => {
       this.plugin.settings.enableExamModule = value;
       await this.saveImmediate("备考模块设置已保存。");
+      this.applySidebarVisibilityToCurrentPage();
+      this.display();
     });
-    this.select<ExamProfileType>(
+    if (this.plugin.settings.enableExamModule) {
+      this.select<ExamProfileType>(
+        card,
+        "备考类型 Profile",
+        `当前：${getExamProfileLabel(this.plugin.settings)}。切换后会更新聊天辅导语境、打卡指标和学习任务类型。`,
+        this.plugin.settings.examProfileType ?? "civil-service",
+        EXAM_PROFILE_OPTIONS,
+        async (value) => {
+          this.plugin.settings.examProfileType = value;
+          await this.saveImmediate("备考类型 Profile 已保存。");
+          this.display();
+        }
+      );
+      if (this.plugin.settings.examProfileType === "custom") {
+        const row = this.row(card, "自定义考试名称", "例如：考 CPA、考雅思、考编。保存后会用于 Chat 辅导标签和 AI 提示。");
+        const input = row.createEl("input", { cls: "lifeos-input", attr: { type: "text", placeholder: "例如：考 CPA" } });
+        input.value = this.plugin.settings.customExamProfileName ?? "";
+        input.onblur = async () => {
+          this.plugin.settings.customExamProfileName = input.value.trim();
+          await this.saveImmediate("自定义备考名称已保存。");
+          this.display();
+        };
+      }
+      this.info(card, "当前备考语境", `${getExamChatModeLabel(this.plugin.settings)}会用于 AI 助手，底层文件仍保存在稳定的 Exam / 备考目录下。`);
+    }
+    this.toggle(
       card,
-      "备考类型 Profile",
-      `当前：${getExamProfileLabel(this.plugin.settings)}。切换后会更新聊天辅导语境、打卡指标和学习任务类型。`,
-      this.plugin.settings.examProfileType ?? "civil-service",
-      EXAM_PROFILE_OPTIONS,
+      "任务页显示已完成任务",
+      "关闭后只隐藏任务页中的已完成列表，不会删除或修改 done.md；也可以直接让 Life OS Agent 隐藏或恢复显示。",
+      this.plugin.settings.taskManagerShowCompleted !== false,
       async (value) => {
-        this.plugin.settings.examProfileType = value;
-        await this.saveImmediate("备考类型 Profile 已保存。");
-        this.display();
+        this.plugin.settings.taskManagerShowCompleted = value;
+        await this.saveImmediate("任务页面显示设置已保存。");
+        for (const leaf of this.app.workspace.getLeavesOfType("personal-life-system-tasks")) {
+          (leaf.view as { refreshFromExternalChange?: () => void }).refreshFromExternalChange?.();
+        }
       }
     );
-    if (this.plugin.settings.examProfileType === "custom") {
-      const row = this.row(card, "自定义考试名称", "例如：考 CPA、考雅思、考编。保存后会用于 Chat 辅导标签和 AI 提示。");
-      const input = row.createEl("input", { cls: "lifeos-input", attr: { type: "text", placeholder: "例如：考 CPA" } });
-      input.value = this.plugin.settings.customExamProfileName ?? "";
-      input.onblur = async () => {
-        this.plugin.settings.customExamProfileName = input.value.trim();
-        await this.saveImmediate("自定义备考名称已保存。");
-        this.display();
-      };
+    this.renderSidebarVisibility(card);
+  }
+
+  private renderSidebarVisibility(parent: HTMLElement): void {
+    const section = parent.createDiv({ cls: "lifeos-sidebar-visibility-setting" });
+    const copy = section.createDiv({ cls: "lifeos-setting-row-copy" });
+    copy.createSpan({ cls: "lifeos-setting-label", text: "左侧功能导航" });
+    copy.createSpan({ cls: "lifeos-setting-description", text: "关闭不需要的入口；功能和数据不会被删除，仍可随时重新显示。" });
+    const grid = section.createDiv({ cls: "lifeos-sidebar-visibility-grid" });
+    const hidden = new Set(this.plugin.settings.hiddenSidebarItems || []);
+    for (const item of SIDEBAR_CONFIGURABLE_ITEMS) {
+      const label = grid.createEl("label", { cls: "lifeos-sidebar-visibility-chip" });
+      const input = label.createEl("input", { attr: { type: "checkbox" } });
+      const forcedHidden = item.key === "checkins" && !this.plugin.settings.enableExamModule;
+      input.checked = !hidden.has(item.key) && !forcedHidden;
+      input.disabled = forcedHidden;
+      label.toggleClass("is-disabled", forcedHidden);
+      label.createSpan({ text: item.label });
+      input.onchange = () => void (async () => {
+        const next = new Set(this.plugin.settings.hiddenSidebarItems || []);
+        if (input.checked) next.delete(item.key);
+        else next.add(item.key);
+        this.plugin.settings.hiddenSidebarItems = normalizeHiddenSidebarItems([...next]);
+        await this.saveImmediate("左侧导航设置已保存。");
+        this.applySidebarVisibilityToCurrentPage();
+      })();
     }
-    this.info(card, "当前备考语境", `${getExamChatModeLabel(this.plugin.settings)}会用于 AI 助手，底层文件仍保存在稳定的 Exam / 备考目录下。`);
+    const actions = section.createDiv({ cls: "lifeos-sidebar-visibility-actions" });
+    const showAll = actions.createEl("button", { text: "全部显示", attr: { type: "button" } });
+    showAll.onclick = () => void (async () => {
+      this.plugin.settings.hiddenSidebarItems = [];
+      await this.saveImmediate("已恢复全部导航入口。");
+      this.applySidebarVisibilityToCurrentPage();
+      this.display();
+    })();
+    const coreOnly = actions.createEl("button", { text: "只保留核心", attr: { type: "button" } });
+    coreOnly.onclick = () => void (async () => {
+      const core = new Set(["chat", "dashboard", "tasks", "diary", "knowledge", "settings"]);
+      this.plugin.settings.hiddenSidebarItems = normalizeHiddenSidebarItems(
+        SIDEBAR_CONFIGURABLE_ITEMS.filter((item) => !core.has(item.key)).map((item) => item.key)
+      );
+      await this.saveImmediate("已切换为核心导航。");
+      this.applySidebarVisibilityToCurrentPage();
+      this.display();
+    })();
+  }
+
+  private applySidebarVisibilityToCurrentPage(): void {
+    const hidden = new Set(this.plugin.settings.hiddenSidebarItems || []);
+    for (const item of Array.from(document.querySelectorAll<HTMLElement>(".lifeos-sidebar .lifeos-nav-item[data-nav-key]"))) {
+      const key = item.dataset.navKey || "";
+      const shouldHide = hidden.has(key as LifeOSNavKey) || (key === "checkins" && !this.plugin.settings.enableExamModule);
+      item.toggleClass("is-user-hidden", shouldHide && key !== "settings");
+    }
+    for (const group of Array.from(document.querySelectorAll<HTMLElement>(".lifeos-sidebar .lifeos-nav-section"))) {
+      const hasVisible = Array.from(group.querySelectorAll<HTMLElement>(".lifeos-nav-item"))
+        .some((item) => !item.hasClass("is-user-hidden"));
+      group.toggleClass("is-empty", !hasVisible);
+    }
   }
 
   private renderThemeGallery(parent: HTMLElement): void {
@@ -1533,10 +1610,12 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       this.plugin.settings.heatmapIncludeTasks = value;
       await this.saveImmediate("热力图统计项已保存。");
     });
-    this.toggle(card, "统计学习打卡", "学习打卡会计入当天活跃度。", this.plugin.settings.heatmapIncludeCheckins, async (value) => {
-      this.plugin.settings.heatmapIncludeCheckins = value;
-      await this.saveImmediate("热力图统计项已保存。");
-    });
+    if (this.plugin.settings.enableExamModule) {
+      this.toggle(card, "统计学习打卡", "学习打卡会计入当天活跃度。", this.plugin.settings.heatmapIncludeCheckins, async (value) => {
+        this.plugin.settings.heatmapIncludeCheckins = value;
+        await this.saveImmediate("热力图统计项已保存。");
+      });
+    }
     this.toggle(card, "统计今日复盘", "每日复盘会计入当天活跃度。", this.plugin.settings.heatmapIncludeSummaries, async (value) => {
       this.plugin.settings.heatmapIncludeSummaries = value;
       await this.saveImmediate("热力图统计项已保存。");
@@ -1694,6 +1773,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       aiApiKeys: { ...DEFAULT_SETTINGS.aiApiKeys },
       aiProviderConfigs: { ...DEFAULT_SETTINGS.aiProviderConfigs },
       reportTopics: [...DEFAULT_SETTINGS.reportTopics],
+      hiddenSidebarItems: [...DEFAULT_SETTINGS.hiddenSidebarItems],
       weixinApprovedSenders: [],
       weixinAllowedGroups: [],
       weixinPendingPairings: [],

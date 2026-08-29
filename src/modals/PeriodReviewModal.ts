@@ -1,6 +1,7 @@
 import { App, Component, Modal, Notice, TFile } from "obsidian";
 import { createButton } from "../components/Button";
 import { createModalShell } from "../components/ModalShell";
+import { hasProAccess, requireProFeature } from "../licensing/entitlement";
 import type { IPlugin } from "../plugin-api";
 import { DailyNoteService } from "../services/DailyNoteService";
 import { FileSystemService } from "../services/FileSystemService";
@@ -54,7 +55,14 @@ export class PeriodReviewModal extends Modal {
       app,
       new FileSystemService(app, plugin.getRoot(), plugin.settings.directoryLanguage),
       plugin.settings,
-      plugin.ai
+      plugin.ai,
+      {
+        hasEntitlement: () => hasProAccess(
+          plugin.settings.licenseSnapshot,
+          new Date(),
+          plugin.settings.licenseEntitlementToken
+        )
+      }
     );
     this.window = initialKind === "custom"
       ? this.service.windowFor("weekly")
@@ -229,7 +237,9 @@ export class PeriodReviewModal extends Modal {
     addFact("范围天数", `${this.daysInWindow()} 天`);
     addFact("纳入日报", `${facts.sources.length} 篇`);
     addFact("完成任务", `${facts.completedTasks.length} 项`);
-    addFact("学习打卡", `${facts.checkins.length} 次`);
+    if (this.plugin.settings.enableExamModule) {
+      addFact("学习打卡", `${facts.checkins.length} 次`);
+    }
     addFact("确认项目活动", `${facts.confirmedProjectActivities.length} 条`);
     if (facts.missingDates.length > 0) {
       section.createDiv({
@@ -239,10 +249,12 @@ export class PeriodReviewModal extends Modal {
     } else {
       section.createDiv({
         cls: "lifeos-period-review-confirmed",
-        text: "日报、任务和打卡来源已整理，可直接生成复盘草稿。"
+        text: this.plugin.settings.enableExamModule
+          ? "日报、任务和打卡来源已整理，可直接生成复盘草稿。"
+          : "日报和任务来源已整理，可直接生成复盘草稿。"
       });
     }
-    if (facts.checkins.some((item) => item.tasksCompleted > 0) && facts.completedTasks.length > 0) {
+    if (this.plugin.settings.enableExamModule && facts.checkins.some((item) => item.tasksCompleted > 0) && facts.completedTasks.length > 0) {
       section.createDiv({ cls: "lifeos-period-review-note", text: "打卡中的“完成任务”是自填指标，未与任务系统相加，避免重复统计。" });
     }
     if (facts.pendingProjectActivities.length > 0) {
@@ -382,6 +394,7 @@ export class PeriodReviewModal extends Modal {
   }
 
   private async generate(section?: string): Promise<void> {
+    if (!requireProFeature(this.plugin, "aiReviewGenerate")) return;
     const facts = this.facts;
     if (!facts) return;
     const changed = await this.service.factsSourceChanges(facts);

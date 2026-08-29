@@ -1,6 +1,8 @@
 import { App, Modal, Notice, setIcon } from "obsidian";
 import { createButton } from "../components/Button";
 import { createModalShell } from "../components/ModalShell";
+import { requireProFeature } from "../licensing/entitlement";
+import type PersonalLifeSystemPlugin from "../main";
 import {
   PROJECT_DOCUMENT_IMPORT_ACCEPT,
   ProjectDocumentService,
@@ -9,9 +11,17 @@ import {
   type ProjectDocumentTextImportMode
 } from "../services/ProjectDocumentService";
 import type { LifeOSProject } from "../types";
+import {
+  asRelativeReadableImportFile,
+  configureDirectoryInput,
+  importFileRelativePath,
+  importFileSelectionKey,
+  mergeSupportedImportFiles
+} from "../utils/import-file-selection";
 
 export class ImportProjectDocumentsModal extends Modal {
   private files: File[] = [];
+  private skippedFileCount = 0;
   private listEl: HTMLElement | null = null;
   private importButton: HTMLButtonElement | null = null;
   private progressEl: HTMLElement | null = null;
@@ -22,6 +32,7 @@ export class ImportProjectDocumentsModal extends Modal {
     app: App,
     private project: LifeOSProject,
     private service: ProjectDocumentService,
+    private plugin: PersonalLifeSystemPlugin,
     private onImported?: (documents: ProjectDocumentImportResult[]) => void | Promise<void>
   ) {
     super(app);
@@ -49,13 +60,29 @@ export class ImportProjectDocumentsModal extends Modal {
       this.addFiles(input.files);
       input.value = "";
     });
+    const directoryInput = body.createEl("input", {
+      cls: "lifeos-project-import-input",
+      attr: {
+        type: "file",
+        multiple: "true",
+        accept: PROJECT_DOCUMENT_IMPORT_ACCEPT,
+        webkitdirectory: "",
+        directory: ""
+      }
+    });
+    configureDirectoryInput(directoryInput);
+    directoryInput.addEventListener("change", () => {
+      this.addFiles(directoryInput.files);
+      directoryInput.value = "";
+    });
 
     const drop = body.createDiv({ cls: "lifeos-project-import-drop", attr: { tabindex: "0" } });
     setIcon(drop.createSpan({ cls: "lifeos-project-import-drop-icon" }), "files");
     const copy = drop.createDiv({ cls: "lifeos-project-import-drop-copy" });
     copy.createEl("strong", { text: "拖拽文件到这里，或选择文件" });
-    copy.createEl("span", { text: "PDF / Word 会先保存原件；可读正文会完整写入项目文档，再按下方选项整理为可检索 Markdown。" });
+    copy.createEl("span", { text: "可一次选择整个目录。PDF / Word 会先保存原件；可读正文会完整写入项目文档，再按下方选项整理为可检索 Markdown。" });
     createButton(drop, "选择文件", () => input.click(), { ghost: true, icon: "paperclip" });
+    createButton(drop, "选择目录", () => directoryInput.click(), { ghost: true, icon: "folder-open" });
 
     drop.addEventListener("dragover", (event) => {
       event.preventDefault();
@@ -92,14 +119,12 @@ export class ImportProjectDocumentsModal extends Modal {
   }
 
   private addFiles(fileList: FileList | File[] | null): void {
-    const nextFiles = Array.from(fileList ?? []);
-    if (nextFiles.length === 0) return;
-    const seen = new Set(this.files.map((file) => this.fileKey(file)));
-    for (const file of nextFiles) {
-      const key = this.fileKey(file);
-      if (seen.has(key)) continue;
-      this.files.push(file);
-      seen.add(key);
+    const result = mergeSupportedImportFiles(this.files, fileList, { visibleLimit: 80 });
+    if (result.added === 0 && result.skipped.length === 0 && result.duplicates === 0) return;
+    this.files = result.files;
+    this.skippedFileCount += result.skipped.length;
+    if (result.skipped.length > 0) {
+      new Notice(`已跳过 ${result.skipped.length} 个暂不支持的文件；其余 ${result.added} 个文档已加入。`, 5000);
     }
     this.renderList();
     this.syncImportButton();
@@ -113,21 +138,29 @@ export class ImportProjectDocumentsModal extends Modal {
       this.listEl.createDiv({ cls: "lifeos-project-import-empty", text: "还没有选择文件。" });
       return;
     }
-    for (const file of this.files) {
+    this.listEl.createDiv({
+      cls: "lifeos-project-import-summary",
+      text: `已选择 ${this.files.length} 个文档${this.skippedFileCount > 0 ? ` · 已跳过 ${this.skippedFileCount} 个不支持文件` : ""}`
+    });
+    for (const file of this.files.slice(0, 80)) {
       const row = this.listEl.createDiv({ cls: "lifeos-project-import-item" });
       setIcon(row.createSpan({ cls: "lifeos-project-import-item-icon" }), this.fileIcon(file));
       const copy = row.createDiv({ cls: "lifeos-project-import-item-copy" });
-      copy.createEl("strong", { text: file.name });
+      copy.createEl("strong", { text: importFileRelativePath(file) });
       copy.createSpan({ text: `${this.fileKindLabel(file)} · ${this.formatSize(file.size)}` });
       createButton(row, "移除", () => {
-        this.files = this.files.filter((item) => this.fileKey(item) !== this.fileKey(file));
+        this.files = this.files.filter((item) => importFileSelectionKey(item) !== importFileSelectionKey(file));
         this.renderList();
         this.syncImportButton();
       }, { ghost: true, icon: "x" });
     }
+    if (this.files.length > 80) {
+      this.listEl.createDiv({ cls: "lifeos-project-import-summary", text: `列表仅预览前 80 个文件，导入时会处理全部 ${this.files.length} 个文档。` });
+    }
   }
 
   private async importSelectedFiles(): Promise<void> {
+    if (!requireProFeature(this.plugin, "projectDocuments")) return;
     if (this.files.length === 0) {
       new Notice("请先选择要导入的文档。");
       return;
@@ -137,7 +170,7 @@ export class ImportProjectDocumentsModal extends Modal {
       new Notice("正在导入：先完整提取正文，再逐段 AI 整理格式…", 4000);
     }
     try {
-      const imported = await this.service.importDocuments(this.project, this.files, {
+      const imported = await this.service.importDocuments(this.project, this.files.map(asRelativeReadableImportFile), {
         textMode: this.textMode,
         onProgress: (progress) => this.renderImportProgress(progress)
       });
@@ -238,7 +271,7 @@ export class ImportProjectDocumentsModal extends Modal {
   }
 
   private fileKey(file: File): string {
-    return `${file.name}:${file.size}:${file.lastModified}`;
+    return importFileSelectionKey(file);
   }
 
   private fileIcon(file: File): string {

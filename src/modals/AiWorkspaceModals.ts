@@ -1,6 +1,7 @@
 import { App, Component, Modal, Notice, TFile, setIcon } from "obsidian";
 import { createButton } from "../components/Button";
 import { createModalShell } from "../components/ModalShell";
+import { requireProFeature } from "../licensing/entitlement";
 import type PersonalLifeSystemPlugin from "../main";
 import type { AiWorkspaceService } from "../services/AiWorkspaceService";
 import {
@@ -235,6 +236,7 @@ export class AiWorkspaceBindingModal extends Modal {
   }
 
   private async save(scanAfter: boolean): Promise<void> {
+    if (!requireProFeature(this.plugin, "projectManagement")) return;
     if (!this.binding) return;
     const workDirectories = Array.from(new Set(this.workDirectories.map((path) => path.trim()).filter(Boolean)));
     const enabledDirectSources = this.binding.tools.filter((source) =>
@@ -311,6 +313,7 @@ export class AiWorkspaceImportModal extends Modal {
     app: App,
     private project: LifeOSProject,
     private service: AiWorkspaceService,
+    private plugin: PersonalLifeSystemPlugin,
     private onImported?: (results: AiWorkspaceImportResult[]) => void | Promise<void>,
     private autoScan = false
   ) {
@@ -694,6 +697,7 @@ export class AiWorkspaceImportModal extends Modal {
   }
 
   private async importPrepared(): Promise<void> {
+    if (!requireProFeature(this.plugin, "projectManagement")) return;
     this.setBusy(true, "正在分块写入会话与版本索引…");
     try {
       const results = await this.service.importPrepared(
@@ -714,6 +718,7 @@ export class AiWorkspaceImportModal extends Modal {
   }
 
   private async ignoreSelected(): Promise<void> {
+    if (!requireProFeature(this.plugin, "projectManagement")) return;
     const keys = Array.from(this.selectedKeys);
     if (keys.length === 0) {
       new Notice("请先选择不再显示的会话。");
@@ -839,6 +844,7 @@ export class AiWorkspacePromptModal extends Modal {
   constructor(
     app: App,
     private service: AiWorkspaceService,
+    private plugin: PersonalLifeSystemPlugin,
     private projects: LifeOSProject[],
     private initial?: Partial<AiWorkspacePromptAsset> & { body?: string },
     private onSaved?: () => void | Promise<void>
@@ -886,6 +892,7 @@ export class AiWorkspacePromptModal extends Modal {
     createButton(footer, "取消", () => this.close(), { ghost: true });
     createButton(footer, "保存版本", () => void (async () => {
       try {
+        if (!requireProFeature(this.plugin, "projectDocuments")) return;
         await this.service.savePrompt({
           id: this.initial?.id,
           title: title.value,
@@ -1214,6 +1221,7 @@ export class AiWorkspaceHandoffGeneratorModal extends Modal {
   constructor(
     app: App,
     private service: AiWorkspaceService,
+    private plugin: PersonalLifeSystemPlugin,
     private session: AiWorkspaceSessionSummary,
     private onImported: () => void | Promise<void>
   ) {
@@ -1275,6 +1283,7 @@ export class AiWorkspaceHandoffGeneratorModal extends Modal {
   }
 
   private async start(): Promise<void> {
+    if (!requireProFeature(this.plugin, "projectDocuments")) return;
     this.statusEl?.setText("正在准备只读任务文件…");
     try {
       const request = await this.ensureRequest();
@@ -1300,6 +1309,7 @@ export class AiWorkspaceHandoffGeneratorModal extends Modal {
   }
 
   private async importResult(): Promise<void> {
+    if (!requireProFeature(this.plugin, "projectDocuments")) return;
     this.statusEl?.setText("正在读取并校验本地交接结果…");
     try {
       const request = await this.ensureRequest();
@@ -1326,6 +1336,7 @@ export class AiWorkspaceHandoffAddendumModal extends Modal {
   constructor(
     app: App,
     private service: AiWorkspaceService,
+    private plugin: PersonalLifeSystemPlugin,
     private session: AiWorkspaceSessionSummary,
     private initialValue: string,
     private onSaved: () => void | Promise<void>
@@ -1354,6 +1365,7 @@ export class AiWorkspaceHandoffAddendumModal extends Modal {
     createButton(footer, "取消", () => this.close(), { ghost: true });
     createButton(footer, "保存用户补充", () => void (async () => {
       try {
+        if (!requireProFeature(this.plugin, "projectDocuments")) return;
         await this.service.saveHandoffUserAddendum(this.session.id, textarea.value);
         await this.onSaved();
         new Notice("交接用户补充已保存，后续刷新不会覆盖。", 4500);

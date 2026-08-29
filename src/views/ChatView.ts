@@ -29,7 +29,12 @@ import { buildImportedAiSkillPackageMarkdown, buildImportedAiSkillRecord, compos
 import { LlmWikiIntakeService, type LlmWikiSaveInput, type LlmWikiSaveResult } from "../services/LlmWikiIntakeService";
 import { LlmWikiPathService } from "../services/LlmWikiPathService";
 import { LlmWikiUndoService } from "../services/LlmWikiUndoService";
-import type { LifeOSAgentBuildMessagesInput } from "../services/LifeOSAgentService";
+import {
+  hasLifeOSWriteIntent,
+  shouldRunLegacyChatWriteback,
+  type LifeOSAgentBuildMessagesInput
+} from "../services/LifeOSAgentService";
+import type { LifeOSAgentEvent, LifeOSAgentToolResult } from "../services/agent/LifeOSAgentTypes";
 import { CHAT_IMPORT_ACCEPT, buildImportedDocumentsContextMarkdown, buildImportedDocumentsMarkdown, buildImportedDocumentsSummary, formatAttachmentSize, formatImportedDocumentReference, readImportedFile, saveImportedFileToVault, type ImportedDocument } from "../services/DocumentImportService";
 import { PdfOcrService } from "../services/PdfOcrService";
 import { buildNumericEvidenceMarkdown, extractNumericEvidence, hasNumericIntent, type NumericEvidence } from "../services/NumericEvidenceService";
@@ -64,7 +69,7 @@ type WritebackTarget = "diary" | "knowledge" | "memory" | "project-document";
 type ProjectWhiteboardChatIntent = "generate" | "adjust";
 type ChatComposerControlId = "mode" | "project" | "model" | "skill" | "web" | "reasoning" | "context" | "aiReply" | "writeback" | "board" | "length" | "style";
 type ChatActivityStepState = "pending" | "active" | "done" | "skipped" | "error";
-type ChatActivityStepId = "analyze" | "inspect" | "retrieve" | "web" | "compose" | "generate" | "verify" | "writeback";
+type ChatActivityStepId = string;
 
 interface ChatActivityStep {
   id: ChatActivityStepId;
@@ -79,6 +84,7 @@ interface ChatActivityStep {
 interface ChatActivitySnapshot {
   id: string;
   startedAt: number;
+  finishedAt?: number;
   steps: ChatActivityStep[];
   element?: HTMLDetailsElement;
 }
@@ -219,6 +225,7 @@ export class LifeOSChatView extends ItemView {
   private skillSearchQuery = "";
   private readonly messageActivity = new WeakMap<ChatMessage, ChatActivitySnapshot>();
   private readonly projectScopeControlId = randomId("lifeos-chat-project-scope");
+  private agentSessionId = randomId("lifeos-chat-session");
 
   constructor(leaf: WorkspaceLeaf, private plugin: PersonalLifeSystemPlugin) {
     super(leaf);
@@ -297,6 +304,8 @@ export class LifeOSChatView extends ItemView {
   }
 
   private restoreActiveChatState(): void {
+    const restoredSessionId = String(this.plugin.activeChatState.sessionId || "").trim();
+    if (restoredSessionId) this.agentSessionId = restoredSessionId;
     const messages = this.plugin.activeChatState.messages ?? [];
     if (messages.length === 0) return;
     this.messages = messages
@@ -312,7 +321,8 @@ export class LifeOSChatView extends ItemView {
     this.plugin.activeChatState = {
       messages: this.messages.map((message) => ({ role: message.role, content: message.content })),
       draftInput: this.inputEl?.value ?? "",
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      sessionId: this.agentSessionId
     };
   }
 
@@ -320,7 +330,8 @@ export class LifeOSChatView extends ItemView {
     this.plugin.activeChatState = {
       messages: [],
       draftInput: "",
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      sessionId: this.agentSessionId
     };
   }
 
@@ -474,6 +485,11 @@ export class LifeOSChatView extends ItemView {
       this.diaryToggleEl?.value ?? this.plugin.settings.chatWritebackMode,
       this.plugin.settings.autoApplyChatToDaily === true
     );
+  }
+
+  private agentPermissionMode(): "read-only" | "confirm" | "explicit-auto" {
+    const mode = this.currentWritebackMode();
+    return mode === "off" ? "read-only" : mode;
   }
 
   private renderComposerControls(parent: HTMLElement, before: ChildNode | null = null): void {
@@ -2062,7 +2078,7 @@ export class LifeOSChatView extends ItemView {
       numeric: hasNumericIntent(text) || documents.some((document) => hasNumericIntent(document.text)),
       project: Boolean(this.selectedProjectScopeId) || /(项目|进度|里程碑|未完成任务|任务分析|交接|当前状态)/u.test(text),
       web: /https?:\/\//u.test(text) || shouldSearchWeb(text, this.webSearchMode),
-      writeback: /(保存|写入|记入|记录到|归档|沉淀|放到|存入|更新到)/u.test(text)
+      writeback: hasLifeOSWriteIntent(text)
     };
   }
 
@@ -2232,51 +2248,21 @@ export class LifeOSChatView extends ItemView {
       this.plugin.settings.aiSkillOverrides
     ).map((skill) => skill.name);
     const intentLabels = this.chatActivityIntentLabels(profile);
-    const attachmentNames = documents.map((document) => document.name).filter(Boolean);
     const steps: ChatActivityStep[] = [
       {
         id: "analyze",
-        label: "解析请求",
-        detail: `识别为：${intentLabels.join("、")}`,
-        state: "done",
-        elapsedMs: 0,
+        label: "理解请求",
+        detail: `正在识别目标与所需能力：${intentLabels.join("、")}`,
+        state: "active",
+        startedAt: now,
         items: [
           `工作范围：${scopeDetail}`,
           `方法：${skillNames.join(" + ") || "Life OS 总管"}`,
-          `模型：${this.chatActivityModelLabel(documents)} · 推理 ${this.reasoningEffort}`
+          `模型：${this.chatActivityModelLabel(documents)} · 推理 ${this.reasoningEffort}`,
+          willSearchWeb ? `联网：${WEB_SEARCH_MODE_LABELS[this.webSearchMode]}` : "联网：本轮暂未触发"
         ]
-      },
-      {
-        id: "inspect",
-        label: "检查输入",
-        detail: documents.length > 0 ? `正在读取 ${documents.length} 个附件` : "正在确认输入与目标",
-        state: "active",
-        startedAt: now,
-        items: attachmentNames.length > 0
-          ? [`附件：${attachmentNames.slice(0, 4).join("、")}${attachmentNames.length > 4 ? ` 等 ${attachmentNames.length} 个` : ""}`]
-          : ["附件：无"]
-      },
-      {
-        id: "retrieve",
-        label: "检索本地上下文",
-        detail: "等待输入检查完成",
-        state: "pending"
-      },
-      {
-        id: "web",
-        label: "搜索网页",
-        detail: willSearchWeb ? "等待生成联网检索请求" : "本轮未触发联网搜索",
-        state: willSearchWeb ? "pending" : "skipped",
-        elapsedMs: willSearchWeb ? undefined : 0,
-        items: willSearchWeb ? undefined : [`联网设置：${WEB_SEARCH_MODE_LABELS[this.webSearchMode]}`]
-      },
-      { id: "compose", label: "组装模型输入", detail: "等待检索结果", state: "pending" },
-      { id: "generate", label: "调用 AI 模型", detail: "等待上下文准备完成", state: "pending" },
-      { id: "verify", label: "核验回答", detail: "等待模型输出", state: "pending" }
+      }
     ];
-    if (profile.writeback || profile.documentEdit) {
-      steps.push({ id: "writeback", label: "写入 Life OS", detail: "等待识别目标和生成写回内容", state: "pending" });
-    }
     this.messageActivity.set(message, {
       id: randomId("lifeos-chat-activity"),
       startedAt: now,
@@ -2289,11 +2275,26 @@ export class LifeOSChatView extends ItemView {
     stepId: ChatActivityStepId,
     state: ChatActivityStepState,
     detail?: string,
-    items?: string[]
+    items?: string[],
+    label?: string
   ): void {
     const snapshot = this.messageActivity.get(message);
-    const step = snapshot?.steps.find((candidate) => candidate.id === stepId);
-    if (!snapshot || !step) return;
+    if (!snapshot) return;
+    let step = snapshot.steps.find((candidate) => candidate.id === stepId);
+    if (!step) {
+      // Claude Code-style progressive disclosure: an action does not exist in the
+      // UI until it actually starts or produces an observable result.
+      if (state === "pending" || state === "skipped") return;
+      step = {
+        id: stepId,
+        label: label || this.activityStepLabel(stepId),
+        detail: detail || "正在执行",
+        state,
+        startedAt: state === "active" ? Date.now() : undefined
+      };
+      snapshot.steps.push(step);
+    }
+    if (label) step.label = label;
     const now = Date.now();
     if (state === "active" && !step.startedAt) step.startedAt = now;
     if ((state === "done" || state === "skipped" || state === "error") && step.startedAt) {
@@ -2305,6 +2306,92 @@ export class LifeOSChatView extends ItemView {
       step.items = items.map((item) => this.compactActivityText(item, 180)).filter(Boolean);
     }
     if (snapshot.element?.isConnected) this.paintMessageActivity(snapshot.element, snapshot);
+  }
+
+  private activityStepLabel(stepId: ChatActivityStepId): string {
+    const labels: Record<string, string> = {
+      analyze: "理解请求",
+      inspect: "检查输入与附件",
+      retrieve: "检索 Life OS",
+      web: "联网搜索",
+      compose: "组织模型上下文",
+      generate: "生成回答",
+      verify: "核验回答",
+      persist: "保存会话记录",
+      writeback: "写入 Life OS",
+      "agent:turn": "启动 Agent 回合",
+      "agent:skill": "选择 Skill",
+      "agent:context": "准备 Agent 上下文",
+      "agent:attachment": "绑定附件",
+      "agent:plan": "规划执行步骤",
+      "agent:compact": "压缩长上下文"
+    };
+    return labels[stepId] || (stepId.startsWith("tool:") ? "调用工具" : "执行动作");
+  }
+
+  private applyAgentEventToActivity(message: ChatMessage, event: LifeOSAgentEvent): void {
+    const toolStep = this.agentToolActivityStep(event);
+    const items = [
+      event.toolId ? `工具：${event.toolId}` : "",
+      event.detail ? this.compactActivityText(event.detail, 180) : "",
+      event.durationMs !== undefined ? `耗时：${this.formatActivityElapsed(event.durationMs)}` : ""
+    ].filter(Boolean);
+    if (event.type === "turn-started") {
+      this.updateMessageActivity(message, "agent:turn", "done", event.summary, items);
+    } else if (event.type === "context-prepared") {
+      this.updateMessageActivity(message, "agent:context", "done", event.summary, items);
+    } else if (event.type === "skill-routed") {
+      this.updateMessageActivity(message, "agent:skill", "done", event.summary, items);
+    } else if (event.type === "plan-created") {
+      this.updateMessageActivity(message, "agent:plan", "done", event.summary, items);
+    } else if (event.type === "attachment-staged") {
+      this.updateMessageActivity(message, "agent:attachment", "active", event.summary, items);
+    } else if (event.type === "attachment-bound" || event.type === "attachment-referenceable") {
+      this.updateMessageActivity(message, "agent:attachment", "done", event.summary, items);
+    } else if (event.type === "tool-started" || event.type === "subagent-started") {
+      this.updateMessageActivity(message, toolStep, "active", event.summary, items, this.agentToolActivityLabel(event.toolId || ""));
+    } else if (event.type === "tool-completed" || event.type === "subagent-completed") {
+      this.updateMessageActivity(message, toolStep, "done", event.summary, items, this.agentToolActivityLabel(event.toolId || ""));
+    } else if (event.type === "tool-failed") {
+      this.updateMessageActivity(message, toolStep, "error", event.summary, items, this.agentToolActivityLabel(event.toolId || ""));
+    } else if (event.type === "tool-confirmation-required") {
+      this.updateMessageActivity(message, "writeback", "active", event.summary, items);
+    } else if (event.type === "context-compacted") {
+      this.updateMessageActivity(message, "agent:compact", "done", event.summary, items);
+    } else if (event.type === "model-started" || event.type === "model-streaming") {
+      this.updateMessageActivity(message, "generate", "active", event.summary, items);
+    } else if (event.type === "answer-verified") {
+      this.updateMessageActivity(message, "verify", "done", event.summary, items);
+    } else if (event.type === "turn-completed") {
+      this.updateMessageActivity(message, "generate", "done", event.summary, items);
+    } else if (event.type === "turn-stopped") {
+      this.updateMessageActivity(message, "generate", "error", event.summary, items);
+    }
+  }
+
+  private agentToolActivityStep(event: LifeOSAgentEvent): ChatActivityStepId {
+    const identity = event.callId || event.toolId || event.id;
+    return `tool:${identity}`;
+  }
+
+  private agentToolActivityLabel(toolId: string): string {
+    const labels: Record<string, string> = {
+      "web-search": "联网搜索网页",
+      "subagent-web": "委派联网研究",
+      vision: "识别图片",
+      "vision-analyze": "分析图片",
+      "ocr-read": "读取图片文字",
+      "lifeos-search": "检索 Life OS 知识",
+      "project-search": "检索项目上下文",
+      "diary-read": "读取日记",
+      "task-list": "读取任务",
+      "reminder-list": "读取提醒",
+      "subagent-rag": "委派知识检索",
+      "subagent-project": "委派项目分析"
+    };
+    if (labels[toolId]) return labels[toolId];
+    if (/(?:add|save|update|complete|delete|generate|cancel)$/u.test(toolId)) return "执行 Life OS 写入";
+    return toolId ? `调用 ${toolId}` : "调用 Agent 工具";
   }
 
   private renderMessageActivity(parent: HTMLElement, message: ChatMessage): void {
@@ -2326,9 +2413,8 @@ export class LifeOSChatView extends ItemView {
   private paintMessageActivity(details: HTMLDetailsElement, snapshot: ChatActivitySnapshot): void {
     const wasOpen = details.open;
     const activeStep = snapshot.steps.find((step) => step.state === "active");
-    const pendingStep = snapshot.steps.find((step) => step.state === "pending");
     const hasError = snapshot.steps.some((step) => step.state === "error");
-    const complete = !activeStep && !pendingStep;
+    const complete = typeof snapshot.finishedAt === "number";
     details.empty();
     details.removeClass("is-error", "is-complete", "is-running");
     details.addClass(hasError ? "is-error" : complete ? "is-complete" : "is-running");
@@ -2345,7 +2431,7 @@ export class LifeOSChatView extends ItemView {
           : activeStep ? `${activeStep.label}：${activeStep.detail}` : "准备中"
     });
     if (complete) {
-      summary.createSpan({ cls: "lifeos-chat-activity-time", text: this.formatActivityElapsed(Date.now() - snapshot.startedAt) });
+      summary.createSpan({ cls: "lifeos-chat-activity-time", text: this.formatActivityElapsed((snapshot.finishedAt ?? Date.now()) - snapshot.startedAt) });
     }
 
     const list = details.createDiv({ cls: "lifeos-chat-activity-list" });
@@ -2371,6 +2457,19 @@ export class LifeOSChatView extends ItemView {
       if (complete && details.open) details.addClass("is-user-open");
       if (!details.open) details.removeClass("is-user-open");
     };
+  }
+
+  private finishMessageActivity(message: ChatMessage): void {
+    const snapshot = this.messageActivity.get(message);
+    if (!snapshot) return;
+    const now = Date.now();
+    for (const step of snapshot.steps) {
+      if (step.state !== "active") continue;
+      step.state = "done";
+      step.elapsedMs = step.startedAt ? Math.max(0, now - step.startedAt) : undefined;
+    }
+    snapshot.finishedAt = now;
+    if (snapshot.element?.isConnected) this.paintMessageActivity(snapshot.element, snapshot);
   }
 
   private formatActivityElapsed(elapsedMs: number): string {
@@ -2533,6 +2632,7 @@ export class LifeOSChatView extends ItemView {
     let documentEditPromptContext = "";
     let estimatedInputTokens = 0;
     let resultUsage: AiUsage | undefined;
+    let agentToolResults: LifeOSAgentToolResult[] = [];
     const runStartedAt = Date.now();
     let contextStartedAt = runStartedAt;
     let contextMs = 0;
@@ -2574,6 +2674,18 @@ export class LifeOSChatView extends ItemView {
         ? "正在提炼搜索问题，并行检索本地资料与网页..."
         : "正在定位与当前问题相关的本地上下文...");
       contextStartedAt = Date.now();
+      this.updateMessageActivity(
+        assistant,
+        "analyze",
+        "done",
+        `已识别为：${this.chatActivityIntentLabels(requestProfile).join("、")}`
+      );
+      this.updateMessageActivity(
+        assistant,
+        "inspect",
+        "active",
+        documents.length > 0 ? `正在读取 ${documents.length} 个附件并确认目标` : "正在确认输入、目标与写入意图"
+      );
       documentEditTarget = await this.resolveDocumentEditTarget(content);
       documentEditPromptContext = formatAiDocumentEditTargetForPrompt(documentEditTarget, content);
       const importedContextMarkdown = buildImportedDocumentsContextMarkdown(documents, content || "请分析这些导入文件。");
@@ -2697,6 +2809,12 @@ export class LifeOSChatView extends ItemView {
         ...agentInput,
         contextBundle: this.lastContextBundle
       });
+      // Preparation happens before the model request. Paint those observable
+      // actions now so the trace follows real execution order instead of
+      // replaying them only after “生成回答” has appeared.
+      for (const event of preparedAgentTurn.preparationEvents) {
+        this.applyAgentEventToActivity(assistant, event);
+      }
       const aiMessages = preparedAgentTurn.messages;
       estimatedInputTokens = this.estimateAiMessagesTokens(aiMessages);
       const selectedSkillNames = getAiSkills(
@@ -2736,7 +2854,10 @@ export class LifeOSChatView extends ItemView {
         {
           temperature: this.mode === "exam" ? 0.25 : 0.45,
           model: this.visionRequestModel(documents),
-          reasoningEffort: this.reasoningEffort
+          reasoningEffort: this.reasoningEffort,
+          permissionMode: this.agentPermissionMode(),
+          explicitWriteIntent: requestProfile.writeback,
+          forcePlanner: requestProfile.writeback
         },
         {
           onStart: () => {
@@ -2752,6 +2873,9 @@ export class LifeOSChatView extends ItemView {
                 `输入估算：${estimatedInputTokens.toLocaleString()} token`
               ]
             );
+          },
+          onAgentEvent: (event) => {
+            this.applyAgentEventToActivity(assistant, event);
           },
           onToken: (token) => {
             streamed += token;
@@ -2801,6 +2925,7 @@ export class LifeOSChatView extends ItemView {
         this.abortController.signal
       );
       resultUsage = result.response.usage;
+      agentToolResults = result.toolResults;
 
       if (!result.ok && runState.status !== "interrupted") {
         runState.status = "error";
@@ -2894,7 +3019,15 @@ export class LifeOSChatView extends ItemView {
       this.scrollLogToBottom();
       this.renderRuntimeStatus(service);
       this.persistActiveChatState();
-      await service.saveConversation(this.messages, this.saveOptions(runState.status, this.lastContextBundle?.contextSources));
+      this.updateMessageActivity(assistant, "persist", "active", "正在保存本轮会话与来源索引");
+      try {
+        await service.saveConversation(this.messages, this.saveOptions(runState.status, this.lastContextBundle?.contextSources));
+        this.updateMessageActivity(assistant, "persist", "done", "会话记录已保存，可在聊天历史中继续");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.updateMessageActivity(assistant, "persist", "error", `会话保存失败：${message}`);
+        new Notice(`回答已保留，但会话记录保存失败：${message}`, 7000);
+      }
       const requestedWriteTarget = this.detectRequestedWriteTarget(content);
       const writebackCandidates: RecognizedWritebackCandidates = {
         diary: this.parseDiaryWriteback(assistant.content),
@@ -2902,7 +3035,8 @@ export class LifeOSChatView extends ItemView {
         memory: this.parseMemoryWriteback(assistant.content)
       };
       const documentEditCandidate = parseAiDocumentEditCandidate(assistant.content, documentEditTarget);
-      if (runState.status === "completed" && documentEditCandidate) {
+      const runLegacyWriteback = shouldRunLegacyChatWriteback(this.currentWritebackMode(), agentToolResults);
+      if (runState.status === "completed" && runLegacyWriteback && documentEditCandidate) {
         this.updateMessageActivity(
           assistant,
           "writeback",
@@ -2926,10 +3060,12 @@ export class LifeOSChatView extends ItemView {
           this.updateMessageActivity(assistant, "writeback", "error", `写入失败：${message}`);
           new Notice(`AI 写入失败：${message}`, 6000);
         }
+        this.finishMessageActivity(assistant);
         return;
       }
       if (
         runState.status === "completed"
+        && runLegacyWriteback
         && this.shouldOfferWritebackTargetChoice(content, assistant.content, writebackCandidates, requestedWriteTarget)
       ) {
         const targetLabel = requestedWriteTarget
@@ -2970,10 +3106,18 @@ export class LifeOSChatView extends ItemView {
           new Notice(`AI 写入失败：${message}`, 6000);
         }
       } else if (runState.status === "completed") {
-        this.updateMessageActivity(assistant, "writeback", "skipped", "没有需要执行的写入操作");
+        const detail = this.currentWritebackMode() === "off"
+          ? "当前为只问答模式，本轮不会写入或弹出写入预览"
+          : agentToolResults.some((result) => result.needsConfirmation)
+            ? "统一 Agent 已发起写入确认，不再重复打开旧写回流程"
+            : agentToolResults.length > 0 && !runLegacyWriteback
+              ? "写入已由统一 Agent 处理，不再重复执行旧写回流程"
+              : "没有需要执行的写入操作";
+        this.updateMessageActivity(assistant, "writeback", "skipped", detail);
       } else {
         this.updateMessageActivity(assistant, "writeback", "skipped", "回答未完成，本轮未执行写入");
       }
+      this.finishMessageActivity(assistant);
     }
   }
 
@@ -3108,6 +3252,7 @@ export class LifeOSChatView extends ItemView {
       }));
     return {
       channel: "desktop",
+      sessionId: this.agentSessionId,
       content,
       history,
       context,
@@ -3791,6 +3936,7 @@ export class LifeOSChatView extends ItemView {
   }
 
   private startNewConversation(): void {
+    this.agentSessionId = randomId("lifeos-chat-session");
     this.messages = [];
     this.importedDocuments = [];
     this.lastImportedDocuments = [];

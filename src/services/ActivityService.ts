@@ -101,7 +101,7 @@ export class ActivityService {
         if (dailySignal.hasLongBody) score += 1;
       }
       if (this.settings.heatmapIncludeTasks) score += completedTaskCount;
-      if (this.settings.heatmapIncludeCheckins && checkinExists) score += 1;
+      if (this.settings.enableExamModule && this.settings.heatmapIncludeCheckins && checkinExists) score += 1;
       if (this.settings.heatmapIncludeSummaries && summaryExists) score += 1;
 
       const activity: DailyActivity = {

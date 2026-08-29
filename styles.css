@@ -2276,6 +2276,364 @@ body.is-mobile .lifeos-theme-swatch-desc,
   }
 }
 
+/* Life OS task manager progressive loading and large-list layout final guard start. */
+.lifeos-task-workspace,
+.lifeos-task-workspace * {
+  box-sizing: border-box;
+}
+
+.lifeos-task-workspace.is-loading {
+  min-height: 100%;
+}
+
+.lifeos-task-loading-header,
+.lifeos-task-loading-status,
+.lifeos-project-doc-loading-status {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+.lifeos-task-loading-status,
+.lifeos-project-doc-loading-status {
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid var(--lifeos-border, var(--background-modifier-border));
+  border-radius: 10px;
+  color: var(--lifeos-muted, var(--text-muted));
+  background: var(--lifeos-surface-soft, var(--background-secondary));
+  white-space: nowrap;
+}
+
+.lifeos-task-loading-stats,
+.lifeos-task-loading-layout,
+.lifeos-task-loading-detail,
+.lifeos-task-loading-panel,
+.lifeos-project-doc-loading-rows {
+  min-width: 0;
+}
+
+.lifeos-task-loading-card {
+  align-items: center;
+}
+
+.lifeos-task-loading-panel,
+.lifeos-task-loading-detail,
+.lifeos-project-doc-panel.is-loading {
+  overflow: hidden !important;
+}
+
+.lifeos-task-loading-detail,
+.lifeos-project-doc-loading-rows {
+  display: grid;
+  gap: 12px;
+}
+
+.lifeos-task-skeleton {
+  display: block;
+  min-width: 0;
+  border-radius: 9px;
+  background: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--lifeos-surface-soft, var(--background-secondary)) 88%, transparent),
+    color-mix(in srgb, var(--lifeos-primary, var(--interactive-accent)) 9%, var(--lifeos-surface, var(--background-primary))),
+    color-mix(in srgb, var(--lifeos-surface-soft, var(--background-secondary)) 88%, transparent)
+  );
+}
+
+.lifeos-task-skeleton.is-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+}
+
+.lifeos-task-skeleton.is-value {
+  width: 58px;
+  height: 20px;
+  margin-bottom: 7px;
+}
+
+.lifeos-task-skeleton.is-caption {
+  width: min(100%, 110px);
+  height: 10px;
+  margin-top: 7px;
+}
+
+.lifeos-task-skeleton.is-row {
+  width: 100%;
+  height: 56px;
+}
+
+.lifeos-task-skeleton.is-panel {
+  width: 100%;
+  height: 118px;
+}
+
+.lifeos-task-skeleton.is-document-row {
+  width: 100%;
+  height: 42px;
+}
+
+.lifeos-task-load-error {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  margin: 18px 0;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--text-error) 30%, var(--lifeos-border));
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--text-error) 6%, var(--lifeos-surface));
+}
+
+.lifeos-task-load-error h2,
+.lifeos-task-load-error p {
+  margin: 0;
+}
+
+.lifeos-task-load-error p {
+  margin-top: 4px;
+  color: var(--lifeos-muted, var(--text-muted));
+}
+
+.lifeos-task-load-error-icon {
+  color: var(--text-error);
+}
+
+.lifeos-project-doc-slot {
+  display: block;
+  min-width: 0;
+}
+
+.lifeos-project-doc-panel.is-loading {
+  min-height: 172px;
+}
+
+.lifeos-task-workspace .lifeos-board {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)) !important;
+  align-items: start !important;
+  gap: 12px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  overflow: visible !important;
+  padding-bottom: 0 !important;
+}
+
+.lifeos-task-workspace .lifeos-board.is-completed-hidden {
+  grid-template-columns: repeat(3, minmax(min(100%, 240px), 1fr)) !important;
+}
+
+.lifeos-task-workspace .lifeos-board-column {
+  align-content: start !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: auto !important;
+  overflow: visible !important;
+}
+
+.lifeos-task-workspace .lifeos-board-column-list {
+  display: grid !important;
+  gap: 8px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
+  padding: 0 !important;
+  scrollbar-gutter: auto !important;
+  overscroll-behavior: auto !important;
+}
+
+.lifeos-task-workspace .lifeos-board-card {
+  display: grid !important;
+  align-content: start !important;
+  gap: 9px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: auto !important;
+  overflow: visible !important;
+}
+
+.lifeos-task-workspace .lifeos-board-card-top,
+.lifeos-task-workspace .lifeos-board-card-title,
+.lifeos-task-workspace .lifeos-board-card-title .lifeos-markdown-content,
+.lifeos-task-workspace .lifeos-board-card-title .markdown-rendered {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: visible !important;
+}
+
+.lifeos-task-workspace .lifeos-board-card-title :is(p, div, span) {
+  max-width: 100% !important;
+  margin-block: 0 !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+}
+
+.lifeos-task-workspace .lifeos-board-card-meta {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  min-width: 0 !important;
+}
+
+.lifeos-task-workspace .lifeos-board-card-actions {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  align-items: stretch !important;
+  gap: 6px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.lifeos-task-workspace .lifeos-board-card-actions .lifeos-button.lifeos-board-card-action {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 5px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  margin: 0 !important;
+  padding: 5px 7px !important;
+  border-radius: 10px !important;
+  font-size: 12px !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-task-workspace .lifeos-board-card-actions .lifeos-button.lifeos-board-card-action :is(svg, .lifeos-button-icon) {
+  width: 14px !important;
+  height: 14px !important;
+  min-width: 14px !important;
+}
+
+.lifeos-board-column-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.lifeos-board-column-count {
+  color: var(--lifeos-muted, var(--text-muted));
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.lifeos-board-column-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.lifeos-board-column-footer-actions .lifeos-button {
+  min-height: 30px !important;
+  padding: 5px 9px !important;
+  border-radius: 9px !important;
+  font-size: 11px !important;
+}
+
+.lifeos-task-workspace .lifeos-task-batch-toolbar {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.lifeos-task-workspace .lifeos-task-batch-actions {
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.modal.lifeos-batch-edit-modal-host .lifeos-task-batch-edit-modal {
+  width: min(760px, 92vw);
+  max-width: min(760px, 92vw);
+}
+
+.lifeos-task-batch-edit-summary {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--lifeos-border, var(--background-modifier-border));
+  border-radius: 12px;
+  background: var(--lifeos-surface-soft, var(--background-secondary));
+}
+
+.lifeos-task-batch-edit-summary span,
+.lifeos-task-batch-edit-field > p {
+  margin: 0;
+  color: var(--lifeos-muted, var(--text-muted));
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.lifeos-task-batch-edit-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.lifeos-task-batch-edit-field {
+  display: grid !important;
+  align-content: start;
+  gap: 6px !important;
+  min-width: 0;
+}
+
+.lifeos-task-batch-edit-field :is(input, select) {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.lifeos-task-batch-date-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+
+.lifeos-task-batch-date-controls input:disabled {
+  opacity: 0.55;
+}
+
+@media (max-width: 1180px) {
+  .lifeos-task-workspace .lifeos-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .lifeos-task-loading-status {
+    justify-self: start;
+  }
+
+  .lifeos-task-load-error,
+  .lifeos-task-batch-edit-form,
+  .lifeos-task-batch-date-controls,
+  .lifeos-task-workspace .lifeos-board {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-task-workspace .lifeos-task-batch-actions,
+  .lifeos-board-column-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .lifeos-task-workspace .lifeos-task-batch-actions .lifeos-button,
+  .lifeos-board-column-footer-actions,
+  .lifeos-board-column-footer-actions .lifeos-button {
+    width: 100% !important;
+  }
+}
+/* Life OS task manager progressive loading and large-list layout final guard end. */
+
 .pls-interview-model-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -29205,6 +29563,351 @@ body.is-mobile .lifeos-settings select,
   .lifeos-v2 * {
     animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
+  }
+}
+
+/* 2026-08 task operations, optional navigation and prompt studio */
+.lifeos-root .lifeos-nav-item.is-user-hidden,
+.lifeos-root .lifeos-nav-section.is-empty {
+  display: none !important;
+}
+
+.lifeos-sidebar-visibility-setting {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--lifeos-border);
+  border-radius: 12px;
+  background: var(--lifeos-surface-soft);
+}
+
+.lifeos-sidebar-visibility-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
+  gap: 7px;
+}
+
+.lifeos-sidebar-visibility-chip {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 1px solid var(--lifeos-border);
+  border-radius: 10px;
+  background: var(--lifeos-surface);
+  cursor: pointer;
+}
+
+.lifeos-sidebar-visibility-chip.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.lifeos-sidebar-visibility-chip input,
+.lifeos-task-select,
+.lifeos-task-select-all {
+  margin: 0;
+  accent-color: var(--lifeos-primary);
+}
+
+.lifeos-sidebar-visibility-actions,
+.lifeos-task-batch-actions,
+.lifeos-ai-workspace-prompt-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.lifeos-task-batch-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--lifeos-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--lifeos-surface) 94%, transparent);
+  box-shadow: var(--lifeos-shadow-subtle);
+  backdrop-filter: blur(12px);
+}
+
+.lifeos-task-batch-selection {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 2px 8px;
+  min-width: 150px;
+}
+
+.lifeos-task-batch-selection > span {
+  grid-column: 2;
+  color: var(--lifeos-muted-2);
+  font-size: 11px;
+}
+
+.lifeos-board-column-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(58vh, 680px);
+  overflow: auto;
+  padding: 2px 3px 4px 1px;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+.lifeos-board-card {
+  transition: border-color 140ms ease, background-color 140ms ease, opacity 140ms ease;
+}
+
+.lifeos-board-card.is-selected {
+  border-color: color-mix(in srgb, var(--lifeos-primary) 66%, var(--lifeos-border));
+  background: color-mix(in srgb, var(--lifeos-primary) 7%, var(--lifeos-surface));
+}
+
+.lifeos-board-card.is-updating {
+  pointer-events: none;
+  opacity: 0.58;
+}
+
+.lifeos-board-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.lifeos-board-card-actions .lifeos-button {
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 12px;
+}
+
+.lifeos-task-edit-form {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(160px, 1fr);
+  gap: 12px;
+}
+
+.lifeos-task-delete-warning {
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--text-error) 35%, var(--lifeos-border));
+  border-radius: 12px;
+  color: var(--text-error);
+  background: color-mix(in srgb, var(--text-error) 8%, var(--lifeos-surface));
+}
+
+.lifeos-prompt-studio-modal {
+  width: min(1120px, 94vw);
+  max-width: min(1120px, 94vw);
+}
+
+.lifeos-prompt-studio-form,
+.lifeos-prompt-studio-context-controls,
+.lifeos-prompt-studio-comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.lifeos-prompt-studio-form .lifeos-form-field-wide,
+.lifeos-prompt-studio-form > .lifeos-form-field:first-child,
+.lifeos-prompt-studio-context,
+.lifeos-prompt-studio-status,
+.lifeos-prompt-studio-analysis,
+.lifeos-prompt-studio-preview {
+  grid-column: 1 / -1;
+}
+
+.lifeos-prompt-studio-form textarea {
+  min-height: 112px;
+  resize: vertical;
+}
+
+.lifeos-prompt-studio-field-head,
+.lifeos-prompt-studio-section-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.lifeos-prompt-studio-field-head {
+  justify-content: space-between;
+}
+
+.lifeos-prompt-studio-field-head > span,
+.lifeos-prompt-studio-section-head span,
+.lifeos-prompt-studio-document-row small {
+  color: var(--lifeos-muted-2);
+  font-size: 11px;
+}
+
+.lifeos-prompt-studio-section-head > div {
+  display: grid;
+  gap: 2px;
+}
+
+.lifeos-prompt-studio-context,
+.lifeos-prompt-studio-analysis,
+.lifeos-prompt-studio-preview {
+  display: grid;
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid var(--lifeos-border);
+  border-radius: 14px;
+  background: var(--lifeos-surface-soft);
+}
+
+.lifeos-prompt-studio-status {
+  padding: 9px 12px;
+  border-radius: 10px;
+  color: var(--lifeos-muted);
+  background: var(--lifeos-surface-soft);
+}
+
+.lifeos-prompt-studio-status.is-running {
+  color: var(--lifeos-primary);
+}
+
+.lifeos-prompt-studio-status.is-success {
+  color: var(--text-success);
+  background: color-mix(in srgb, var(--text-success) 8%, var(--lifeos-surface));
+}
+
+.lifeos-prompt-studio-status.is-attention {
+  color: var(--text-warning);
+  background: color-mix(in srgb, var(--text-warning) 8%, var(--lifeos-surface));
+}
+
+.lifeos-prompt-studio-status.is-error {
+  color: var(--text-error);
+  background: color-mix(in srgb, var(--text-error) 8%, var(--lifeos-surface));
+}
+
+.lifeos-prompt-studio-documents {
+  border-top: 1px solid var(--lifeos-border);
+  padding-top: 9px;
+}
+
+.lifeos-prompt-studio-documents > summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.lifeos-prompt-studio-document-body {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+}
+
+.lifeos-prompt-studio-document-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.lifeos-prompt-studio-document-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 8px;
+  border: 1px solid var(--lifeos-border);
+  border-radius: 10px;
+  background: var(--lifeos-surface);
+}
+
+.lifeos-prompt-studio-document-row > span {
+  display: grid;
+  min-width: 0;
+}
+
+.lifeos-prompt-studio-document-row :is(strong, small) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.lifeos-prompt-studio-assumptions,
+.lifeos-prompt-studio-questions,
+.lifeos-prompt-studio-checklist {
+  display: grid;
+  gap: 7px;
+}
+
+.lifeos-prompt-studio-assumptions > div,
+.lifeos-prompt-studio-checklist > div {
+  position: relative;
+  padding-left: 16px;
+}
+
+.lifeos-prompt-studio-assumptions > div::before,
+.lifeos-prompt-studio-checklist > div::before {
+  position: absolute;
+  left: 2px;
+  content: "•";
+  color: var(--lifeos-primary);
+}
+
+.lifeos-prompt-studio-comparison.is-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.lifeos-prompt-studio-preview-pane {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--lifeos-border);
+  border-radius: 12px;
+  background: var(--lifeos-surface);
+}
+
+.lifeos-prompt-studio-preview-pane.is-candidate {
+  border-color: color-mix(in srgb, var(--lifeos-primary) 38%, var(--lifeos-border));
+}
+
+.lifeos-prompt-studio-preview-pane pre,
+.lifeos-prompt-studio-candidate {
+  max-height: 360px;
+  min-height: 220px;
+  overflow: auto;
+  margin: 0;
+  padding: 11px;
+  border: 1px solid var(--lifeos-border);
+  border-radius: 10px;
+  color: var(--lifeos-text);
+  background: var(--lifeos-surface-soft);
+  font: inherit;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 900px) {
+  .lifeos-task-batch-toolbar,
+  .lifeos-prompt-studio-field-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .lifeos-task-edit-form,
+  .lifeos-prompt-studio-form,
+  .lifeos-prompt-studio-context-controls,
+  .lifeos-prompt-studio-comparison,
+  .lifeos-prompt-studio-document-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lifeos-board-column-list {
+    max-height: none;
   }
 }
 
@@ -58568,3 +59271,316 @@ body.is-mobile .lifeos-period-review-modal .lifeos-period-review-draft-actions >
   }
 }
 /* Life OS chat history drawer layout final guard end */
+/* Life OS stable task refresh, folder import, and full knowledge document manager */
+.lifeos-board-card.is-updating {
+  pointer-events: none;
+  opacity: 0.68;
+}
+
+.lifeos-board-card.is-updating input[type="checkbox"] {
+  accent-color: var(--interactive-accent);
+}
+
+/* Keep the undo affordance out of document flow so completing a task never
+   shifts the board a second time after the stable DOM swap. */
+.lifeos-task-workspace > .lifeos-toast {
+  position: fixed;
+  right: max(24px, env(safe-area-inset-right));
+  bottom: max(24px, env(safe-area-inset-bottom));
+  z-index: var(--layer-notice, 1000);
+  max-width: min(420px, calc(100vw - 48px));
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--lifeos-green) 28%, var(--background-modifier-border));
+  box-shadow: var(--shadow-s);
+}
+
+.lifeos-knowledge-doc-manager {
+  min-width: 0;
+}
+
+.lifeos-knowledge-doc-header,
+.lifeos-knowledge-doc-toolbar,
+.lifeos-knowledge-doc-item,
+.lifeos-knowledge-doc-title,
+.lifeos-knowledge-doc-meta,
+.lifeos-knowledge-doc-actions,
+.lifeos-knowledge-doc-item-actions {
+  display: flex;
+  align-items: center;
+}
+
+.lifeos-knowledge-doc-header {
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.lifeos-knowledge-doc-header-copy {
+  min-width: 0;
+}
+
+.lifeos-knowledge-doc-header-copy > p {
+  margin: 5px 0 0;
+  color: var(--text-muted);
+}
+
+.lifeos-knowledge-doc-actions {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.lifeos-knowledge-doc-toolbar {
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.lifeos-knowledge-doc-search,
+.lifeos-knowledge-doc-category {
+  min-height: 36px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 10px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+}
+
+.lifeos-knowledge-doc-search {
+  flex: 1 1 320px;
+  min-width: 160px;
+  padding-inline: 12px;
+}
+
+.lifeos-knowledge-doc-category {
+  flex: 0 1 190px;
+  min-width: 130px;
+  padding-inline: 10px 30px;
+}
+
+.lifeos-knowledge-doc-scroll {
+  max-height: min(52vh, 620px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+  background: var(--background-primary);
+}
+
+.lifeos-knowledge-doc-item {
+  gap: 12px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.lifeos-knowledge-doc-item:last-child {
+  border-bottom: 0;
+}
+
+.lifeos-knowledge-doc-item:hover,
+.lifeos-knowledge-doc-item:focus-visible {
+  outline: none;
+  background: var(--background-secondary);
+}
+
+.lifeos-knowledge-doc-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.lifeos-knowledge-doc-title {
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--text-normal);
+  font-weight: 650;
+}
+
+.lifeos-knowledge-doc-title > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-knowledge-doc-excerpt {
+  display: -webkit-box;
+  max-width: 100%;
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.88em;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.lifeos-knowledge-doc-meta {
+  gap: 8px 14px;
+  min-width: 0;
+  max-width: 100%;
+  margin-top: 6px;
+  color: var(--text-faint);
+  font-size: 0.78em;
+}
+
+.lifeos-knowledge-doc-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifeos-knowledge-doc-meta span:last-child {
+  flex: 1 1 auto;
+}
+
+.lifeos-knowledge-doc-item-actions {
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.lifeos-knowledge-doc-more,
+.lifeos-knowledge-import-selection-summary,
+.lifeos-project-import-summary {
+  padding: 9px 12px;
+  color: var(--text-muted);
+  font-size: 0.82em;
+  text-align: center;
+}
+
+.lifeos-knowledge-doc-more {
+  display: flex;
+  justify-content: center;
+}
+
+.lifeos-knowledge-import-file-row > span:first-child,
+.lifeos-project-import-item-copy > strong {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .lifeos-knowledge-doc-header,
+  .lifeos-knowledge-doc-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .lifeos-knowledge-doc-actions {
+    justify-content: flex-start;
+  }
+
+  .lifeos-knowledge-doc-search,
+  .lifeos-knowledge-doc-category {
+    flex-basis: auto;
+    width: 100%;
+  }
+
+  .lifeos-knowledge-doc-item {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .lifeos-knowledge-doc-copy,
+  .lifeos-knowledge-doc-title,
+  .lifeos-knowledge-doc-excerpt,
+  .lifeos-knowledge-doc-meta {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .lifeos-knowledge-doc-title,
+  .lifeos-knowledge-doc-meta {
+    flex-wrap: wrap;
+  }
+
+  .lifeos-knowledge-doc-title > span:first-child {
+    flex: 1 1 160px;
+  }
+
+  .lifeos-knowledge-doc-meta span:last-child {
+    flex-basis: 100%;
+  }
+
+  .lifeos-knowledge-doc-item-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
+/* Life OS modal close alignment: one final layout contract for every plugin dialog. */
+.modal.lifeos-modal-host,
+.modal:has(.pls-modal),
+.modal:has(.lifeos-github-skill-modal),
+.modal:has(.lifeos-pro-required-modal) {
+  position: relative !important;
+}
+
+body .modal.lifeos-modal-host.lifeos-modal-host .modal-close-button,
+body .modal:has(.pls-modal) .modal-close-button,
+body .modal:has(.lifeos-github-skill-modal) .modal-close-button,
+body .modal:has(.lifeos-pro-required-modal) .modal-close-button {
+  position: absolute !important;
+  inset: 8px 8px auto auto !important;
+  width: 32px !important;
+  min-width: 32px !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: grid !important;
+  place-items: center !important;
+  transform: none !important;
+  line-height: 1 !important;
+  z-index: 100 !important;
+}
+
+body .modal.lifeos-modal-host.lifeos-modal-host .modal-close-button :is(svg, path),
+body .modal:has(.pls-modal) .modal-close-button :is(svg, path),
+body .modal:has(.lifeos-github-skill-modal) .modal-close-button :is(svg, path),
+body .modal:has(.lifeos-pro-required-modal) .modal-close-button :is(svg, path) {
+  margin: 0 !important;
+  transform: none !important;
+}
+
+body .modal.lifeos-modal-host.lifeos-modal-host :is(.lifeos-modal-header, .lifeos-quick-header),
+body .modal:has(.pls-modal) .pls-modal > :is(h1, h2, .pls-modal-hero):first-child,
+body .modal:has(.lifeos-github-skill-modal) .lifeos-github-skill-hero,
+body .modal:has(.lifeos-pro-required-modal) .lifeos-pro-required-modal > h2:first-child {
+  padding-right: 56px !important;
+}
+
+@media (max-width: 520px) {
+  body .modal.lifeos-modal-host.lifeos-modal-host .modal-close-button,
+  body .modal:has(.pls-modal) .modal-close-button,
+  body .modal:has(.lifeos-github-skill-modal) .modal-close-button,
+  body .modal:has(.lifeos-pro-required-modal) .modal-close-button {
+    inset: 6px 6px auto auto !important;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+  }
+}
+/* Keep icon and label foreground synchronized with the actual button state.
+   Obsidian and third-party themes may otherwise tint nested spans independently. */
+.lifeos-root :is(button.lifeos-button, button.lifeos-v2-button) > :is(.lifeos-v2-button-label, .lifeos-v2-button-icon, .lifeos-button-icon),
+.modal.lifeos-modal-host :is(button.lifeos-button, button.lifeos-v2-button) > :is(.lifeos-v2-button-label, .lifeos-v2-button-icon, .lifeos-button-icon) {
+  color: inherit !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
+
+html body .modal.lifeos-modal-host.lifeos-modal-host button.lifeos-v2-button.lifeos-v2-button > span.lifeos-v2-button-label.lifeos-v2-button-label,
+html body .modal.lifeos-modal-host.lifeos-modal-host button.lifeos-v2-button.lifeos-v2-button > span.lifeos-v2-button-icon.lifeos-v2-button-icon,
+html body .modal.lifeos-modal-host.lifeos-modal-host button.lifeos-v2-button.lifeos-v2-button > span.lifeos-button-icon.lifeos-button-icon {
+  color: inherit !important;
+  -webkit-text-fill-color: currentColor !important;
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
