@@ -124,7 +124,9 @@ export class ReviewEvidenceService {
     const [completedTasks, openTasks, checkins, projectActivities] = await Promise.all([
       this.collectCompletedTasks(window),
       this.collectOpenTasks(),
-      this.collectCheckins(window),
+      this.settings.enableExamModule
+        ? this.collectCheckins(window)
+        : Promise.resolve([] as ReviewCheckinEvidence[]),
       this.collectProjectActivities(window)
     ]);
     const confirmedProjectActivities = projectActivities.filter((item) => item.status === "confirmed");

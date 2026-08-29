@@ -1,6 +1,8 @@
 import { App, Modal, Notice } from "obsidian";
 import { createButton } from "../components/Button";
 import { createModalShell } from "../components/ModalShell";
+import { requireProFeature } from "../licensing/entitlement";
+import type PersonalLifeSystemPlugin from "../main";
 import { ProjectDocumentService } from "../services/ProjectDocumentService";
 import type { LifeOSProject, LifeOSProjectDocument, LifeOSProjectDocumentKind } from "../types";
 
@@ -9,6 +11,7 @@ export class NewProjectDocumentModal extends Modal {
     app: App,
     private project: LifeOSProject,
     private service: ProjectDocumentService,
+    private plugin: PersonalLifeSystemPlugin,
     private onSaved?: (document: LifeOSProjectDocument) => void | Promise<void>
   ) {
     super(app);
@@ -54,6 +57,7 @@ export class NewProjectDocumentModal extends Modal {
           return;
         }
         try {
+          if (!requireProFeature(this.plugin, "projectDocuments")) return;
           const document = await this.service.createDocument(this.project, {
             title: cleanTitle,
             kind: kind.value as LifeOSProjectDocumentKind,

@@ -3,6 +3,8 @@ import { ensureFile, ensureFolder, readFile } from "../../utils/vault";
 import { FileSystemService } from "../FileSystemService";
 import { getWeixinImageContentParts, type WeixinInboundRequest } from "./WeixinBotLogic";
 
+export type WeixinAttachmentState = "pending" | "bound" | "consumed" | "referenceable" | "archived";
+
 export interface WeixinStoredImage {
   id: string;
   vaultPath: string;
@@ -10,6 +12,10 @@ export interface WeixinStoredImage {
   name: string;
   createdAt: string;
   sourceMessageId: string;
+  state: WeixinAttachmentState;
+  boundTurnId: string;
+  consumedAt: string;
+  lastReferencedAt: string;
 }
 
 export interface WeixinPendingOperation {
@@ -77,7 +83,13 @@ export class WeixinConversationStateService {
         continue;
       }
       const stored = await this.persistImage(request, media, dataUrl, index);
-      persistedMedia.push({ ...media, vaultPath: stored.vaultPath });
+      persistedMedia.push({
+        ...media,
+        vaultPath: stored.vaultPath,
+        attachmentId: stored.id,
+        sourceMessageId: stored.sourceMessageId,
+        attachmentState: stored.state
+      });
       storedImages.push(stored);
     }
     if (storedImages.length > 0) {
@@ -95,19 +107,76 @@ export class WeixinConversationStateService {
   async hydrateRecentImages(request: WeixinInboundRequest): Promise<WeixinInboundRequest> {
     if (getWeixinImageContentParts(request.media).length > 0) return request;
     const state = await this.load(request);
-    const latest = state.recentImages[state.recentImages.length - 1];
+    const candidates = state.recentImages.filter((item) => item.state !== "archived");
+    const latest = candidates[candidates.length - 1];
     // Rehydrate the latest message batch, not every image seen in the last
     // three days. This keeps “用另一种 Skill 解前面那道题” deterministic and
     // avoids silently mixing unrelated screenshots from older turns.
     const images = latest
-      ? state.recentImages.filter((item) => item.sourceMessageId === latest.sourceMessageId).slice(-4)
+      ? candidates.filter((item) => item.sourceMessageId === latest.sourceMessageId).slice(-4)
       : [];
     const hydrated: unknown[] = [];
     for (const image of images) {
       const media = await this.hydrateImage(image).catch(() => null);
       if (media) hydrated.push(media);
     }
-    return hydrated.length > 0 ? { ...request, media: [...hydrated, ...request.media] } : request;
+    if (hydrated.length === 0) return request;
+    const now = new Date().toISOString();
+    const ids = new Set(images.map((item) => item.id));
+    await this.update(request, (next) => {
+      next.recentImages.forEach((item) => {
+        if (ids.has(item.id)) item.lastReferencedAt = now;
+      });
+    });
+    return { ...request, media: [...hydrated, ...request.media] };
+  }
+
+  /** Bind the latest pending image batch to exactly one text turn. */
+  async bindPendingImages(request: WeixinInboundRequest): Promise<number> {
+    let count = 0;
+    await this.update(request, (state) => {
+      const directIds = new Set(request.media.map((item) => String(asRecord(item).attachmentId || "")).filter(Boolean));
+      const pending = state.recentImages.filter((item) => item.state === "pending");
+      const latest = pending[pending.length - 1];
+      const sourceMessageId = latest?.sourceMessageId || "";
+      state.recentImages.forEach((item) => {
+        const matches = directIds.has(item.id) || Boolean(sourceMessageId && item.sourceMessageId === sourceMessageId);
+        if (!matches || item.state === "archived") return;
+        item.state = "bound";
+        item.boundTurnId = String(request.messageId || "").slice(0, 300);
+        count += 1;
+      });
+    });
+    return count;
+  }
+
+  /** Complete the lifecycle after the bound turn has produced a response. */
+  async markImagesReferenceable(request: WeixinInboundRequest): Promise<number> {
+    let count = 0;
+    const now = new Date().toISOString();
+    await this.update(request, (state) => {
+      state.recentImages.forEach((item) => {
+        if (item.boundTurnId !== request.messageId || item.state === "archived") return;
+        item.state = "referenceable";
+        item.consumedAt = now;
+        item.lastReferencedAt = now;
+        count += 1;
+      });
+    });
+    return count;
+  }
+
+  /** A new unrelated text turn closes unbound image batches to prevent leaks. */
+  async archivePendingImages(request: WeixinInboundRequest): Promise<number> {
+    let count = 0;
+    await this.update(request, (state) => {
+      state.recentImages.forEach((item) => {
+        if (item.state !== "pending") return;
+        item.state = "archived";
+        count += 1;
+      });
+    });
+    return count;
   }
 
   async hydratePersistedMedia(request: WeixinInboundRequest): Promise<WeixinInboundRequest> {
@@ -129,7 +198,11 @@ export class WeixinConversationStateService {
         mimeType: String(record.mimeType || "image/png"),
         name: String(record.name || "微信图片"),
         createdAt: this.safeTimestamp(request.timestamp),
-        sourceMessageId: request.messageId
+        sourceMessageId: request.messageId,
+        state: "referenceable",
+        boundTurnId: request.messageId,
+        consumedAt: this.safeTimestamp(request.timestamp),
+        lastReferencedAt: this.safeTimestamp(request.timestamp)
       }).catch(() => null);
       media.push(hydrated || item);
     }
@@ -235,7 +308,11 @@ export class WeixinConversationStateService {
       mimeType,
       name: String(media.name || `微信图片-${index + 1}.${extension}`).slice(0, 160),
       createdAt: this.safeTimestamp(request.timestamp),
-      sourceMessageId: String(request.messageId || "").slice(0, 300)
+      sourceMessageId: String(request.messageId || "").slice(0, 300),
+      state: "pending",
+      boundTurnId: "",
+      consumedAt: "",
+      lastReferencedAt: ""
     };
   }
 
@@ -253,7 +330,10 @@ export class WeixinConversationStateService {
       size: binary.byteLength,
       vaultPath: image.vaultPath,
       dataUrl: `data:${image.mimeType};base64,${this.encodeBase64(binary)}`,
-      persisted: true
+      persisted: true,
+      attachmentId: image.id,
+      sourceMessageId: image.sourceMessageId,
+      attachmentState: image.state
     };
   }
 
@@ -320,8 +400,21 @@ export class WeixinConversationStateService {
       mimeType,
       name: String(record.name || "微信图片").slice(0, 160),
       createdAt,
-      sourceMessageId: String(record.sourceMessageId || "").slice(0, 300)
+      sourceMessageId: String(record.sourceMessageId || "").slice(0, 300),
+      state: this.normalizeAttachmentState(record.state),
+      boundTurnId: String(record.boundTurnId || "").slice(0, 300),
+      consumedAt: String(record.consumedAt || "").slice(0, 60),
+      lastReferencedAt: String(record.lastReferencedAt || "").slice(0, 60)
     };
+  }
+
+  private normalizeAttachmentState(value: unknown): WeixinAttachmentState {
+    const state = String(value || "") as WeixinAttachmentState;
+    // Legacy records predate lifecycle tracking. They were already reusable,
+    // so migrate them to referenceable rather than unexpectedly hiding them.
+    return ["pending", "bound", "consumed", "referenceable", "archived"].includes(state)
+      ? state
+      : "referenceable";
   }
 
   private normalizePendingOperation(value: unknown): WeixinPendingOperation | null {

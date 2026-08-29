@@ -1,6 +1,7 @@
 import { App, Modal, Notice } from "obsidian";
 import { createButton } from "../components/Button";
 import { createModalShell } from "../components/ModalShell";
+import { requireProFeature } from "../licensing/entitlement";
 import type PersonalLifeSystemPlugin from "../main";
 import { FileSystemService } from "../services/FileSystemService";
 import { ProjectService } from "../services/ProjectService";
@@ -51,6 +52,7 @@ export class NewProjectModal extends Modal {
       footer,
       this.options.submitLabel ?? "保存项目",
       async () => {
+        if (!requireProFeature(this.plugin, "projectManagement")) return;
         try {
           const project = await new ProjectService(this.app, new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage)).createProject({
             name: name.value,

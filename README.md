@@ -6,7 +6,7 @@
 
 [**English**](README.md) · [简体中文](README.zh-CN.md)
 
-![Version](https://img.shields.io/badge/version-0.3.16-0f172a?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.3.17-0f172a?style=flat-square)
 ![Obsidian](https://img.shields.io/badge/Obsidian-1.5.0%2B-7c3aed?style=flat-square)
 ![Local first](https://img.shields.io/badge/data-local--first-15803d?style=flat-square)
 ![Mobile](https://img.shields.io/badge/mobile-supported-2563eb?style=flat-square)
@@ -17,11 +17,11 @@
 
 Life OS Assistant turns an Obsidian vault into a connected workspace for **today, tasks, diary, knowledge, memory, reviews, AI assistance, and project AI sessions**. Your readable records remain Markdown in the vault. AI writeback is off by default; you can keep preview confirmation or explicitly opt in to automatic writes only when the current request names one unambiguous destination.
 
-Current release: **0.3.16** · Obsidian **1.5.0+** · `isDesktopOnly: false`
+Current release: **0.3.17** · Obsidian **1.5.0+** · `isDesktopOnly: false`
 
-> **0.3.16 agent and authorization reliability:** the desktop assistant and Weixin Bot now share one Life OS Agent for installed Skills, project-aware RAG, general web research, and controlled writeback. Pro purchases prevent duplicate orders, safely recover unfinished payments after restart, and keep the public lifetime plan at CNY 299 while preserving historical licenses.
+> **0.3.17 agent tools and workflow update:** the shared desktop/Weixin Life OS Agent now includes 38 permission-aware tools, durable task and event memory, safe reusable tool recipes, richer Skill routing, context compaction, attachment lifecycle handling, and controlled Vault writeback. This release also adds Prompt Studio, task batch operations, directory knowledge import, configurable navigation/exam modules, and multiple task, modal, and rendering fixes.
 
-> **About the images:** the walkthrough images below were generated from the current 0.3.16 information architecture and implemented workflows. They use synthetic data and a neutral Obsidian theme; your actual layout follows your Obsidian theme, viewport, and enabled features.
+> **About the images:** the walkthrough images below were generated from the current 0.3.17 information architecture and implemented workflows. They use synthetic data and a neutral Obsidian theme; your actual layout follows your Obsidian theme, viewport, and enabled features.
 
 ![Life OS Today dashboard](readme-assets/01-today-overview.webp)
 
@@ -192,7 +192,7 @@ After the listing is accepted:
 
 ### Manual installation
 
-Create `.obsidian/plugins/personal-life-system/` and copy these three assets from an exact semantic-version release tag such as `0.3.16`:
+Create `.obsidian/plugins/personal-life-system/` and copy these three assets from an exact semantic-version release tag such as `0.3.17`:
 
 - `main.js`
 - `manifest.json`

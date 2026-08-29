@@ -53,11 +53,13 @@ export function createSidebar(parent: HTMLElement, plugin: PersonalLifeSystemPlu
 
 function renderNavGroup(parent: HTMLElement, title: string, keys: LifeOSNavKey[], plugin: PersonalLifeSystemPlugin, active: LifeOSNavKey): void {
   const group = parent.createDiv({ cls: "lifeos-nav-section" });
+  group.setAttr("data-lifeos-nav-group", title);
   group.createDiv({ cls: "lifeos-nav-section-label", text: title });
   for (const key of keys) {
     const item = NAV_ITEMS.find((entry) => entry.key === key);
     if (item) renderNavItem(group, item, plugin, active);
   }
+  syncNavGroupVisibility(group);
 }
 
 function renderNavItem(
@@ -67,8 +69,18 @@ function renderNavItem(
   active: LifeOSNavKey
 ): void {
   const button = parent.createEl("button", {
-    cls: item.key === active ? "lifeos-nav-item lifeos-v2-sidebar-item is-active" : "lifeos-nav-item lifeos-v2-sidebar-item",
-    attr: { type: "button", title: `${item.label} - ${item.hint}`, "aria-label": `${item.label}: ${item.hint}` }
+    cls: [
+      "lifeos-nav-item",
+      "lifeos-v2-sidebar-item",
+      item.key === active ? "is-active" : "",
+      isNavItemHidden(plugin, item.key) ? "is-user-hidden" : ""
+    ].filter(Boolean).join(" "),
+    attr: {
+      type: "button",
+      title: `${item.label} - ${item.hint}`,
+      "aria-label": `${item.label}: ${item.hint}`,
+      "data-nav-key": item.key
+    }
   });
   setIcon(button.createSpan({ cls: "lifeos-nav-icon lifeos-v2-sidebar-icon" }), item.icon);
   const text = button.createSpan({ cls: "lifeos-nav-copy lifeos-v2-sidebar-copy" });
@@ -90,6 +102,18 @@ function renderNavItem(
     if (item.key === "checkins") void plugin.showCheckinModal();
     if (item.key === "settings") void plugin.activateSettings();
   };
+}
+
+function isNavItemHidden(plugin: PersonalLifeSystemPlugin, key: LifeOSNavKey): boolean {
+  if (key === "settings") return false;
+  if (key === "checkins" && !plugin.settings.enableExamModule) return true;
+  return plugin.settings.hiddenSidebarItems?.includes(key) === true;
+}
+
+function syncNavGroupVisibility(group: HTMLElement): void {
+  const hasVisibleItem = Array.from(group.querySelectorAll<HTMLElement>(".lifeos-nav-item"))
+    .some((item) => !item.hasClass("is-user-hidden"));
+  group.toggleClass("is-empty", !hasVisibleItem);
 }
 
 function markNavigationPending(button: HTMLButtonElement): void {

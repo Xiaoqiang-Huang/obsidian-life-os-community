@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.3.17 - 2026-08-29
+
+### Added
+
+- Expanded the shared Life OS Agent to 38 built-in tools spanning tasks, diary, reviews, knowledge, memory, projects, reminders, web research, RAG, Skills, vision/OCR, and safe Vault file operations.
+- Added capability discovery and persistent declarative tool recipes. When no one-to-one tool exists, the Agent can compose approved primitives into a reusable tool without generating or executing JavaScript, Shell, `eval`, or arbitrary code.
+- Added durable Agent events, task memory, context compaction, scoped attachment lifecycles, and Skill routing so desktop and Weixin conversations can continue work without letting an old image or unrelated Skill dominate later turns.
+- Added a prompt Studio for optimizing an existing prompt or generating a new one with optional Life OS context, selected documents, clarification questions, preview-before-apply, version creation, and undo.
+- Added directory import for project and knowledge documents, plus compact knowledge document management, search, category navigation, source handling, and project writeback.
+
+### Changed
+
+- Agent execution now reveals observable steps only as they actually start and finish, while preserving private model reasoning. Missing capabilities are checked against the tool catalog before the Agent reports that an operation is unavailable.
+- The task page now supports single-task editing/deletion, select-all, batch edit/complete/restore/delete, a persistent “show completed” preference, and stable in-place refresh instead of rebuilding the visible page from the top.
+- Sidebar modules can be shown or hidden independently. The exam/check-in module is opt-in and supports civil-service, postgraduate, law, teacher, or custom study profiles instead of assuming every user is preparing for the civil-service exam.
+- Knowledge, project-document, modal, and narrow-window layouts were compacted and aligned for clearer document scanning and consistent controls.
+
+### Fixed
+
+- Fixed task-page blank loading, scroll jumps after task mutations, visible flashing, misaligned action buttons, blocked batch editing, and overlapping multi-column task lists.
+- Fixed “hide completed tasks” being mistaken for destructive file deletion. The Agent now changes only the task-view preference and leaves `done.md` and archived task history intact.
+- Fixed stale knowledge-pending counts, directory-import gaps, overly sticky image references, modal close-button offsets, and several button-label contrast and overflow regressions across sibling pages.
+- Hardened Agent writes so custom tools still obey read-only/full-access modes, confirmation policy, Pro gates, Life OS path boundaries, backups, and tamper validation across restarts.
+
+### Validation
+
+- Passed 656 plugin service and workflow tests, TypeScript checks, UI class/behavior/overflow guards, writeback-destination checks, Pro compatibility checks, and the production build.
+- Passed an isolated Obsidian runtime smoke covering desktop/mobile views, task and project-document writes, knowledge, review, chat persistence, Markdown/LaTeX rendering, and button contrast.
+- Verified community source export, privacy exclusions, forbidden-path/content scanning, and release artifact consistency before publication.
+
 ## 0.3.16 - 2026-08-26
 
 ### Added

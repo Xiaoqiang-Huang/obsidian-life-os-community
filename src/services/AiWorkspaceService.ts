@@ -126,7 +126,9 @@ export class AiWorkspaceService {
         : [],
       rejectedSourceKeys: Array.isArray(parsed.rejectedSourceKeys) ? parsed.rejectedSourceKeys : [],
       dailyFacts: Array.isArray(parsed.dailyFacts) ? parsed.dailyFacts : [],
-      prompts: Array.isArray(parsed.prompts) ? parsed.prompts : [],
+      prompts: Array.isArray(parsed.prompts)
+        ? parsed.prompts.map((prompt) => this.normalizePrompt(prompt))
+        : [],
       projectMemories: Array.isArray(parsed.projectMemories)
         ? parsed.projectMemories.map((memory) => this.normalizeProjectMemory(memory))
         : [],
@@ -920,7 +922,7 @@ export class AiWorkspaceService {
     const now = new Date().toISOString();
     const existing = input.id ? state.prompts.find((prompt) => prompt.id === input.id) : undefined;
     const id = existing?.id ?? `prompt-${stableTextHash(`${title}:${now}`)}`;
-    const version = (existing?.currentVersion ?? 0) + 1;
+    const version = this.nextPromptVersion(existing);
     const versionPath = `${this.promptsRoot()}/${id}/v${version}.md`;
     const markdown = [
       "---",
@@ -949,7 +951,7 @@ export class AiWorkspaceService {
       tool: input.tool,
       tags: Array.from(new Set(input.tags?.map((tag) => tag.trim()).filter(Boolean) ?? [])),
       currentVersion: version,
-      versionPaths: [...(existing?.versionPaths ?? []), versionPath],
+      versionPaths: this.sortPromptVersionPaths([...(existing?.versionPaths ?? []), versionPath]),
       usageCount: existing?.usageCount ?? 0,
       lastUsedAt: existing?.lastUsedAt,
       status: "active",
@@ -965,8 +967,35 @@ export class AiWorkspaceService {
   }
 
   async readPrompt(prompt: AiWorkspacePromptAsset): Promise<string> {
-    const path = prompt.versionPaths[prompt.currentVersion - 1];
+    const path = this.promptVersionPath(prompt);
     return path ? readFile(this.app, path) : "";
+  }
+
+  promptVersionPath(prompt: AiWorkspacePromptAsset, version = prompt.currentVersion): string | undefined {
+    const exact = prompt.versionPaths.find((path) => this.promptVersionFromPath(path) === version);
+    if (exact) return exact;
+    // Compatibility for state created before version paths were normalized.
+    return prompt.versionPaths[Math.max(0, version - 1)];
+  }
+
+  async rollbackPrompt(promptId: string): Promise<AiWorkspacePromptAsset> {
+    const state = await this.loadState(true);
+    const prompt = state.prompts.find((item) => item.id === promptId);
+    if (!prompt) throw new Error("提示词不存在。");
+    const availableVersions = prompt.versionPaths
+      .map((path) => ({ path, version: this.promptVersionFromPath(path) }))
+      .filter((item): item is { path: string; version: number } => Number.isFinite(item.version))
+      .sort((left, right) => left.version - right.version);
+    const previous = [...availableVersions].reverse().find((item) => item.version < prompt.currentVersion);
+    if (!previous) throw new Error("当前已经是最早版本，无法继续撤销。");
+    const markdown = await readFile(this.app, previous.path);
+    if (!markdown.trim()) throw new Error("历史版本文件为空，未执行撤销。");
+    prompt.currentVersion = previous.version;
+    prompt.updatedAt = new Date().toISOString();
+    await writeFile(this.app, `${this.promptsRoot()}/${prompt.id}/current.md`, markdown);
+    await this.saveState(state);
+    await this.writeAgentContext(state);
+    return structuredClone(prompt);
   }
 
   async markPromptUsed(promptId: string): Promise<void> {
@@ -1150,7 +1179,10 @@ export class AiWorkspaceService {
       "## 项目专属提示词",
       "",
       ...(prompts.length
-        ? prompts.map((prompt) => `- [[${prompt.versionPaths[prompt.currentVersion - 1].replace(/\.md$/iu, "")}|${prompt.title}]] · ${prompt.tool}`)
+        ? prompts.map((prompt) => {
+          const path = this.promptVersionPath(prompt) || `${this.promptsRoot()}/${prompt.id}/current.md`;
+          return `- [[${path.replace(/\.md$/iu, "")}|${prompt.title}]] · ${prompt.tool}`;
+        })
         : ["- 暂无。"]),
       ""
     ].join("\n");
@@ -2743,7 +2775,10 @@ export class AiWorkspaceService {
     lines.push("", "## 可复用提示词", "");
     const prompts = state.prompts.filter((prompt) => prompt.status === "active").slice(-60);
     lines.push(...(prompts.length
-      ? prompts.map((prompt) => `- [[${prompt.versionPaths[prompt.currentVersion - 1].replace(/\.md$/i, "")}|${prompt.title}]] · ${prompt.tool}`)
+      ? prompts.map((prompt) => {
+        const path = this.promptVersionPath(prompt) || `${this.promptsRoot()}/${prompt.id}/current.md`;
+        return `- [[${path.replace(/\.md$/i, "")}|${prompt.title}]] · ${prompt.tool}`;
+      })
       : ["- 暂无。"]));
     await writeFile(this.app, `${this.workspaceRoot()}/context.md`, `${lines.join("\n")}\n`);
   }
@@ -3294,6 +3329,72 @@ export class AiWorkspaceService {
       versionPaths,
       status: memory.status === "missing" ? "missing" : "active"
     };
+  }
+
+  private normalizePrompt(value: unknown): AiWorkspacePromptAsset {
+    const prompt = this.asRecord(value);
+    const versionPaths = this.sortPromptVersionPaths(
+      Array.isArray(prompt.versionPaths)
+        ? prompt.versionPaths.map((path) => String(path)).filter(Boolean)
+        : []
+    );
+    const availableVersions = versionPaths
+      .map((path) => this.promptVersionFromPath(path))
+      .filter((version): version is number => Number.isFinite(version));
+    const requestedVersion = Math.max(1, Number(prompt.currentVersion) || 1);
+    const currentVersion = availableVersions.includes(requestedVersion)
+      ? requestedVersion
+      : availableVersions[availableVersions.length - 1] || 1;
+    const rawTool = String(prompt.tool || "any");
+    const tool = rawTool === "any" || (AI_WORKSPACE_TOOLS as readonly string[]).includes(rawTool)
+      ? rawTool as AiWorkspaceTool | "any"
+      : "any";
+    const scope = prompt.scope === "project" ? "project" : "global";
+    const now = new Date().toISOString();
+    return {
+      id: String(prompt.id || `prompt-${stableTextHash(`${String(prompt.title || "prompt")}:${now}`)}`),
+      title: String(prompt.title || "未命名提示词"),
+      scope,
+      projectId: scope === "project" && prompt.projectId ? String(prompt.projectId) : undefined,
+      tool,
+      tags: Array.isArray(prompt.tags) ? prompt.tags.map((tag) => String(tag).trim()).filter(Boolean) : [],
+      currentVersion,
+      versionPaths,
+      usageCount: Math.max(0, Number(prompt.usageCount) || 0),
+      lastUsedAt: prompt.lastUsedAt ? String(prompt.lastUsedAt) : undefined,
+      status: prompt.status === "archived" ? "archived" : "active",
+      createdAt: String(prompt.createdAt || prompt.updatedAt || now),
+      updatedAt: String(prompt.updatedAt || prompt.createdAt || now),
+      sourceSessionId: prompt.sourceSessionId ? String(prompt.sourceSessionId) : undefined,
+      sourceNodeIds: Array.isArray(prompt.sourceNodeIds)
+        ? prompt.sourceNodeIds.map((id) => String(id)).filter(Boolean)
+        : undefined
+    };
+  }
+
+  private nextPromptVersion(prompt?: AiWorkspacePromptAsset): number {
+    if (!prompt) return 1;
+    const versions = prompt.versionPaths
+      .map((path) => this.promptVersionFromPath(path))
+      .filter((version): version is number => Number.isFinite(version));
+    return Math.max(prompt.currentVersion, ...versions, 0) + 1;
+  }
+
+  private promptVersionFromPath(path: string): number {
+    const match = path.match(/\/v(\d+)\.md$/iu);
+    return match ? Number(match[1]) : Number.NaN;
+  }
+
+  private sortPromptVersionPaths(paths: string[]): string[] {
+    return Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)))
+      .sort((left, right) => {
+        const leftVersion = this.promptVersionFromPath(left);
+        const rightVersion = this.promptVersionFromPath(right);
+        if (Number.isFinite(leftVersion) && Number.isFinite(rightVersion)) return leftVersion - rightVersion;
+        if (Number.isFinite(leftVersion)) return -1;
+        if (Number.isFinite(rightVersion)) return 1;
+        return left.localeCompare(right);
+      });
   }
 
   private inferSourceKind(

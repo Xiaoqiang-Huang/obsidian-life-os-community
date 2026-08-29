@@ -5,6 +5,7 @@ import { createEmptyState } from "../components/EmptyState";
 import { createHeroHeader } from "../components/HeroHeader";
 import { createLifeOSShell } from "../components/LifeOSComponent";
 import { DAILY_VIEW_TYPE } from "../constants";
+import { requireProFeature } from "../licensing/entitlement";
 import type PersonalLifeSystemPlugin from "../main";
 import { QuickCaptureModal } from "../modals/QuickCaptureModal";
 import { AiWorkspaceService } from "../services/AiWorkspaceService";
@@ -213,12 +214,14 @@ export class DailyView extends ItemView {
           new Notice("\u8bf7\u5148\u9009\u62e9\u81f3\u5c11\u4e00\u6761\u9879\u76ee\u6d3b\u52a8\u3002");
           return;
         }
+        if (!requireProFeature(this.plugin, "aiWriteback")) return;
         await service.confirmDailyFacts([...selected]);
         new Notice("\u5df2\u5199\u5165\u4eca\u65e5\u65e5\u62a5\uff0c\u624b\u5199\u5185\u5bb9\u4fdd\u6301\u4e0d\u53d8\u3002", 5000);
         await this.render();
       })(), { icon: "notebook-pen", primary: true });
       createButton(actions, "\u5ffd\u7565\u6240\u9009", () => void (async () => {
         if (selected.size === 0) return;
+        if (!requireProFeature(this.plugin, "projectManagement")) return;
         await service.dismissDailyFacts([...selected]);
         new Notice("\u5df2\u5ffd\u7565\u6240\u9009\u9879\u76ee\u6d3b\u52a8\u3002", 4000);
         await this.render();

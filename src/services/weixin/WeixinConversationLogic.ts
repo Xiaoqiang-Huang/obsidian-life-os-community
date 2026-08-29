@@ -88,6 +88,7 @@ const REFERENTIAL_FOLLOW_UP = /^(?:那|这个|这个呢|这个问题|这件事|�
 const WEB_CAPABILITY_FOLLOW_UP = /^(?:你)?(?:(?:不能|不会|没(?:有)?|怎么没|为什么没)(?:给我)?(?:联网|上网|网络|网页)(?:搜索|检索|查找|查|搜)?(?:吗|么|呢|？|\?)?|(?:再|重新)(?:联网|上网|网络|网页)(?:搜索|检索|查找|查|搜)(?:一下)?)[。！!？?\s]*$/u;
 const PROJECT_CONTEXT_FOLLOW_UP = /^(?:这个|当前|刚才|前面)?(?:内容|资料|进展|记录)?(?:在|从)?(?:项目上下文|项目记忆|会话记录|工作记录)(?:里|中|里面)?(?:可以|应该|能够|能)?(?:看到|找到|查到|读到|有)(?:的|啊|呀|吧|吗)?[。！!？?\s]*$/u;
 const IMAGE_REFERENCE = /(?:前面|刚才|之前|上面|上一张|那张|这个|这道|该)(?:的)?(?:图片|图|截图|照片|题|题目)|(?:再|重新|继续).{0,8}(?:解|分析|看)(?:一遍|一下)?/u;
+const PENDING_IMAGE_INSTRUCTION = /(?:图片|截图|照片|图中|看图|识图|读图|这道题|这个题|题目|OCR|文字识别|提取文字|识别文字|分析(?:一下)?(?:这|该)?(?:张)?图|解(?:一下)?(?:这|该)?(?:道)?题)/iu;
 const PROJECT_TERMS = /(?:(?:这个|当前|我的|本)(?:项目|代码库|仓库|工作区|分支)|(?:会话交接|项目上下文|项目记忆|项目文档|项目任务|项目进度|会话记录|工作记录)|(?:这个|当前|最近|刚才|今天).{0,6}(?:提交|commit|文件改动|分支))/iu;
 const PERSONAL_CONTEXT_TERMS = /(?:(?:我的|我(?:今天|昨天|最近|之前)?|当前|这个|本地|Life\s*OS).{0,12}(?:知识库|记忆|日记|日报|复盘|待办|任务|项目|科研|工作|学习|进展|成果|会话|上下文)|(?:查|找|读取|打开|看看|看一下).{0,10}(?:我的)?(?:知识库|记忆|日记|日报|复盘|待办|任务|项目|科研|工作记录|会话记录|项目上下文)|(?:项目上下文|项目记忆|会话记录|工作记录).{0,10}(?:看到|找到|查到|读到|有)|(?:之前|过去)(?:记录|保存|聊过))/iu;
 const SAVE_LINK_INTENT = /(?:收藏|保存|存下|存一下|存入|收录|加入|放进).{0,16}(?:链接|网页|文章|网址|这个信息)|(?:链接|网页|文章|网址).{0,16}(?:收藏|保存|存下|存一下|存入|收录|加入|放进)/u;
@@ -428,9 +429,21 @@ export function isWeixinPersonalContextQuery(value: unknown): boolean {
   return PERSONAL_CONTEXT_TERMS.test(clean(value, 2_000));
 }
 
-export function shouldReuseWeixinImages(value: unknown, hasExplicitSkill = false): boolean {
+export function shouldReuseWeixinImages(value: unknown, _hasExplicitSkill = false): boolean {
   const text = clean(value, 2_000);
-  return hasExplicitSkill || IMAGE_REFERENCE.test(text);
+  return IMAGE_REFERENCE.test(text);
+}
+
+/**
+ * Decide whether a separately-sent image batch belongs to the current text
+ * turn. A named Skill alone is deliberately insufficient: “用小P解释言语
+ * 理解” must not silently inherit the previous screenshot, while “用小P解
+ * 这道题” is an explicit attachment instruction and should bind it.
+ */
+export function shouldBindPendingWeixinImages(value: unknown): boolean {
+  const text = clean(value, 2_000);
+  if (!text) return false;
+  return IMAGE_REFERENCE.test(text) || PENDING_IMAGE_INSTRUCTION.test(text);
 }
 
 /**

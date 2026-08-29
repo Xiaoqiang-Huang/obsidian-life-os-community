@@ -239,14 +239,19 @@ export class PeriodReviewService {
       primaryMetric: total.primaryMetric + item.primaryMetric,
       secondaryMetric: total.secondaryMetric + item.secondaryMetric
     }), { durationMinutes: 0, tasksCompleted: 0, primaryMetric: 0, secondaryMetric: 0 });
-    return [
+    const lines = [
       `范围：${facts.window.start} 至 ${facts.window.end}（${this.daysInWindow(facts.window)} 天）`,
       `纳入日报：${facts.sources.length} 篇；缺失日期：${facts.missingDates.length} 天`,
-      `完成任务：${facts.completedTasks.length} 项；当前未完成任务：${facts.openTasks.length} 项`,
-      `学习打卡：${facts.checkins.length} 次；学习时长：${checkinTotals.durationMinutes} 分钟`,
-      `打卡自填完成任务：${checkinTotals.tasksCompleted} 项（与任务系统分开统计）`,
-      `训练指标：${checkinTotals.primaryMetric} / ${checkinTotals.secondaryMetric}`
-    ].join("\n");
+      `完成任务：${facts.completedTasks.length} 项；当前未完成任务：${facts.openTasks.length} 项`
+    ];
+    if (this.settings.enableExamModule) {
+      lines.push(
+        `学习打卡：${facts.checkins.length} 次；学习时长：${checkinTotals.durationMinutes} 分钟`,
+        `打卡自填完成任务：${checkinTotals.tasksCompleted} 项（与任务系统分开统计）`,
+        `训练指标：${checkinTotals.primaryMetric} / ${checkinTotals.secondaryMetric}`
+      );
+    }
+    return lines.join("\n");
   }
 
   async generateDraft(ai: AiClient, facts: PeriodReviewFacts, instruction = "", section?: string): Promise<string> {
@@ -467,7 +472,7 @@ export class PeriodReviewService {
     const taskLines = facts.completedTasks.length > 0
       ? facts.completedTasks.map((item) => `- ${item.completedAt}：${item.title}`).join("\n")
       : "- 无完成任务记录";
-    return [
+    const lines = [
       "## 统计快照",
       this.factSummary(facts),
       "",
@@ -475,10 +480,12 @@ export class PeriodReviewService {
       taskLines,
       "",
       "## 当前未完成任务（当前状态，不代表周期末历史状态）",
-      facts.openTasks.length > 0 ? facts.openTasks.map((task) => `- ${task}`).join("\n") : "- 无",
-      "",
-      "## 学习打卡（与任务系统分开统计）",
-      checkinLines,
+      facts.openTasks.length > 0 ? facts.openTasks.map((task) => `- ${task}`).join("\n") : "- 无"
+    ];
+    if (this.settings.enableExamModule) {
+      lines.push("", "## 学习打卡（与任务系统分开统计）", checkinLines);
+    }
+    lines.push(
       "",
       "## 已确认项目活动",
       facts.confirmedProjectActivities.length > 0
@@ -487,7 +494,8 @@ export class PeriodReviewService {
       "",
       "## 缺失日报日期",
       facts.missingDates.length > 0 ? facts.missingDates.map((date) => `- ${date}`).join("\n") : "- 无"
-    ].join("\n");
+    );
+    return lines.join("\n");
   }
 
   buildReviewMarkdown(facts: PeriodReviewFacts, draft: string, instruction: string, userNotes = "", status: "confirmed" | "pending" | "stale" = "confirmed"): string {

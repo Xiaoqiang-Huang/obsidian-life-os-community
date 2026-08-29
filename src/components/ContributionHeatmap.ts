@@ -54,8 +54,12 @@ export function createContributionHeatmap(parent: HTMLElement, options: Contribu
     attr: { type: "button" },
     text: lang === "zh" ? "了解如何统计记录" : "Learn how we count contributions"
   }).onclick = () => new Notice(lang === "zh"
-    ? "记录来自手动快速记录、已完成任务、学习打卡和每日复盘，可在热力图设置中调整。"
-    : "Contributions are counted from manual quick records, completed tasks, check-ins, and daily summaries.");
+    ? (options.plugin.settings.enableExamModule
+      ? "记录来自手动快速记录、已完成任务、学习打卡和每日复盘，可在热力图设置中调整。"
+      : "记录来自手动快速记录、已完成任务和每日复盘，可在热力图设置中调整。")
+    : (options.plugin.settings.enableExamModule
+      ? "Contributions are counted from manual quick records, completed tasks, check-ins, and daily summaries."
+      : "Contributions are counted from manual quick records, completed tasks, and daily summaries."));
   const legend = footer.createDiv({ cls: "lifeos-contrib-legend" });
   legend.createSpan({ text: lang === "zh" ? "少" : "Less" });
   for (const level of [0, 1, 2, 3, 4]) legend.createSpan({ cls: `lifeos-contrib-day level-${level}` });
@@ -111,7 +115,7 @@ function renderGrid(parent: HTMLElement, weeks: HeatmapCell[][], options: Contri
         column.createSpan({ cls: "lifeos-contrib-day is-empty" });
         continue;
       }
-      const text = tooltipText(day, lang);
+      const text = tooltipText(day, lang, options.plugin.settings.enableExamModule);
       const cell = column.createEl("button", {
         cls: contributionDayClasses(day, options.plugin.settings),
         attr: {
@@ -135,7 +139,7 @@ function contributionDayClasses(day: DailyActivity, settings: PersonalLifeSystem
   if (day.score > 0) classes.push("has-activity");
   if (settings.heatmapIncludeDaily && (day.dailyNoteExists || day.dailyRecordCount > 0)) classes.push("has-daily");
   if (settings.heatmapIncludeTasks && day.completedTaskCount > 0) classes.push("has-task");
-  if (settings.heatmapIncludeCheckins && day.checkinExists) classes.push("has-checkin");
+  if (settings.enableExamModule && settings.heatmapIncludeCheckins && day.checkinExists) classes.push("has-checkin");
   if (settings.heatmapIncludeSummaries && day.summaryExists) classes.push("has-summary");
   return classes.join(" ");
 }
@@ -160,14 +164,14 @@ function showTooltip(parent: HTMLElement, tooltip: HTMLElement, cell: HTMLElemen
   tooltip.style.top = `${top}px`;
 }
 
-function tooltipText(day: DailyActivity, lang: DisplayLanguage): string {
+function tooltipText(day: DailyActivity, lang: DisplayLanguage, examEnabled: boolean): string {
   if (lang === "en") {
     return [
       day.date,
       `${day.score} contributions`,
       `Quick records: ${day.dailyRecordCount}`,
       `Completed tasks: ${day.completedTaskCount}`,
-      `Check-in: ${day.checkinExists ? "Yes" : "No"}`,
+      ...(examEnabled ? [`Check-in: ${day.checkinExists ? "Yes" : "No"}`] : []),
       `Daily summary: ${day.summaryExists ? "Yes" : "No"}`
     ].join("\n");
   }
@@ -176,7 +180,7 @@ function tooltipText(day: DailyActivity, lang: DisplayLanguage): string {
     `${day.score} 次记录`,
     `快速记录: ${day.dailyRecordCount}`,
     `完成任务：${day.completedTaskCount}`,
-    `学习打卡：${day.checkinExists ? "有" : "无"}`,
+    ...(examEnabled ? [`学习打卡：${day.checkinExists ? "有" : "无"}`] : []),
     `今日复盘：${day.summaryExists ? "有" : "无"}`
   ].join("\n");
 }
@@ -230,7 +234,9 @@ class ContributionSettingsModal extends Modal {
     sources.createDiv({ cls: "lifeos-setting-label", text: lang === "zh" ? "统计内容" : "Contribution sources" });
     const daily = this.checkbox(sources, lang === "zh" ? "日记记录" : "Daily notes", this.plugin.settings.heatmapIncludeDaily);
     const tasks = this.checkbox(sources, lang === "zh" ? "完成任务" : "Completed tasks", this.plugin.settings.heatmapIncludeTasks);
-    const checkins = this.checkbox(sources, lang === "zh" ? "学习打卡" : "Check-ins", this.plugin.settings.heatmapIncludeCheckins);
+    const checkins = this.plugin.settings.enableExamModule
+      ? this.checkbox(sources, lang === "zh" ? "学习打卡" : "Check-ins", this.plugin.settings.heatmapIncludeCheckins)
+      : null;
     const summaries = this.checkbox(sources, lang === "zh" ? "今日复盘" : "Daily summaries", this.plugin.settings.heatmapIncludeSummaries);
 
     footer.createEl("button", {
@@ -242,7 +248,14 @@ class ContributionSettingsModal extends Modal {
       cls: "lifeos-button lifeos-button-primary",
       attr: { type: "button" },
       text: lang === "zh" ? "保存设置" : "Save settings"
-    }).onclick = () => void this.save(range.value as HeatmapRange, language.value as DisplayLanguage, daily.checked, tasks.checked, checkins.checked, summaries.checked);
+    }).onclick = () => void this.save(
+      range.value as HeatmapRange,
+      language.value as DisplayLanguage,
+      daily.checked,
+      tasks.checked,
+      checkins?.checked ?? this.plugin.settings.heatmapIncludeCheckins,
+      summaries.checked
+    );
   }
 
   private select(parent: HTMLElement, label: string, options: Array<[string, string]>, value: string): HTMLSelectElement {
