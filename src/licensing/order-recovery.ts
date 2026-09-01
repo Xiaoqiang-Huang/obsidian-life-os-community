@@ -8,6 +8,7 @@ export interface StoredPendingOrderInput {
 }
 
 const RESUMABLE_ORDER_STATUSES = new Set(["created", "pending", "processing", "paid"]);
+export const PENDING_ORDER_STALE_AFTER_MS = 48 * 60 * 60 * 1000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -92,4 +93,20 @@ export function storedOrderClaimTokenFor(
 
 export function shouldResumeOrderPolling(status: string): boolean {
   return RESUMABLE_ORDER_STATUSES.has(status.trim().toLowerCase());
+}
+
+/**
+ * Payment claim tokens are valid for 48 hours. A non-paid local order older
+ * than that must remain recoverable, but must not trap the user in a permanent
+ * "another order is pending" state.
+ */
+export function isPendingOrderStale(
+  order: Pick<PaymentOrder, "status" | "createdAt">,
+  now = new Date()
+): boolean {
+  const status = order.status.trim().toLowerCase();
+  if (status !== "created" && status !== "pending" && status !== "processing") return false;
+  const createdAt = Date.parse(order.createdAt);
+  if (!Number.isFinite(createdAt)) return false;
+  return now.getTime() - createdAt >= PENDING_ORDER_STALE_AFTER_MS;
 }

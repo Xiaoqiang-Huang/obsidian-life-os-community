@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.3.18 - 2026-09-01
+
+### Added
+
+- Added a configurable cap for tasks extracted from AI conversations, together with select-all and batch deletion for large task sets.
+- Added a durable task-deletion ledger so manually deleted or batch-deleted tasks are not recreated by automatic extraction after Obsidian restarts.
+- Added complete imported-Skill discovery for the shared desktop/Weixin Agent, including natural-language intent ranking when the user describes a method without typing an exact Skill name.
+
+### Changed
+
+- Reworked narrow-window layouts across the AI assistant, Today dashboard, task manager, and shared navigation. Controls now reflow into readable rows or cards, component sizing adapts to the available width, and the primary content keeps the user's expected reading order.
+- Task and Skill mutations now use stable in-place refreshes that preserve scroll position and selection instead of rebuilding the page from the top.
+- Monthly Pro members can enter the lifetime purchase flow explicitly, while lifetime members remain protected from accidental downgrade paths and stale pending orders can be cleared safely.
+
+### Fixed
+
+- Fixed task actions becoming misaligned, batch edit/delete controls being blocked, completed-task columns overlapping, and task pages briefly opening as a blank white view.
+- Fixed deleted tasks returning after Obsidian was reopened, including tasks originally extracted from conversations or imported sources.
+- Fixed Skill manager search/card overlap and the list jumping to the top whenever a Skill was selected or cleared.
+- Fixed imported Skills not appearing in Weixin, weak natural-language Skill routing, repeated full-page refresh flicker, and narrow-pane horizontal overflow or clipped controls.
+
+### Validation
+
+- Passed 677 plugin service and workflow tests, TypeScript checks, UI class/behavior/overflow guards, Pro compatibility checks, and the production build.
+- Passed real Obsidian runtime audits for the AI assistant, Today dashboard, and task manager at the reported 600 x 1165 narrow viewport as well as the regular desktop layout.
+- Verified source and release community exports, privacy exclusions, forbidden-content scans, exact version alignment, and the three required Obsidian release assets.
+
 ## 0.3.17 - 2026-08-29
 
 ### Added

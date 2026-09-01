@@ -19,11 +19,15 @@ import { PeriodReviewService } from "../services/PeriodReviewService";
 import { ReviewService, type ReviewSummaryPeriod, type SummaryInfo } from "../services/ReviewService";
 import { today } from "../utils/dates";
 import { renderMarkdownDisplay } from "../utils/markdown-render";
+import { renderStableView } from "../utils/stable-view-refresh";
 import { readFile } from "../utils/vault";
 
 export class ReviewView extends ItemView {
   private renderToken = 0;
   private renderDebounceHandle: number | null = null;
+  private renderPromise: Promise<void> | null = null;
+  private renderQueued = false;
+  private preserveScrollOnNextRender = true;
 
   constructor(leaf: WorkspaceLeaf, private plugin: PersonalLifeSystemPlugin) {
     super(leaf);
@@ -38,32 +42,52 @@ export class ReviewView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
-    void this.render();
+    await this.render(false);
     this.registerEvent(this.app.vault.on("create", (file) => this.scheduleRender(file)));
     this.registerEvent(this.app.vault.on("modify", (file) => this.scheduleRender(file)));
     this.registerEvent(this.app.vault.on("delete", (file) => this.scheduleRender(file)));
+    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+      if (this.shouldRefreshForFile(file) || this.shouldRefreshForFile(oldPath)) this.scheduleRender();
+    }));
   }
 
   async onClose(): Promise<void> {
     this.renderToken += 1;
+    this.renderQueued = false;
     if (this.renderDebounceHandle !== null) {
       window.clearTimeout(this.renderDebounceHandle);
       this.renderDebounceHandle = null;
     }
   }
 
-  private async render(): Promise<void> {
-    const token = ++this.renderToken;
-    const container = this.containerEl.children[1];
-    container.empty();
-    const main = createLifeOSShell(container as HTMLElement, this.plugin, "review");
-    main.addClass("lifeos-review-main");
-    this.renderLoadingState(main);
+  private async render(preserveScroll = true): Promise<void> {
+    if (this.renderDebounceHandle !== null) {
+      window.clearTimeout(this.renderDebounceHandle);
+      this.renderDebounceHandle = null;
+    }
+    this.renderToken += 1;
+    this.renderQueued = true;
+    this.preserveScrollOnNextRender = preserveScroll;
+    if (this.renderPromise) return this.renderPromise;
 
+    const run = async (): Promise<void> => {
+      while (this.renderQueued) {
+        this.renderQueued = false;
+        const token = this.renderToken;
+        await this.renderPass(token, this.preserveScrollOnNextRender);
+      }
+    };
+    this.renderPromise = run().finally(() => {
+      this.renderPromise = null;
+    });
+    return this.renderPromise;
+  }
+
+  private async renderPass(token: number, preserveScroll: boolean): Promise<void> {
+    const container = this.containerEl.children[1] as HTMLElement | undefined;
+    if (!container) return;
     await this.plugin.ensureBaseStructure();
     if (!this.isCurrentRender(token)) return;
-
-    main.empty();
     const fs = new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage);
     const reviews = new ReviewService(this.app, fs, this.plugin.settings);
     const periodReviews = new PeriodReviewService(this.app, fs, this.plugin.settings);
@@ -81,6 +105,10 @@ export class ReviewView extends ItemView {
     const completedTasks = activities.reduce((sum, item) => sum + item.completedTaskCount, 0);
     const legacySummaryCount = Object.values(summaryGroups).reduce((total, items) => total + items.length, 0);
     const summaryCount = legacySummaryCount + formalPeriodReviewCount;
+
+    await renderStableView(container, async (staging) => {
+      const main = createLifeOSShell(staging, this.plugin, "review");
+      main.addClass("lifeos-review-main");
 
     createHeroHeader(main, {
       kicker: "成长看板",
@@ -114,6 +142,10 @@ export class ReviewView extends ItemView {
       this.renderSummaryList(summaries, "年度脉络", "把一年里的变化整理成脉络。", reviews, periodReviews, "Yearly", summaryGroups.Yearly, [])
     ]);
     if (!this.isCurrentRender(token)) return;
+    }, {
+      preserveScroll,
+      isCurrent: () => this.isCurrentRender(token)
+    });
   }
 
   private renderLoadingState(main: HTMLElement): void {
@@ -342,10 +374,10 @@ export class ReviewView extends ItemView {
     }, 350);
   }
 
-  private shouldRefreshForFile(file?: TAbstractFile): boolean {
-    if (!file || !("path" in file)) return true;
+  private shouldRefreshForFile(file?: TAbstractFile | string): boolean {
+    if (!file) return true;
     const root = normalizeVaultPath(this.plugin.getRoot());
-    const path = normalizeVaultPath(file.path);
+    const path = normalizeVaultPath(typeof file === "string" ? file : file.path);
     return path === root || path.startsWith(`${root}/`);
   }
 

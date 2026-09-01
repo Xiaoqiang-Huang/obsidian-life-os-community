@@ -641,7 +641,6 @@ body {
   padding: 16px 18px;
   box-shadow: var(--pls-shadow-sm);
   transition: box-shadow 0.3s ease, transform 0.3s ease;
-  animation: pls-card-enter 0.35s ease both;
   overflow: hidden;
 }
 
@@ -660,15 +659,6 @@ body {
   position: relative;
   z-index: 2;
 }
-
-/* Staggered card entrance */
-.pls-section:nth-child(1) { animation-delay: 0.00s; }
-.pls-section:nth-child(2) { animation-delay: 0.06s; }
-.pls-section:nth-child(3) { animation-delay: 0.12s; }
-.pls-section:nth-child(4) { animation-delay: 0.18s; }
-.pls-section:nth-child(5) { animation-delay: 0.24s; }
-.pls-section:nth-child(6) { animation-delay: 0.30s; }
-.pls-section:nth-child(7) { animation-delay: 0.36s; }
 
 .pls-section:hover {
   box-shadow: 0 8px 24px rgba(59, 130, 246, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
@@ -690,17 +680,6 @@ body {
 .pls-section-reports,
 .pls-section-exam {
   padding-left: 15px;
-}
-
-@keyframes pls-card-enter {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 /* ── Button rows ── */
@@ -2291,6 +2270,7 @@ body.is-mobile .lifeos-theme-swatch-desc,
 .lifeos-project-doc-loading-status {
   display: flex !important;
   align-items: center !important;
+  justify-content: flex-start !important;
   gap: 8px !important;
 }
 
@@ -4146,7 +4126,6 @@ body.pls-theme-pastel .pls-message-user .pls-message-body {
    ═════════════════════════════════════════════════════════════════════ */
 .pls-calendar {
   padding: 20px 24px;
-  animation: pls-fade-in 0.3s ease;
 }
 
 /* -- Card wrapper (matches dashboard .pls-section) -- */
@@ -4380,47 +4359,7 @@ body.pls-theme-pastel .pls-message-user .pls-message-body {
   color: #fff;
 }
 
-/* -- Staggered cell animation -- */
-.pls-calendar-day {
-  animation: pls-fade-in 0.28s ease both;
-}
-.pls-calendar-day:nth-child(1)  { animation-delay: 0.00s; }
-.pls-calendar-day:nth-child(2)  { animation-delay: 0.01s; }
-.pls-calendar-day:nth-child(3)  { animation-delay: 0.02s; }
-.pls-calendar-day:nth-child(4)  { animation-delay: 0.03s; }
-.pls-calendar-day:nth-child(5)  { animation-delay: 0.04s; }
-.pls-calendar-day:nth-child(6)  { animation-delay: 0.05s; }
-.pls-calendar-day:nth-child(7)  { animation-delay: 0.06s; }
-.pls-calendar-day:nth-child(8)  { animation-delay: 0.07s; }
-.pls-calendar-day:nth-child(9)  { animation-delay: 0.08s; }
-.pls-calendar-day:nth-child(10) { animation-delay: 0.09s; }
-.pls-calendar-day:nth-child(11) { animation-delay: 0.10s; }
-.pls-calendar-day:nth-child(12) { animation-delay: 0.11s; }
-.pls-calendar-day:nth-child(13) { animation-delay: 0.12s; }
-.pls-calendar-day:nth-child(14) { animation-delay: 0.13s; }
-.pls-calendar-day:nth-child(15) { animation-delay: 0.14s; }
-.pls-calendar-day:nth-child(16) { animation-delay: 0.15s; }
-.pls-calendar-day:nth-child(17) { animation-delay: 0.16s; }
-.pls-calendar-day:nth-child(18) { animation-delay: 0.17s; }
-.pls-calendar-day:nth-child(19) { animation-delay: 0.18s; }
-.pls-calendar-day:nth-child(20) { animation-delay: 0.19s; }
-.pls-calendar-day:nth-child(21) { animation-delay: 0.20s; }
-.pls-calendar-day:nth-child(22) { animation-delay: 0.21s; }
-.pls-calendar-day:nth-child(23) { animation-delay: 0.22s; }
-.pls-calendar-day:nth-child(24) { animation-delay: 0.23s; }
-.pls-calendar-day:nth-child(25) { animation-delay: 0.24s; }
-.pls-calendar-day:nth-child(26) { animation-delay: 0.25s; }
-.pls-calendar-day:nth-child(27) { animation-delay: 0.26s; }
-.pls-calendar-day:nth-child(28) { animation-delay: 0.27s; }
-.pls-calendar-day:nth-child(29) { animation-delay: 0.28s; }
-.pls-calendar-day:nth-child(30) { animation-delay: 0.29s; }
-.pls-calendar-day:nth-child(31) { animation-delay: 0.30s; }
-.pls-calendar-day:nth-child(32) { animation-delay: 0.31s; }
-.pls-calendar-day:nth-child(33) { animation-delay: 0.32s; }
-.pls-calendar-day:nth-child(34) { animation-delay: 0.33s; }
-.pls-calendar-day:nth-child(35) { animation-delay: 0.34s; }
-.pls-calendar-day:nth-child(36) { animation-delay: 0.35s; }
-.pls-calendar-day:nth-child(37) { animation-delay: 0.36s; }
+/* Calendar cells stay visually stable while changing months. */
 
 /* -- Detail modal -- */
 .pls-calendar-detail-modal {
@@ -29638,17 +29577,43 @@ body.is-mobile .lifeos-settings select,
 }
 
 .lifeos-task-batch-selection {
-  display: grid;
-  grid-template-columns: auto auto;
+  display: flex;
   align-items: center;
-  gap: 2px 8px;
-  min-width: 150px;
+  gap: 10px;
+  min-width: 230px;
 }
 
-.lifeos-task-batch-selection > span {
-  grid-column: 2;
+.lifeos-task-select-all-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--lifeos-border);
+  border-radius: 9px;
+  background: var(--lifeos-surface-2);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.lifeos-task-select-all-control input {
+  margin: 0;
+}
+
+.lifeos-batch-selection-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.lifeos-batch-selection-copy > span {
   color: var(--lifeos-muted-2);
   font-size: 11px;
+}
+
+.lifeos-task-batch-delete:not(:disabled) {
+  color: var(--text-error);
+  border-color: color-mix(in srgb, var(--text-error) 35%, var(--lifeos-border));
 }
 
 .lifeos-board-column-list {
@@ -30529,7 +30494,7 @@ body.is-mobile .lifeos-v2-sidebar .lifeos-v2-sidebar-copy,
   .lifeos-chat-view-host .lifeos-root.lifeos-chat-root .lifeos-chat-composer,
   .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root .lifeos-chat-composer {
     flex: 0 0 auto !important;
-    order: 3 !important;
+    order: 6 !important;
   }
 
   body.is-mobile .lifeos-chat-root .lifeos-chat-quick,
@@ -30545,7 +30510,7 @@ body.is-mobile .lifeos-v2-sidebar .lifeos-v2-sidebar-copy,
   .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-log,
   .lifeos-chat-view-host .lifeos-root.lifeos-chat-root .lifeos-chat-log,
   .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root .lifeos-chat-log {
-    order: 5 !important;
+    order: 3 !important;
   }
 
   body.is-mobile .lifeos-chat-root .lifeos-chat-loading,
@@ -30553,7 +30518,15 @@ body.is-mobile .lifeos-v2-sidebar .lifeos-v2-sidebar-copy,
   .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-loading,
   .lifeos-chat-view-host .lifeos-root.lifeos-chat-root .lifeos-chat-loading,
   .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root .lifeos-chat-loading {
-    order: 6 !important;
+    order: 4 !important;
+  }
+
+  body.is-mobile .lifeos-chat-root .lifeos-chat-runtime-status,
+  .lifeos-root.lifeos-chat-root.lifeos-is-mobile-runtime .lifeos-chat-runtime-status,
+  .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-runtime-status,
+  .lifeos-chat-view-host .lifeos-root.lifeos-chat-root .lifeos-chat-runtime-status,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root .lifeos-chat-runtime-status {
+    order: 5 !important;
   }
 }
 
@@ -43795,56 +43768,6 @@ body.lifeos-theme-codex-dark .lifeos-settings {
 body.lifeos-theme-codex-light .lifeos-root,
 body.lifeos-theme-codex-dark .lifeos-root {
   position: relative !important;
-  animation: lifeos-codex-page-enter 180ms ease-out both !important;
-}
-
-.lifeos-theme-codex-light.lifeos-root.is-navigating .lifeos-main,
-.lifeos-theme-codex-dark.lifeos-root.is-navigating .lifeos-main,
-body.lifeos-theme-codex-light .lifeos-root.is-navigating .lifeos-main,
-body.lifeos-theme-codex-dark .lifeos-root.is-navigating .lifeos-main {
-  opacity: 0.72 !important;
-  transform: translateY(2px) !important;
-}
-
-.lifeos-theme-codex-light.lifeos-root.is-navigating::after,
-.lifeos-theme-codex-dark.lifeos-root.is-navigating::after,
-body.lifeos-theme-codex-light .lifeos-root.is-navigating::after,
-body.lifeos-theme-codex-dark .lifeos-root.is-navigating::after {
-  content: "" !important;
-  position: absolute !important;
-  inset: 0 !important;
-  z-index: 20 !important;
-  pointer-events: none !important;
-  background:
-    linear-gradient(90deg, transparent, rgba(37, 99, 235, 0.08), transparent),
-    color-mix(in srgb, var(--lifeos-bg) 72%, transparent) !important;
-  opacity: 0.62 !important;
-  animation: lifeos-codex-nav-buffer 360ms ease-out both !important;
-}
-
-@keyframes lifeos-codex-page-enter {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes lifeos-codex-nav-buffer {
-  0% {
-    opacity: 0;
-    background-position: -120% 0;
-  }
-  35% {
-    opacity: 0.62;
-  }
-  100% {
-    opacity: 0;
-    background-position: 120% 0;
-  }
 }
 
 .lifeos-theme-codex-light :is(
@@ -57130,10 +57053,14 @@ body.is-mobile .lifeos-period-review-modal .lifeos-period-review-draft-actions >
 .lifeos-chat-view-host .lifeos-chat-skill-dropdown-panel,
 .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-dropdown-panel,
 .lifeos-root.lifeos-chat-root .lifeos-chat-skill-dropdown-panel {
+  box-sizing: border-box !important;
   width: min(820px, calc(100vw - 48px)) !important;
   max-width: min(820px, calc(100vw - 48px)) !important;
   max-height: min(68svh, 640px) !important;
   gap: 8px !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain !important;
 }
 
 .lifeos-chat-view-host .lifeos-chat-skill-dropdown-heading,
@@ -57163,29 +57090,56 @@ body.is-mobile .lifeos-period-review-modal .lifeos-period-review-draft-actions >
 }
 
 .lifeos-skill-picker-search-row {
-  position: relative;
-  display: flex;
+  box-sizing: border-box;
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  grid-template-columns: 16px minmax(0, 1fr);
   align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  overflow: hidden;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.lifeos-skill-picker-search-row:focus-within {
+  border-color: var(--interactive-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 18%, transparent);
 }
 
 .lifeos-skill-picker-search-icon {
-  position: absolute;
-  z-index: 1;
-  left: 10px;
   display: inline-flex;
   width: 16px;
   height: 16px;
+  align-items: center;
+  justify-content: center;
   color: var(--text-muted);
   pointer-events: none;
 }
 
 .lifeos-skill-picker-search {
+  box-sizing: border-box !important;
   width: 100% !important;
+  min-width: 0 !important;
   height: 36px !important;
   min-height: 36px !important;
-  padding-inline: 34px 10px !important;
-  border-radius: 8px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  outline: 0 !important;
+  appearance: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
   font-size: 12px !important;
+}
+
+.lifeos-skill-picker-search:focus {
+  border: 0 !important;
+  box-shadow: none !important;
 }
 
 .lifeos-chat-view-host .lifeos-chat-skill-dropdown-panel .lifeos-skill-picker-grid,
@@ -59584,3 +59538,922 @@ html body .modal.lifeos-modal-host.lifeos-modal-host button.lifeos-v2-button.lif
   fill: currentColor !important;
   stroke: currentColor !important;
 }
+
+/* Life OS narrow assistant conversation-flow contract start.
+   A narrow desktop pane must keep the same mental model as the wide layout:
+   session header -> conversation -> composer.  Older mobile rules used visual
+   reordering to keep the composer visible, which placed the input before the
+   conversation and made the page read backwards. */
+.lifeos-chat-view-host .lifeos-root.lifeos-chat-root .lifeos-chat-log,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root .lifeos-chat-log,
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-log {
+  order: 3 !important;
+}
+
+.lifeos-chat-view-host .lifeos-root.lifeos-chat-root .lifeos-chat-loading,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root .lifeos-chat-loading,
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-loading {
+  order: 4 !important;
+}
+
+.lifeos-chat-view-host .lifeos-root.lifeos-chat-root .lifeos-chat-runtime-status,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root .lifeos-chat-runtime-status,
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-runtime-status {
+  order: 5 !important;
+}
+
+.lifeos-chat-view-host .lifeos-root.lifeos-chat-root .lifeos-chat-composer,
+.workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root .lifeos-chat-composer,
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-composer {
+  order: 6 !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-main.lifeos-chat-main-host {
+  min-height: 0 !important;
+  padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px)) !important;
+  overflow: hidden !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-shell-focused {
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-main {
+  display: flex !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: max(520px, calc(100svh - 220px)) !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  flex-direction: column !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border-radius: 8px !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-top {
+  flex: 0 0 auto !important;
+  gap: 8px !important;
+  padding: 12px !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-top-copy p {
+  display: none !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-top-actions {
+  display: flex !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  flex-wrap: nowrap !important;
+  justify-content: flex-start !important;
+  gap: 6px !important;
+  padding: 1px 0 4px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  scrollbar-width: thin !important;
+  overscroll-behavior-inline: contain !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-utility-anchor {
+  display: contents !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-top-actions .lifeos-button {
+  width: auto !important;
+  min-width: max-content !important;
+  flex: 0 0 auto !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-control-summary {
+  min-height: 38px !important;
+  flex: 0 0 auto !important;
+  flex-wrap: nowrap !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-log,
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-log:has(.lifeos-chat-welcome) {
+  flex: 1 1 160px !important;
+  width: 100% !important;
+  min-height: 140px !important;
+  height: auto !important;
+  max-height: none !important;
+  padding: 14px 12px !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-welcome {
+  width: min(520px, 100%) !important;
+  min-height: 120px !important;
+  margin: auto !important;
+  align-content: center !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-runtime-status,
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-composer {
+  flex: 0 0 auto !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-composer {
+  width: 100% !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 9px 10px 8px !important;
+  border-radius: 0 !important;
+}
+
+/* A 1100px window can still have a pane wider than the ResizeObserver
+   breakpoint. Keep the composer inside the visible workspace instead of
+   letting the last action row fall below the Obsidian viewport. */
+@media (min-width: 861px) and (max-width: 1100px) {
+  .lifeos-chat-view-host .lifeos-root.lifeos-chat-root:not(.lifeos-is-narrow-pane) .lifeos-chat-main,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root:not(.lifeos-is-narrow-pane) .lifeos-chat-main {
+    height: max(520px, calc(100svh - 190px)) !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: hidden !important;
+  }
+}
+
+/* The Skill manager is fixed inside a transformed Obsidian view. Viewport
+   units are therefore wider than its real containing block at some pane
+   widths. Pin both inline edges so the panel remains inside the assistant. */
+@media (max-width: 820px) {
+  .lifeos-chat-view-host .lifeos-chat-skill-dropdown-panel,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-chat-skill-dropdown-panel,
+  .lifeos-root.lifeos-chat-root .lifeos-chat-skill-dropdown-panel {
+    inset-inline: 12px !important;
+    width: auto !important;
+    max-width: calc(100% - 24px) !important;
+    transform: none !important;
+  }
+}
+
+@media (max-width: 520px) {
+  .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-main {
+    height: max(540px, calc(100svh - 190px)) !important;
+  }
+
+  .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-composer {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-composer > textarea,
+  .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-send-actions {
+    grid-column: 1 / -1 !important;
+  }
+
+  .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-send-actions {
+    width: 100% !important;
+    min-width: 0 !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+/* Phone-width panes have very little vertical room. Keep the same reading
+   order, but collapse secondary chrome into compact horizontal rails so the
+   conversation remains visible and both composer actions stay reachable. */
+@media (max-width: 420px) {
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-top {
+    gap: 6px !important;
+    padding: 8px !important;
+  }
+
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-top-copy h1 {
+    margin: 0 !important;
+    font-size: 24px !important;
+    line-height: 1.2 !important;
+  }
+
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-top-actions {
+    display: flex !important;
+    height: 48px !important;
+    min-height: 48px !important;
+    max-height: 48px !important;
+    flex-wrap: nowrap !important;
+    gap: 6px !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+  }
+
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-utility-anchor {
+    display: contents !important;
+  }
+
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-top-actions .lifeos-button {
+    width: 44px !important;
+    min-width: 44px !important;
+    max-width: 44px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+    flex: 0 0 44px !important;
+    padding: 0 !important;
+  }
+
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-control-summary {
+    height: 38px !important;
+    min-height: 38px !important;
+    max-height: 38px !important;
+    align-items: center !important;
+    flex-wrap: nowrap !important;
+    padding-block: 5px !important;
+    white-space: nowrap !important;
+  }
+
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-control-summary > * {
+    flex: 0 0 auto !important;
+    white-space: nowrap !important;
+  }
+
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-log,
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-log:has(.lifeos-chat-welcome) {
+    min-height: 116px !important;
+    padding: 8px !important;
+  }
+
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-welcome {
+    min-height: 96px !important;
+  }
+
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-runtime-status {
+    display: grid !important;
+    min-height: 54px !important;
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    align-items: center !important;
+    gap: 6px !important;
+    padding: 5px 8px !important;
+    flex-wrap: nowrap !important;
+  }
+
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-runtime-actions {
+    display: grid !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 4px !important;
+    margin: 0 !important;
+    overflow: visible !important;
+  }
+
+  .workspace-leaf-content[data-type="personal-life-system-chat"] .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-runtime-actions .lifeos-button {
+    min-width: 0 !important;
+    min-height: 40px !important;
+    padding: 5px 6px !important;
+    white-space: nowrap !important;
+  }
+}
+/* Life OS narrow assistant conversation-flow contract end */
+
+/* Life OS compact narrow workspace hierarchy final contract start.
+   Narrow panes are a separate workspace mode, not a scaled desktop page:
+   one icon rail, compact summaries, horizontal option rails and one primary
+   reading/working column. Keep this block last so desktop-theme !important
+   declarations cannot squeeze the task board back into two columns. */
+.lifeos-project-options {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.lifeos-root.lifeos-is-narrow-pane {
+  --lifeos-mobile-page-padding: 10px;
+  --lifeos-mobile-bottom-space: 18px;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-shell {
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  overflow-x: hidden !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-sidebar {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 40 !important;
+  display: flex !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 60px !important;
+  min-height: 60px !important;
+  max-height: 60px !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 6px !important;
+  padding: 6px 8px !important;
+  border-radius: 0 0 14px 14px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  scroll-snap-type: x proximity !important;
+  scrollbar-width: none !important;
+  overscroll-behavior-inline: contain !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-sidebar::-webkit-scrollbar {
+  display: none !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane :is(
+  .lifeos-sidebar-main,
+  .lifeos-sidebar-footer,
+  .lifeos-nav,
+  .lifeos-sidebar-bottom,
+  .lifeos-nav-section
+) {
+  display: contents !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane :is(
+  .lifeos-brand,
+  .lifeos-sidebar-note,
+  .lifeos-nav-section-label,
+  .lifeos-nav-copy
+) {
+  display: none !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-nav-item,
+.lifeos-root.lifeos-is-narrow-pane .lifeos-sidebar-bottom .lifeos-nav-item {
+  position: relative !important;
+  display: grid !important;
+  width: 50px !important;
+  min-width: 50px !important;
+  max-width: 50px !important;
+  height: 48px !important;
+  min-height: 48px !important;
+  max-height: 48px !important;
+  flex: 0 0 50px !important;
+  place-items: center !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border-radius: 12px !important;
+  scroll-snap-align: start !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-nav-item.is-user-hidden {
+  display: none !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-nav-icon {
+  width: 20px !important;
+  height: 20px !important;
+  margin: 0 !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-main:not(.lifeos-chat-main-host) {
+  width: 100% !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 10px 10px 18px !important;
+  overflow-x: hidden !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane :is(.lifeos-hero, .lifeos-page-header) {
+  width: 100% !important;
+  min-width: 0 !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 12px !important;
+  margin: 0 0 12px !important;
+  padding: 16px !important;
+  border-radius: 16px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane :is(.lifeos-hero h1, .lifeos-page-header h1) {
+  font-size: clamp(30px, 8vw, 38px) !important;
+  line-height: 1.08 !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane :is(.lifeos-hero p, .lifeos-page-header p) {
+  margin-top: 6px !important;
+  font-size: 14px !important;
+  line-height: 1.55 !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane :is(.lifeos-hero-side, .lifeos-hero-actions) {
+  width: 100% !important;
+  min-width: 0 !important;
+  align-items: stretch !important;
+  justify-content: stretch !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-hero-side {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 10px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-hero-actions {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-hero-actions .lifeos-button {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 44px !important;
+  justify-content: center !important;
+}
+
+/* Dashboard: keep the overview scannable, but reduce card height and turn the
+   former desktop side rail into compact, full-width utility cards. */
+.lifeos-root.lifeos-is-narrow-pane .lifeos-dashboard-grid,
+.lifeos-root.lifeos-is-narrow-pane .lifeos-dashboard-center,
+.lifeos-root.lifeos-is-narrow-pane .lifeos-dashboard-right {
+  display: grid !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 12px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-dashboard-center > .lifeos-stat-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 10px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-dashboard-center > .lifeos-stat-grid > .lifeos-stat-card {
+  min-height: 106px !important;
+  padding: 14px !important;
+  border-radius: 15px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-stat-card .lifeos-stat-icon {
+  width: 38px !important;
+  height: 38px !important;
+  min-width: 38px !important;
+  border-radius: 12px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-stat-card strong {
+  font-size: clamp(22px, 6vw, 30px) !important;
+  line-height: 1.05 !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane :is(
+  .lifeos-recommendation-card,
+  .lifeos-task-focus-card,
+  .lifeos-dashboard-right .lifeos-panel,
+  .lifeos-status-card,
+  .lifeos-llmwiki-dashboard-reminder
+) {
+  padding: 14px !important;
+  border-radius: 16px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-recommendation-card {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 12px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-recommendation-card h2 {
+  margin: 4px 0 !important;
+  font-size: clamp(22px, 6vw, 28px) !important;
+  line-height: 1.18 !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-recommendation-actions,
+.lifeos-root.lifeos-is-narrow-pane .lifeos-task-focus-card .lifeos-card-actions {
+  display: grid !important;
+  width: 100% !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  justify-content: stretch !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane :is(.lifeos-recommendation-actions, .lifeos-task-focus-card .lifeos-card-actions) .lifeos-button {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 42px !important;
+  justify-content: center !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-status-grid {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 10px !important;
+  margin-top: 0 !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-status-card p {
+  min-height: 0 !important;
+  margin: 8px 0 10px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-dashboard-right .lifeos-action-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-dashboard-right .lifeos-action-tile {
+  min-height: 70px !important;
+  grid-template-columns: 34px minmax(0, 1fr) !important;
+  gap: 8px !important;
+  padding: 10px !important;
+  border-radius: 14px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-dashboard-right .lifeos-action-tile-icon {
+  width: 34px !important;
+  height: 34px !important;
+  border-radius: 11px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-dashboard-right .lifeos-action-tile-description {
+  display: block !important;
+  font-size: 11px !important;
+  line-height: 1.3 !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-workflow-list {
+  gap: 8px !important;
+  margin-top: 10px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-workflow-item {
+  grid-template-columns: 30px minmax(0, 1fr) !important;
+  gap: 9px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-workflow-index {
+  width: 30px !important;
+  min-width: 30px !important;
+  height: 30px !important;
+}
+
+/* Tasks: project selection is context, not a permanent desktop sidebar.
+   Present it as a compact horizontal rail, then give each task state a full
+   swipeable card instead of compressing four columns into unreadable strips. */
+.lifeos-root.lifeos-is-narrow-pane .lifeos-task-workspace .lifeos-project-task-layout,
+body.lifeos-theme-codex-light .lifeos-root.lifeos-is-narrow-pane .lifeos-project-task-layout,
+body.lifeos-theme-codex-dark .lifeos-root.lifeos-is-narrow-pane .lifeos-project-task-layout {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 12px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-task-page-header .lifeos-toolbar {
+  display: grid !important;
+  width: 100% !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-task-page-header {
+  display: grid !important;
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  grid-auto-rows: max-content !important;
+  align-content: start !important;
+  justify-content: stretch !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-task-page-header > :first-child {
+  min-width: 0 !important;
+  flex: none !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-task-page-header .lifeos-toolbar .lifeos-button {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 44px !important;
+  justify-content: center !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-task-page-header .lifeos-toolbar .lifeos-button:last-child {
+  grid-column: 1 / -1 !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-task-workspace .lifeos-project-panel {
+  position: static !important;
+  display: grid !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  gap: 6px !important;
+  padding: 12px !important;
+  border-radius: 16px !important;
+  overflow: hidden !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-project-options {
+  display: flex !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  gap: 8px !important;
+  padding: 2px 0 5px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  scroll-snap-type: x proximity !important;
+  scrollbar-width: none !important;
+  overscroll-behavior-inline: contain !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-project-options::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-project-options .lifeos-project-option {
+  width: min(220px, 72vw) !important;
+  min-width: min(220px, 72vw) !important;
+  max-width: min(220px, 72vw) !important;
+  min-height: 58px !important;
+  flex: 0 0 min(220px, 72vw) !important;
+  grid-template-columns: 42px minmax(0, 1fr) !important;
+  gap: 8px !important;
+  padding: 8px 10px !important;
+  border-radius: 13px !important;
+  scroll-snap-align: start !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-project-options > .lifeos-button {
+  min-width: 132px !important;
+  min-height: 58px !important;
+  flex: 0 0 132px !important;
+  justify-content: center !important;
+  scroll-snap-align: start !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-project-ring {
+  width: 38px !important;
+  height: 38px !important;
+  flex-basis: 38px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-task-summary-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-task-summary-item {
+  min-height: 88px !important;
+  padding: 12px !important;
+  border-radius: 14px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-task-batch-toolbar {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 8px !important;
+  padding: 10px !important;
+  border-radius: 14px !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-task-batch-actions {
+  display: flex !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  flex-wrap: nowrap !important;
+  gap: 6px !important;
+  padding-bottom: 3px !important;
+  overflow-x: auto !important;
+  scrollbar-width: none !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane :is(
+  .lifeos-chat-top-actions,
+  .lifeos-chat-control-summary,
+  .lifeos-chat-compact-toolbar,
+  .lifeos-chat-composer-toolbar,
+  .lifeos-project-options,
+  .lifeos-task-batch-actions
+)::-webkit-scrollbar {
+  display: none !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-task-batch-actions .lifeos-button {
+  min-width: max-content !important;
+  min-height: 40px !important;
+  flex: 0 0 auto !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-task-workspace .lifeos-board {
+  display: grid !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  grid-template-columns: none !important;
+  grid-auto-flow: column !important;
+  grid-auto-columns: min(86%, 420px) !important;
+  gap: 10px !important;
+  padding: 2px 2px 8px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  scroll-snap-type: x mandatory !important;
+  scrollbar-width: thin !important;
+  overscroll-behavior-inline: contain !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-task-workspace .lifeos-board-column {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  min-height: 250px !important;
+  padding: 12px !important;
+  border-radius: 16px !important;
+  scroll-snap-align: start !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-task-workspace .lifeos-board-column-list {
+  /* Keep one vertical scroll owner (the page). Nested task-list scroll areas
+     make wheel/touch navigation feel trapped and reset position after a task
+     mutation. The board itself remains horizontally pageable on narrow panes. */
+  max-height: none !important;
+  overflow: visible !important;
+  overscroll-behavior: auto !important;
+}
+
+.lifeos-root.lifeos-is-narrow-pane .lifeos-task-workspace .lifeos-board-card {
+  padding: 10px !important;
+  border-radius: 13px !important;
+}
+
+/* Assistant: session operations and settings become horizontal rails. The
+   conversation keeps the largest flexible region and both send actions stay
+   visible without turning the page into a stack of oversized controls. */
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-main.lifeos-chat-main-host {
+  padding: 8px 8px 12px !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-main {
+  height: max(560px, calc(100svh - 156px)) !important;
+  border-radius: 14px !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-top {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 8px !important;
+  padding: 12px !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-top-copy h1 {
+  font-size: 30px !important;
+  line-height: 1.08 !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-top-actions {
+  display: grid !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 6px !important;
+  padding: 0 !important;
+  overflow: visible !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-top-actions .lifeos-button {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  min-height: 40px !important;
+  justify-content: center !important;
+  padding: 6px 8px !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-top-actions .lifeos-v2-button-label {
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-control-summary {
+  height: 38px !important;
+  min-height: 38px !important;
+  max-height: 38px !important;
+  padding: 5px 10px !important;
+  flex-wrap: nowrap !important;
+  white-space: nowrap !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  scrollbar-width: none !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane :is(
+  .lifeos-chat-control-summary,
+  .lifeos-chat-compact-toolbar,
+  .lifeos-chat-composer-toolbar
+) {
+  scrollbar-width: none !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane :is(
+  .lifeos-chat-control-summary,
+  .lifeos-chat-compact-toolbar,
+  .lifeos-chat-composer-toolbar
+)::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-control-summary > * {
+  min-width: max-content !important;
+  flex: 0 0 auto !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-log,
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-log:has(.lifeos-chat-welcome) {
+  min-height: 180px !important;
+  padding: 12px !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-welcome {
+  width: min(430px, 100%) !important;
+  min-height: 112px !important;
+  padding: 16px 12px !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-welcome h2 {
+  font-size: clamp(23px, 6vw, 28px) !important;
+  line-height: 1.18 !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-runtime-status {
+  min-height: 48px !important;
+  padding: 5px 8px !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-runtime-actions {
+  display: grid !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 6px !important;
+  overflow: visible !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-runtime-actions .lifeos-button {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 40px !important;
+  justify-content: center !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-composer {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) !important;
+  gap: 8px !important;
+  padding: 8px 10px 10px !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-composer > textarea {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 68px !important;
+  grid-column: 1 / -1 !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-send-actions {
+  display: grid !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  grid-column: 1 / -1 !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+}
+
+.lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-send-actions .lifeos-button {
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 44px !important;
+  justify-content: center !important;
+}
+
+@media (max-width: 420px) {
+  .lifeos-root.lifeos-is-narrow-pane .lifeos-dashboard-center > .lifeos-stat-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-root.lifeos-is-narrow-pane .lifeos-dashboard-right .lifeos-action-grid,
+  .lifeos-root.lifeos-is-narrow-pane .lifeos-recommendation-actions,
+  .lifeos-root.lifeos-is-narrow-pane .lifeos-task-focus-card .lifeos-card-actions {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-top-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .lifeos-root.lifeos-chat-root.lifeos-is-narrow-pane .lifeos-chat-top-actions .lifeos-button {
+    min-height: 38px !important;
+  }
+}
+/* Life OS compact narrow workspace hierarchy final contract end */

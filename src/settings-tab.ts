@@ -2,7 +2,7 @@
 import type PersonalLifeSystemPlugin from "./main";
 import { Setting } from "obsidian";
 import type { AiProviderType, AiReasoningEffort, AssistantStyle, AssistantVerbosity, ChatContextMode, ChatMode, ChatSendBehavior, ChatWritebackMode, DirectoryLanguage, DisplayLanguage, ExamProfileType, HeatmapRange, LlmWikiCompileDepth, LlmWikiLongMaterialMode, LlmWikiSensitiveDefault, PdfOcrEngine, ThemeStyle, WebSearchProviderType, WeixinBotPermission, WeixinSenderPolicy } from "./settings";
-import { analyzeAiConnectionTestModels, DEFAULT_SETTINGS, EXAM_PROFILE_OPTIONS, getAiProviderPreset, getExamChatModeLabel, getExamProfileLabel, getStoredAiApiKey, getStoredAiProviderConfig, getThemeStyleClasses, normalizeAiApiKeyInput, normalizeBrowserCapturePort, normalizeChatWritebackMode, normalizeHiddenSidebarItems, normalizeThemeStyle, setStoredAiApiKey, setStoredAiProviderConfig, SIDEBAR_CONFIGURABLE_ITEMS, THEME_STYLES, validateAiProviderConfig } from "./settings";
+import { analyzeAiConnectionTestModels, DEFAULT_SETTINGS, EXAM_PROFILE_OPTIONS, getAiProviderPreset, getExamChatModeLabel, getExamProfileLabel, getStoredAiApiKey, getStoredAiProviderConfig, getThemeStyleClasses, normalizeAiApiKeyInput, normalizeAiTaskExtractionLimit, normalizeBrowserCapturePort, normalizeChatWritebackMode, normalizeHiddenSidebarItems, normalizeThemeStyle, setStoredAiApiKey, setStoredAiProviderConfig, SIDEBAR_CONFIGURABLE_ITEMS, THEME_STYLES, validateAiProviderConfig } from "./settings";
 import type { LifeOSNavKey } from "./types";
 import { requireProFeature, resolveLicenseStatus } from "./licensing/entitlement";
 import { createImportedAiSkills, getAiSkillCategories, getAiSkills, getAiSkillsByCategory, normalizeAiSkillIds } from "./services/AiSkillService";
@@ -1326,6 +1326,31 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
         }
       }
     );
+    const taskLimitRow = this.row(
+      card,
+      "单次任务提取上限",
+      "从日记、会话或笔记提取任务时，只保留优先级最高的指定数量，避免一次生成大量低价值任务。可设置 1–50 条，默认 8 条。"
+    );
+    const taskLimitInput = taskLimitRow.createEl("input", {
+      cls: "lifeos-input lifeos-setting-number-input",
+      attr: {
+        type: "number",
+        min: "1",
+        max: "50",
+        step: "1",
+        "aria-label": "单次任务提取上限"
+      }
+    });
+    const currentTaskLimit = normalizeAiTaskExtractionLimit(this.plugin.settings.aiTaskExtractionLimit);
+    this.plugin.settings.aiTaskExtractionLimit = currentTaskLimit;
+    taskLimitInput.value = String(currentTaskLimit);
+    taskLimitInput.onchange = () => void (async () => {
+      const next = normalizeAiTaskExtractionLimit(taskLimitInput.value);
+      taskLimitInput.value = String(next);
+      if (next === this.plugin.settings.aiTaskExtractionLimit) return;
+      this.plugin.settings.aiTaskExtractionLimit = next;
+      await this.saveImmediate(`单次任务提取上限已设为 ${next} 条。`);
+    })();
     this.renderSidebarVisibility(card);
   }
 

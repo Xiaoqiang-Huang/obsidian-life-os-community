@@ -369,8 +369,9 @@ export class TaskManagerView extends ItemView {
     panel.createEl("p", {
       text: this.selectedProjectId ? "当前只显示选中项目的任务。" : "当前显示全部项目待办。"
     });
+    const options = panel.createDiv({ cls: "lifeos-project-options" });
     this.renderProjectOption(
-      panel,
+      options,
       "all",
       "全部项目待办",
       overview.all.openCount,
@@ -383,7 +384,7 @@ export class TaskManagerView extends ItemView {
     );
     for (const summary of overview.projects) {
       this.renderProjectOption(
-        panel,
+        options,
         summary.projectId ?? "",
         summary.label,
         summary.openCount,
@@ -396,7 +397,7 @@ export class TaskManagerView extends ItemView {
       );
     }
     this.renderProjectOption(
-      panel,
+      options,
       "unassigned",
       "未归属任务",
       overview.unassigned.openCount,
@@ -407,7 +408,7 @@ export class TaskManagerView extends ItemView {
         void this.render();
       }
     );
-    createButton(panel, "新增项目", () => {
+    createButton(options, "新增项目", () => {
       if (!requireProFeature(this.plugin, "projectManagement")) return;
       new NewProjectModal(this.app, this.plugin, () => this.render()).open();
     }, {
@@ -940,12 +941,15 @@ export class TaskManagerView extends ItemView {
     const selectedTasks = (): LifeOSTask[] => unique.filter((task) => this.selectedTaskKeys.has(this.taskStableKey(task)));
     const toolbar = parent.createDiv({ cls: "lifeos-task-batch-toolbar" });
     const selection = toolbar.createDiv({ cls: "lifeos-task-batch-selection" });
-    const selectAll = selection.createEl("input", {
+    const selectAllControl = selection.createEl("label", { cls: "lifeos-task-select-all-control" });
+    const selectAll = selectAllControl.createEl("input", {
       cls: "lifeos-task-select-all",
       attr: { type: "checkbox", "aria-label": "全选当前筛选结果" }
     });
-    const selectedLabel = selection.createEl("strong", { text: "批量处理" });
-    selection.createSpan({ text: `当前范围 ${unique.length} 项` });
+    selectAllControl.createSpan({ text: "全选当前范围" });
+    const selectionCopy = selection.createDiv({ cls: "lifeos-batch-selection-copy" });
+    const selectedLabel = selectionCopy.createEl("strong", { text: "批量处理" });
+    selectionCopy.createSpan({ text: `当前范围 ${unique.length} 项` });
 
     const actions = toolbar.createDiv({ cls: "lifeos-task-batch-actions" });
     const edit = createButton(actions, "批量编辑", () => {
@@ -970,6 +974,7 @@ export class TaskManagerView extends ItemView {
         await this.runTaskBatch(() => service.batchDeleteTasks(selected), "删除");
       }).open();
     }, { icon: "trash-2", ghost: true });
+    remove.addClass("lifeos-task-batch-delete");
     const clear = createButton(actions, "清空选择", () => {
       for (const task of unique) {
         const key = this.taskStableKey(task);

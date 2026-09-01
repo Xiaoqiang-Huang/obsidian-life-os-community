@@ -25,6 +25,31 @@ export type ProFeatureId =
   | "taskAutoCarryover"
   | "webClipper";
 
+export type LicensePlanTransition = "upgrade" | "same" | "downgrade";
+
+const LICENSE_PLAN_RANK: Record<LicenseStatusLabel, number> = {
+  free: 0,
+  trial: 1,
+  "monthly-pro": 2,
+  "lifetime-pro": 3
+};
+
+/**
+ * Compare two already-verified entitlement states before replacing the locally
+ * stored license. This deliberately treats lifetime Pro as dominant so an old
+ * monthly/trial key cannot silently downgrade a device after an upgrade.
+ */
+export function compareLicensePlans(
+  current: LicenseStatusLabel,
+  candidate: LicenseStatusLabel
+): LicensePlanTransition {
+  const currentRank = LICENSE_PLAN_RANK[current];
+  const candidateRank = LICENSE_PLAN_RANK[candidate];
+  if (candidateRank > currentRank) return "upgrade";
+  if (candidateRank < currentRank) return "downgrade";
+  return "same";
+}
+
 const FEATURE_LABELS: Record<ProFeatureId, string> = {
   aiChat: "AI Chat",
   aiDiarySummary: "AI 日记整理",
@@ -72,7 +97,10 @@ export function resolveLicenseStatus(snapshot: LicenseStateSnapshot | null, now 
   if (!snapshotMatchesVerifiedToken(snapshot, entitlementToken)) return "free";
   if (license.expiresAt && Date.parse(license.expiresAt) <= now.getTime()) return "free";
   if (license.tier === "trial") return "trial";
-  if (isLifeOsMonthlyProSku(license.sku)) return "monthly-pro";
+  // Historical redeem/admin grants may use a lifetime SKU with a finite
+  // expiration. Entitlement duration, not only the SKU name, decides whether
+  // the plan is actually permanent.
+  if (isLifeOsMonthlyProSku(license.sku) || Boolean(license.expiresAt)) return "monthly-pro";
   return "lifetime-pro";
 }
 

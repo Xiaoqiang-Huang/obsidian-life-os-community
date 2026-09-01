@@ -1,4 +1,4 @@
-import { ItemView, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
+import { ItemView, Notice, TAbstractFile, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import { createButton } from "./components/Button";
 import { createCard } from "./components/Card";
 import { createEmptyState } from "./components/EmptyState";
@@ -12,12 +12,18 @@ import { LIFEOS_MEMORY_CATEGORIES, FileSystemService } from "./services/FileSyst
 import { MemoryService, type MemoryRecord } from "./services/MemoryService";
 import type { PendingMemory } from "./types";
 import { renderMarkdownDisplay } from "./utils/markdown-render";
+import { renderStableView } from "./utils/stable-view-refresh";
 
 type MemoryTab = "pending" | "categories" | "trash";
 
 export class MemoryView extends ItemView {
   private activeTab: MemoryTab = "pending";
   private entries: PendingMemory[] = [];
+  private refreshTimer: number | null = null;
+  private renderPromise: Promise<void> | null = null;
+  private renderQueued = false;
+  private renderRequestRevision = 0;
+  private preserveScrollOnNextRender = true;
   private selectedCategory = "其他";
 
   constructor(leaf: WorkspaceLeaf, private plugin: PersonalLifeSystemPlugin) {
@@ -33,21 +39,74 @@ export class MemoryView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
-    await this.render();
-    this.registerEvent(this.app.vault.on("modify", () => void this.render()));
-    this.registerEvent(this.app.vault.on("create", () => void this.render()));
+    await this.render(false);
+    const refresh = (file: TAbstractFile): void => {
+      if (this.shouldRefreshForFile(file)) this.scheduleVaultRefresh();
+    };
+    this.registerEvent(this.app.vault.on("modify", refresh));
+    this.registerEvent(this.app.vault.on("create", refresh));
+    this.registerEvent(this.app.vault.on("delete", refresh));
+    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+      if (this.shouldRefreshForFile(file) || this.shouldRefreshForFile(oldPath)) this.scheduleVaultRefresh();
+    }));
   }
 
-  private async render(): Promise<void> {
+  async onClose(): Promise<void> {
+    if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
+    this.refreshTimer = null;
+    this.renderRequestRevision += 1;
+  }
+
+  private scheduleVaultRefresh(): void {
+    if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
+    this.refreshTimer = window.setTimeout(() => {
+      this.refreshTimer = null;
+      void this.render(true);
+    }, 120);
+  }
+
+  private shouldRefreshForFile(file: TAbstractFile | string): boolean {
+    const path = (typeof file === "string" ? file : file.path).replace(/\\/g, "/");
+    const root = this.plugin.path("Memory").replace(/\\/g, "/").replace(/\/+$/g, "");
+    return path === root || path.startsWith(`${root}/`);
+  }
+
+  private async render(preserveScroll = true): Promise<void> {
+    if (this.refreshTimer !== null) {
+      window.clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+    this.renderRequestRevision += 1;
+    this.renderQueued = true;
+    this.preserveScrollOnNextRender = preserveScroll;
+    if (this.renderPromise) return this.renderPromise;
+
+    const run = async (): Promise<void> => {
+      while (this.renderQueued) {
+        this.renderQueued = false;
+        const revision = this.renderRequestRevision;
+        await this.renderPass(revision, this.preserveScrollOnNextRender);
+      }
+    };
+    this.renderPromise = run().finally(() => {
+      this.renderPromise = null;
+    });
+    return this.renderPromise;
+  }
+
+  private async renderPass(revision: number, preserveScroll: boolean): Promise<void> {
     await this.plugin.ensureBaseStructure();
-    const container = this.containerEl.children[1];
-    container.empty();
-
-    const main = createLifeOSShell(container as HTMLElement, this.plugin, "memory");
-    main.addClass("lifeos-memory-page");
-
+    if (revision !== this.renderRequestRevision) return;
+    const container = this.containerEl.children[1] as HTMLElement | undefined;
+    if (!container) return;
     const service = this.service();
-    this.entries = await service.loadPending();
+    const entries = await service.loadPending();
+    if (revision !== this.renderRequestRevision) return;
+    this.entries = entries;
+
+    await renderStableView(container, async (staging) => {
+      const main = createLifeOSShell(staging, this.plugin, "memory");
+      main.addClass("lifeos-memory-page");
 
     createHeroHeader(main, {
       kicker: "记忆审核",
@@ -84,7 +143,11 @@ export class MemoryView extends ItemView {
     if (this.activeTab === "categories") await this.renderCategories(workspace, service);
     if (this.activeTab === "trash") await this.renderTrash(workspace, service);
 
-    this.renderSideGuide(aside);
+      this.renderSideGuide(aside);
+    }, {
+      preserveScroll,
+      isCurrent: () => revision === this.renderRequestRevision
+    });
   }
 
   private renderSafetyNote(parent: HTMLElement): void {

@@ -229,13 +229,40 @@ function parseMarkdownFrontmatter(markdown: string): { metadata: Record<string, 
   }
 
   const metadata: Record<string, string> = {};
-  for (const line of normalized.slice(4, end).trim().split("\n")) {
-    const match = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$/);
+  const lines = normalized.slice(4, end).split("\n");
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(/^([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$/);
     if (!match) continue;
-    metadata[match[1].toLowerCase()] = match[2].replace(/^["']|["']$/g, "").trim();
+    const key = match[1].toLowerCase();
+    const rawValue = match[2].trim();
+    const blockScalar = rawValue.match(/^([|>])(?:[+-]?\d*|\d*[+-]?)$/u);
+    if (!blockScalar) {
+      metadata[key] = rawValue.replace(/^["']|["']$/g, "").trim();
+      continue;
+    }
+
+    const blockLines: string[] = [];
+    let cursor = index + 1;
+    while (cursor < lines.length && (lines[cursor].trim() === "" || /^\s+/u.test(lines[cursor]))) {
+      blockLines.push(lines[cursor]);
+      cursor += 1;
+    }
+    const indentation = blockLines
+      .filter((line) => line.trim().length > 0)
+      .map((line) => line.match(/^\s*/u)?.[0].length ?? 0)
+      .reduce((minimum, current) => Math.min(minimum, current), Number.POSITIVE_INFINITY);
+    const deindented = blockLines.map((line) => Number.isFinite(indentation) ? line.slice(indentation) : "");
+    metadata[key] = blockScalar[1] === ">"
+      ? deindented.join("\n").split(/\n{2,}/u).map((paragraph) => paragraph.replace(/\n/gu, " ")).join("\n\n").trim()
+      : deindented.join("\n").trim();
+    index = cursor - 1;
   }
 
   return { metadata, body: normalized.slice(end + 4).replace(/^\s+/, "") };
+}
+
+function isYamlBlockScalarIndicator(value: unknown): boolean {
+  return typeof value === "string" && /^[|>](?:[+-]?\d*|\d*[+-]?)$/u.test(value.trim());
 }
 
 function titleFromMarkdown(body: string): string {
@@ -966,8 +993,12 @@ export function normalizeImportedAiSkillRecords(records: unknown): ImportedAiSki
       const merged: ImportedAiSkillRecord = {
         ...rebuilt,
         name: typeof record.name === "string" && record.name.trim() ? record.name.trim() : rebuilt.name,
-        description: typeof record.description === "string" && record.description.trim() ? record.description.trim() : rebuilt.description,
-        lens: typeof record.lens === "string" && record.lens.trim() ? record.lens.trim() : rebuilt.lens,
+        description: typeof record.description === "string" && record.description.trim() && !isYamlBlockScalarIndicator(record.description)
+          ? record.description.trim()
+          : rebuilt.description,
+        lens: typeof record.lens === "string" && record.lens.trim() && !isYamlBlockScalarIndicator(record.lens)
+          ? record.lens.trim()
+          : rebuilt.lens,
         category: normalizeAiSkillCategoryId(record.category, rebuilt.category)
       };
       if (REPLACED_IMPORTED_AI_SKILL_IDS.has(merged.id)) continue;

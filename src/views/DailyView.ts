@@ -1,4 +1,4 @@
-import { ItemView, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
+import { ItemView, Notice, TAbstractFile, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import { createButton } from "../components/Button";
 import { createCard } from "../components/Card";
 import { createEmptyState } from "../components/EmptyState";
@@ -15,6 +15,7 @@ import { FileSystemService } from "../services/FileSystemService";
 import { today } from "../utils/dates";
 import { extractQuickRecordEntries, latestQuickRecord } from "../utils/quick-records";
 import { renderMarkdownDisplay } from "../utils/markdown-render";
+import { renderStableView } from "../utils/stable-view-refresh";
 
 const WEEKDAYS = [
   "\u5468\u65e5",
@@ -27,6 +28,12 @@ const WEEKDAYS = [
 ];
 
 export class DailyView extends ItemView {
+  private refreshTimer: number | null = null;
+  private renderPromise: Promise<void> | null = null;
+  private renderQueued = false;
+  private renderRequestRevision = 0;
+  private preserveScrollOnNextRender = true;
+
   constructor(leaf: WorkspaceLeaf, private plugin: PersonalLifeSystemPlugin) {
     super(leaf);
   }
@@ -40,23 +47,75 @@ export class DailyView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
-    await this.render();
-    this.registerEvent(this.app.vault.on("create", () => void this.render()));
-    this.registerEvent(this.app.vault.on("modify", () => void this.render()));
+    await this.render(false);
+    const refresh = (file: TAbstractFile): void => {
+      if (this.shouldRefreshForFile(file)) this.scheduleVaultRefresh();
+    };
+    this.registerEvent(this.app.vault.on("create", refresh));
+    this.registerEvent(this.app.vault.on("modify", refresh));
+    this.registerEvent(this.app.vault.on("delete", refresh));
+    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+      if (this.shouldRefreshForFile(file) || this.shouldRefreshForFile(oldPath)) this.scheduleVaultRefresh();
+    }));
   }
 
-  private async render(): Promise<void> {
+  async onClose(): Promise<void> {
+    if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
+    this.refreshTimer = null;
+    this.renderRequestRevision += 1;
+  }
+
+  private scheduleVaultRefresh(): void {
+    if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
+    this.refreshTimer = window.setTimeout(() => {
+      this.refreshTimer = null;
+      void this.render(true);
+    }, 120);
+  }
+
+  private shouldRefreshForFile(file: TAbstractFile | string): boolean {
+    const path = (typeof file === "string" ? file : file.path).replace(/\\/g, "/");
+    const root = this.plugin.getRoot().replace(/\\/g, "/").replace(/\/+$/g, "");
+    return path === root || path.startsWith(`${root}/`);
+  }
+
+  private async render(preserveScroll = true): Promise<void> {
+    if (this.refreshTimer !== null) {
+      window.clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+    this.renderRequestRevision += 1;
+    this.renderQueued = true;
+    this.preserveScrollOnNextRender = preserveScroll;
+    if (this.renderPromise) return this.renderPromise;
+
+    const run = async (): Promise<void> => {
+      while (this.renderQueued) {
+        this.renderQueued = false;
+        const revision = this.renderRequestRevision;
+        await this.renderPass(revision, this.preserveScrollOnNextRender);
+      }
+    };
+    this.renderPromise = run().finally(() => {
+      this.renderPromise = null;
+    });
+    return this.renderPromise;
+  }
+
+  private async renderPass(revision: number, preserveScroll: boolean): Promise<void> {
+    const container = this.containerEl.children[1] as HTMLElement | undefined;
+    if (!container) return;
     await this.plugin.ensureBaseStructure();
-    const container = this.containerEl.children[1];
-    container.empty();
-    const main = createLifeOSShell(container as HTMLElement, this.plugin, "diary");
+    if (revision !== this.renderRequestRevision) return;
     const daily = this.dailyService();
     const date = today();
     const todayFile = this.app.vault.getAbstractFileByPath(daily.getTodayNotePath(date));
     const file = todayFile instanceof TFile ? todayFile : null;
     const exists = file instanceof TFile;
 
-    createHeroHeader(main, {
+    await renderStableView(container, async (staging) => {
+      const main = createLifeOSShell(staging, this.plugin, "diary");
+      createHeroHeader(main, {
       kicker: "\u65e5\u8bb0",
       title: exists ? "\u4eca\u5929\u7684\u8bb0\u5f55\u5df2\u7ecf\u5f00\u59cb" : "\u5148\u4e3a\u4eca\u5929\u5f00\u4e00\u4e2a\u8bb0\u5f55\u5165\u53e3",
       description: "\u65e5\u8bb0\u4e0d\u7528\u5b8c\u6574\u3002\u5148\u7559\u4e0b\u51e0\u53e5\u8bdd\uff0c\u4efb\u52a1\u3001\u8bb0\u5fc6\u548c\u590d\u76d8\u624d\u6709\u4e0a\u4e0b\u6587\u3002",
@@ -89,7 +148,11 @@ export class DailyView extends ItemView {
     await this.renderProjectActivityCard(leftColumn, date);
     this.renderPromptCard(leftColumn);
     await this.renderRecent(rightColumn);
-    await this.renderRecentQuickCard(rightColumn, file);
+      await this.renderRecentQuickCard(rightColumn, file);
+    }, {
+      preserveScroll,
+      isCurrent: () => revision === this.renderRequestRevision
+    });
   }
 
   private async createOrOpenToday(): Promise<void> {

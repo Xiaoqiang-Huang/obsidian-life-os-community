@@ -585,6 +585,8 @@ export interface PersonalLifeSystemSettings {
   hiddenSidebarItems: LifeOSNavKey[];
   /** Display preference only; completed task records remain in done.md. */
   taskManagerShowCompleted: boolean;
+  /** Maximum number of new tasks kept from one AI or rule-based extraction. */
+  aiTaskExtractionLimit: number;
   backgroundImagePath: string;
   browserCaptureEnabled: boolean;
   browserCaptureSetupVersion: number;
@@ -620,6 +622,18 @@ export interface PersonalLifeSystemSettings {
 
 export function normalizeThemeStyle(value: string | undefined | null): ThemeStyle {
   return THEME_STYLES.includes(value as ThemeStyle) ? (value as ThemeStyle) : "minimal-warm";
+}
+
+export const DEFAULT_AI_TASK_EXTRACTION_LIMIT = 8;
+export const MAX_AI_TASK_EXTRACTION_LIMIT = 50;
+
+export function normalizeAiTaskExtractionLimit(value: unknown): number {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return DEFAULT_AI_TASK_EXTRACTION_LIMIT;
+  }
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed)) return DEFAULT_AI_TASK_EXTRACTION_LIMIT;
+  return Math.min(MAX_AI_TASK_EXTRACTION_LIMIT, Math.max(1, parsed));
 }
 
 export function normalizeBrowserCapturePort(value: unknown): number {
@@ -1231,6 +1245,7 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   sidebarDirectoryCollapsed: false,
   hiddenSidebarItems: [],
   taskManagerShowCompleted: true,
+  aiTaskExtractionLimit: DEFAULT_AI_TASK_EXTRACTION_LIMIT,
   backgroundImagePath: "",
   browserCaptureEnabled: true,
   browserCaptureSetupVersion: 1,

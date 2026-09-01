@@ -1,4 +1,4 @@
-import { App } from "obsidian";
+import { App, type TFile } from "obsidian";
 import type { LifeOSTask } from "../types";
 import { parseTaskLine } from "../utils/markdown";
 import { ensureFile, ensureFolder, readFile } from "../utils/vault";
@@ -6,9 +6,20 @@ import { FileSystemService } from "./FileSystemService";
 import { carryoverOpenTasks, completeTaskMarkdown, deleteTaskMarkdown, undoTaskMarkdown } from "./lifeos-logic";
 import { randomId } from "../utils/ids";
 import { formatDate, formatTime } from "../utils/dates";
+import {
+  appendTaskDeletionMarkers,
+  filterSuppressedTaskLines,
+  removeTaskDeletionMarker
+} from "./task-deletion-ledger";
 
 const OPEN_TASKS_FALLBACK = "# 未完成待办\n\n";
 const DONE_TASKS_FALLBACK = "# 已完成待办\n\n";
+const DELETED_TASK_INDEX_FALLBACK = [
+  "# 已删除任务索引",
+  "",
+  "> Life OS 自动维护。这里只保存不可逆哈希，不保存任务正文。",
+  ""
+].join("\n");
 
 export interface TaskBatchResult {
   succeeded: number;
@@ -51,12 +62,18 @@ export class TaskService {
   async completeTask(task: LifeOSTask): Promise<string> {
     const openFile = await ensureFile(this.app, this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
     const doneFile = await ensureFile(this.app, this.fs.path("Tasks", "done.md"), DONE_TASKS_FALLBACK);
+    const openContent = await this.app.vault.read(openFile);
+    const doneContent = await this.app.vault.read(doneFile);
     const result = completeTaskMarkdown(
-      await this.app.vault.read(openFile),
-      await this.app.vault.read(doneFile),
+      openContent,
+      doneContent,
       task.line,
       `${formatDate()} ${formatTime()}`
     );
+    if (result.openContent === openContent) {
+      throw new Error("待办已变化或已不存在，请重新查看待办后操作。");
+    }
+    await this.recordDeletedTaskLines([task.line]);
     await this.app.vault.modify(openFile, result.openContent);
     await this.app.vault.modify(doneFile, result.doneContent);
     return result.doneLine;
@@ -83,6 +100,7 @@ export class TaskService {
     const note = data.note?.trim() ? `\n  - note: ${data.note.trim().replace(/\r?\n/g, " ")}` : "";
     const line = `- [ ] ${title} ${tags.join(" ")}${project}${due}${source} ^${randomId("task")}${note}\n`;
     await this.app.vault.append(file, line);
+    await this.unsuppressTaskLine(line);
     return line;
   }
 
@@ -120,7 +138,9 @@ export class TaskService {
     const checkbox = task.source === "done" || task.isDone ? "x" : " ";
     const nextLine = `- [${checkbox}] ${title}${metadata ? ` ${metadata}` : ""}${due}${blockId ? ` ${blockId}` : ""}`;
     lines[index] = nextLine;
+    await this.recordDeletedTaskLines([sourceLine]);
     await this.app.vault.modify(file, lines.join("\n"));
+    await this.unsuppressTaskLine(nextLine);
     return nextLine;
   }
 
@@ -133,19 +153,26 @@ export class TaskService {
     const content = await this.app.vault.read(file);
     const result = deleteTaskMarkdown(content, task.line);
     if (!result.removed) throw new Error("待办已变化或已不存在，请重新查看待办后操作。");
+    await this.recordDeletedTaskLines([task.line]);
     await this.app.vault.modify(file, result.content);
   }
 
   async undoCompleteTask(originalOpenLine: string): Promise<void> {
     const openFile = await ensureFile(this.app, this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
     const doneFile = await ensureFile(this.app, this.fs.path("Tasks", "done.md"), DONE_TASKS_FALLBACK);
+    const openContent = await this.app.vault.read(openFile);
+    const doneContent = await this.app.vault.read(doneFile);
     const result = undoTaskMarkdown(
-      await this.app.vault.read(openFile),
-      await this.app.vault.read(doneFile),
+      openContent,
+      doneContent,
       originalOpenLine
     );
+    if (result.doneContent === doneContent) {
+      throw new Error("已完成任务已变化或已不存在，请重新查看待办后操作。");
+    }
     await this.app.vault.modify(openFile, result.openContent);
     await this.app.vault.modify(doneFile, result.doneContent);
+    await this.unsuppressTaskLine(originalOpenLine);
   }
 
   async batchCompleteTasks(tasks: LifeOSTask[]): Promise<TaskBatchResult> {
@@ -156,6 +183,7 @@ export class TaskService {
     let openContent = await this.app.vault.read(openFile);
     let doneContent = await this.app.vault.read(doneFile);
     const failed: TaskBatchResult["failed"] = [];
+    const completedLines: string[] = [];
     let succeeded = 0;
     const completedAt = `${formatDate()} ${formatTime()}`;
     for (const task of selected) {
@@ -166,9 +194,11 @@ export class TaskService {
       }
       openContent = result.openContent;
       doneContent = result.doneContent;
+      completedLines.push(task.line);
       succeeded += 1;
     }
     if (succeeded > 0) {
+      await this.recordDeletedTaskLines(completedLines);
       await this.app.vault.modify(openFile, openContent);
       await this.app.vault.modify(doneFile, doneContent);
     }
@@ -183,6 +213,7 @@ export class TaskService {
     let openContent = await this.app.vault.read(openFile);
     let doneContent = await this.app.vault.read(doneFile);
     const failed: TaskBatchResult["failed"] = [];
+    const restoredLines: string[] = [];
     let succeeded = 0;
     for (const task of selected) {
       const removable = deleteTaskMarkdown(doneContent, task.line);
@@ -193,11 +224,13 @@ export class TaskService {
       const result = undoTaskMarkdown(openContent, doneContent, task.line);
       openContent = result.openContent;
       doneContent = result.doneContent;
+      restoredLines.push(task.line);
       succeeded += 1;
     }
     if (succeeded > 0) {
       await this.app.vault.modify(openFile, openContent);
       await this.app.vault.modify(doneFile, doneContent);
+      await this.unsuppressTaskLines(restoredLines);
     }
     return { succeeded, failed };
   }
@@ -210,7 +243,10 @@ export class TaskService {
     let openContent = await this.app.vault.read(openFile);
     let doneContent = await this.app.vault.read(doneFile);
     const failed: TaskBatchResult["failed"] = [];
+    const deletedLines: string[] = [];
     let succeeded = 0;
+    let openChanged = false;
+    let doneChanged = false;
     for (const task of selected) {
       const current = task.source === "done" ? doneContent : openContent;
       const result = deleteTaskMarkdown(current, task.line);
@@ -218,13 +254,20 @@ export class TaskService {
         failed.push({ task, reason: "任务已变化或已不存在" });
         continue;
       }
-      if (task.source === "done") doneContent = result.content;
-      else openContent = result.content;
+      if (task.source === "done") {
+        doneContent = result.content;
+        doneChanged = true;
+      } else {
+        openContent = result.content;
+        openChanged = true;
+      }
+      deletedLines.push(task.line);
       succeeded += 1;
     }
     if (succeeded > 0) {
-      await this.app.vault.modify(openFile, openContent);
-      await this.app.vault.modify(doneFile, doneContent);
+      await this.recordDeletedTaskLines(deletedLines);
+      if (openChanged) await this.app.vault.modify(openFile, openContent);
+      if (doneChanged) await this.app.vault.modify(doneFile, doneContent);
     }
     return { succeeded, failed };
   }
@@ -256,12 +299,25 @@ export class TaskService {
 
     await this.app.vault.create(backupPath, original);
     try {
+      await this.recordDeletedTaskLines(unfinished.map((task) => task.line));
       await this.app.vault.modify(openFile, OPEN_TASKS_FALLBACK);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`任务备份已保存到 ${backupPath}，但清空 open.md 失败：${message}`);
     }
     return { cleared: unfinished.length, openPath, backupPath };
+  }
+
+  /**
+   * Automatic extraction and carryover must respect an explicit deletion,
+   * including after the plugin or Obsidian has restarted.
+   */
+  async filterSuppressedAutomaticTaskLines(taskLines: string[]): Promise<string[]> {
+    if (taskLines.length === 0) return [];
+    const ledgerFile = this.app.vault.getAbstractFileByPath(this.deletedTaskIndexPath());
+    if (!ledgerFile || !ledgerFile.path.endsWith(".md")) return [...taskLines];
+    const content = await this.app.vault.read(ledgerFile as TFile);
+    return filterSuppressedTaskLines(taskLines, content);
   }
 
   async batchUpdateTasks(tasks: LifeOSTask[], update: TaskBatchUpdate): Promise<TaskBatchResult> {
@@ -325,6 +381,43 @@ export class TaskService {
       this.fs.path("Tasks", source === "done" ? "done.md" : "open.md"),
       source === "done" ? DONE_TASKS_FALLBACK : OPEN_TASKS_FALLBACK
     );
+  }
+
+  private deletedTaskIndexPath(): string {
+    return this.fs.path("Tasks", "archive", "deleted-task-index.md");
+  }
+
+  private async recordDeletedTaskLines(taskLines: string[]): Promise<void> {
+    if (taskLines.length === 0) return;
+    const archiveFolder = this.fs.path("Tasks", "archive");
+    await ensureFolder(this.app, archiveFolder);
+    const ledgerFile = await ensureFile(this.app, this.deletedTaskIndexPath(), DELETED_TASK_INDEX_FALLBACK);
+    const current = await this.app.vault.read(ledgerFile);
+    const next = appendTaskDeletionMarkers(current, taskLines);
+    if (next.added > 0) {
+      await this.app.vault.append(ledgerFile, next.content.slice(current.length));
+    }
+  }
+
+  private async unsuppressTaskLine(taskLine: string): Promise<void> {
+    await this.unsuppressTaskLines([taskLine]);
+  }
+
+  private async unsuppressTaskLines(taskLines: string[]): Promise<void> {
+    if (taskLines.length === 0) return;
+    const ledgerFile = this.app.vault.getAbstractFileByPath(this.deletedTaskIndexPath());
+    if (!ledgerFile || !ledgerFile.path.endsWith(".md")) return;
+    const current = await this.app.vault.read(ledgerFile as TFile);
+    let content = current;
+    let removed = false;
+    for (const taskLine of taskLines) {
+      const next = removeTaskDeletionMarker(content, taskLine);
+      content = next.content;
+      removed = removed || next.removed;
+    }
+    if (removed) {
+      await this.app.vault.modify(ledgerFile as TFile, content);
+    }
   }
 
   private findTaskLineIndex(lines: string[], taskLine: string): number {

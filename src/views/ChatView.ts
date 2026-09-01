@@ -116,6 +116,14 @@ interface RecognizedWritebackCandidates {
   memory: MemoryWritebackCandidate | null;
 }
 
+interface SkillPickerRefreshState {
+  categoryOpen: Record<string, boolean>;
+  dropdownOpen: boolean;
+  focusedAction: "manage" | "search" | "select" | null;
+  focusedSkillId: string;
+  scrollTop: number;
+}
+
 interface DiaryWritebackCandidate {
   title: string;
   targetPath: string;
@@ -172,6 +180,7 @@ const AI_GENERATED_FOOTER_PATTERN = /(?:^|\n)\s*(?:AI生成|AI鐢熸垚)\s*$/u;
 
 export class LifeOSChatView extends ItemView {
   private messages: ChatMessage[] = [];
+  private renderedMessageEls = new WeakMap<ChatMessage, { bubble: HTMLElement; signature: string }>();
   private logEl!: HTMLElement;
   private inputEl!: HTMLTextAreaElement;
   private fileInputEl: HTMLInputElement | null = null;
@@ -191,6 +200,7 @@ export class LifeOSChatView extends ItemView {
   private composerControlsEl: HTMLElement | null = null;
   private webSearchSelectEl: HTMLSelectElement | null = null;
   private webSearchSummaryEl: HTMLElement | null = null;
+  private skillControlSummaryEl: HTMLElement | null = null;
   private activeDrawerKind: "history" | "context" | null = null;
   private historyChannelFilter: ChatHistoryChannelFilter = "all";
   private contextCards: ChatContextStatusCard[] = [];
@@ -267,6 +277,7 @@ export class LifeOSChatView extends ItemView {
     this.composerControlsEl = null;
     this.webSearchSelectEl = null;
     this.webSearchSummaryEl = null;
+    this.skillControlSummaryEl = null;
     this.webSearchMode = normalizeWebSearchMode(this.plugin.settings.defaultWebSearchMode);
     this.fileInputEl = null;
     this.attachmentListEl = null;
@@ -471,7 +482,7 @@ export class LifeOSChatView extends ItemView {
       return item.createEl("strong", { text: value });
     };
 
-    addSummaryItem("Skill", selectedSkills.map((skill) => skill.name).join(" + ") || "Life OS 总管");
+    this.skillControlSummaryEl = addSummaryItem("Skill", selectedSkills.map((skill) => skill.name).join(" + ") || "Life OS 总管");
     addSummaryItem("项目", this.selectedProjectScopeId ? "当前项目" : "全部项目");
     addSummaryItem("模型", activeProvider?.model || activeProvider?.label || "未配置");
     this.webSearchSummaryEl = addSummaryItem("联网", WEB_SEARCH_MODE_LABELS[this.webSearchMode]);
@@ -1414,7 +1425,7 @@ export class LifeOSChatView extends ItemView {
     createButton(toolActions, "重置选择", () => {
       this.selectedSkillIds = ["lifeos-general"];
       this.persistSelectedSkills();
-      this.refreshComposerControls();
+      this.syncSkillSelectionUi(dropdown);
     }, { ghost: true });
     if (normalizeAiSkillOverrides(overrides).length > 0) {
       createButton(toolActions, "恢复内置", () => void this.restoreBuiltInSkills(), { ghost: true, icon: "rotate-ccw" });
@@ -1426,7 +1437,11 @@ export class LifeOSChatView extends ItemView {
     const searchInput = searchRow.createEl("input", {
       cls: "lifeos-input lifeos-skill-picker-search",
       attr: {
-        type: "search",
+        type: "text",
+        role: "searchbox",
+        inputmode: "search",
+        autocomplete: "off",
+        spellcheck: "false",
         placeholder: "搜索 Skill 名称、说明或分类",
         "aria-label": "搜索 Skill"
       }
@@ -1438,6 +1453,7 @@ export class LifeOSChatView extends ItemView {
       const skills = getAiSkillsByCategory(category.id, this.importedAiSkills, overrides);
       if (skills.length === 0) continue;
       const details = grid.createEl("details", { cls: "lifeos-skill-category" });
+      details.dataset.categoryId = String(category.id);
       details.dataset.categorySearch = `${category.label} ${category.description}`.toLocaleLowerCase();
       details.open = true;
       const summary = details.createEl("summary");
@@ -1451,6 +1467,7 @@ export class LifeOSChatView extends ItemView {
           cls: this.selectedSkillIds.includes(skill.id) ? "lifeos-chat-skill-option is-active" : "lifeos-chat-skill-option",
           attr: { title: `${skill.name}｜${skill.description}` }
         });
+        option.dataset.skillId = skill.id;
         option.dataset.searchText = `${skill.name} ${skill.description} ${skill.lens} ${category.label}`.toLocaleLowerCase();
         const selectButton = option.createEl("button", {
           cls: "lifeos-chat-skill-select",
@@ -1463,7 +1480,7 @@ export class LifeOSChatView extends ItemView {
         const state = selectButton.createSpan({ cls: "lifeos-chat-skill-select-state" });
         setIcon(state, "check");
         selectButton.createSpan({ cls: "lifeos-chat-skill-name", text: skill.name });
-        selectButton.onclick = () => this.toggleSkill(skill.id);
+        selectButton.onclick = () => this.toggleSkill(skill.id, dropdown);
 
         const manageButton = option.createEl("button", {
           cls: "lifeos-chat-skill-manage",
@@ -1504,13 +1521,40 @@ export class LifeOSChatView extends ItemView {
     applyFilter();
   }
 
-  private toggleSkill(id: string): void {
+  private toggleSkill(id: string, dropdown?: HTMLElement): void {
     const next = new Set(this.selectedSkillIds);
     if (next.has(id)) next.delete(id);
     else next.add(id);
     this.selectedSkillIds = normalizeAiSkillIds(Array.from(next), undefined, this.importedAiSkills, this.plugin.settings.aiSkillOverrides);
     this.persistSelectedSkills();
-    this.refreshComposerControls();
+    this.syncSkillSelectionUi(dropdown);
+  }
+
+  private syncSkillSelectionUi(dropdown?: HTMLElement): void {
+    const selectedSkills = getAiSkills(
+      this.selectedSkillIds,
+      this.importedAiSkills,
+      this.plugin.settings.aiSkillOverrides
+    );
+    const selectedIds = new Set(this.selectedSkillIds);
+    const activeDropdown = dropdown ?? this.composerControlsEl?.querySelector<HTMLElement>(".lifeos-chat-skill-dropdown") ?? undefined;
+    const dropdownValue = activeDropdown?.querySelector<HTMLElement>(".lifeos-chat-skill-dropdown-value");
+    if (dropdownValue) {
+      dropdownValue.setText(selectedSkills.length > 1
+        ? `${selectedSkills[0]?.name ?? "Life OS 总管"} +${selectedSkills.length - 1}`
+        : selectedSkills[0]?.name ?? "Life OS 总管");
+    }
+    for (const option of Array.from(activeDropdown?.querySelectorAll<HTMLElement>(".lifeos-chat-skill-option") ?? [])) {
+      const skillId = option.dataset.skillId ?? "";
+      const active = selectedIds.has(skillId);
+      option.toggleClass("is-active", active);
+      const selectButton = option.querySelector<HTMLButtonElement>(".lifeos-chat-skill-select");
+      if (!selectButton) continue;
+      const skillName = option.querySelector<HTMLElement>(".lifeos-chat-skill-name")?.textContent?.trim() || "Skill";
+      selectButton.setAttribute("aria-pressed", String(active));
+      selectButton.setAttribute("aria-label", `${active ? "取消选择" : "选择"} ${skillName}`);
+    }
+    this.skillControlSummaryEl?.setText(selectedSkills.map((skill) => skill.name).join(" + ") || "Life OS 总管");
   }
 
   private openAiSkillManager(skill: AiSkill): void {
@@ -1643,10 +1687,76 @@ export class LifeOSChatView extends ItemView {
 
     const nextSibling = current.nextSibling;
     const shouldRefocusInput = document.activeElement === this.inputEl;
+    const skillPickerState = this.captureSkillPickerRefreshState(current);
     current.remove();
     this.renderComposerControls(host, nextSibling);
+    this.restoreSkillPickerRefreshState(skillPickerState);
+    this.syncSkillSelectionUi();
     if (shouldRefocusInput) this.inputEl?.focus({ preventScroll: true });
     this.resizeComposer();
+  }
+
+  private captureSkillPickerRefreshState(current: HTMLElement): SkillPickerRefreshState | null {
+    const dropdown = current.querySelector<HTMLDetailsElement>(".lifeos-chat-skill-dropdown");
+    const panel = current.querySelector<HTMLElement>(".lifeos-chat-skill-dropdown-panel");
+    if (!dropdown || !panel) return null;
+
+    const categoryOpen: Record<string, boolean> = {};
+    for (const category of Array.from(panel.querySelectorAll<HTMLDetailsElement>(".lifeos-skill-category"))) {
+      const categoryId = category.dataset.categoryId;
+      if (categoryId) categoryOpen[categoryId] = category.open;
+    }
+
+    const activeElement = document.activeElement instanceof HTMLElement && current.contains(document.activeElement)
+      ? document.activeElement
+      : null;
+    const focusedOption = activeElement?.closest<HTMLElement>(".lifeos-chat-skill-option");
+    const focusedAction = activeElement?.classList.contains("lifeos-skill-picker-search")
+      ? "search"
+      : activeElement?.classList.contains("lifeos-chat-skill-manage")
+        ? "manage"
+        : activeElement?.classList.contains("lifeos-chat-skill-select")
+          ? "select"
+          : null;
+
+    return {
+      categoryOpen,
+      dropdownOpen: dropdown.open,
+      focusedAction,
+      focusedSkillId: focusedOption?.dataset.skillId ?? "",
+      scrollTop: panel.scrollTop
+    };
+  }
+
+  private restoreSkillPickerRefreshState(state: SkillPickerRefreshState | null): void {
+    if (!state || !this.composerControlsEl) return;
+    const controls = this.composerControlsEl;
+    const applyState = (): void => {
+      if (this.composerControlsEl !== controls || !controls.isConnected) return;
+      const dropdown = controls.querySelector<HTMLDetailsElement>(".lifeos-chat-skill-dropdown");
+      const panel = controls.querySelector<HTMLElement>(".lifeos-chat-skill-dropdown-panel");
+      if (!dropdown || !panel) return;
+      dropdown.open = state.dropdownOpen;
+      this.isSkillPickerExpanded = state.dropdownOpen;
+      for (const category of Array.from(panel.querySelectorAll<HTMLDetailsElement>(".lifeos-skill-category"))) {
+        const categoryId = category.dataset.categoryId;
+        if (categoryId && Object.prototype.hasOwnProperty.call(state.categoryOpen, categoryId)) {
+          category.open = state.categoryOpen[categoryId];
+        }
+      }
+      if (state.focusedAction === "search") {
+        panel.querySelector<HTMLInputElement>(".lifeos-skill-picker-search")?.focus({ preventScroll: true });
+      } else if (state.focusedSkillId) {
+        const option = Array.from(panel.querySelectorAll<HTMLElement>(".lifeos-chat-skill-option"))
+          .find((candidate) => candidate.dataset.skillId === state.focusedSkillId);
+        option?.querySelector<HTMLButtonElement>(
+          state.focusedAction === "manage" ? ".lifeos-chat-skill-manage" : ".lifeos-chat-skill-select"
+        )?.focus({ preventScroll: true });
+      }
+      panel.scrollTop = state.scrollTop;
+    };
+    applyState();
+    window.requestAnimationFrame(applyState);
   }
 
   private openGitHubSkillInstallModal(): void {
@@ -1687,7 +1797,8 @@ export class LifeOSChatView extends ItemView {
     this.plugin.settings.defaultAiSkillId = this.selectedSkillIds[0] ?? "lifeos-general";
     await this.plugin.saveSettings();
     new Notice(`${savedRecord.sourceKind === "local-file" ? "本地 Skill 已导入" : "GitHub Skill 已安装"}：${savedRecord.name}`);
-    await this.onOpen();
+    this.isSkillPickerExpanded = true;
+    this.refreshComposerControls();
   }
 
   private persistSelectedSkills(): void {
@@ -2124,10 +2235,12 @@ export class LifeOSChatView extends ItemView {
 
   private renderMessages(): void {
     if (!this.logEl) return;
-    this.logEl.empty();
+    const previousScrollTop = this.logEl.scrollTop;
+    const wasNearBottom = this.logEl.scrollHeight - this.logEl.scrollTop - this.logEl.clientHeight <= 56;
     if (this.messages.length === 0) {
       const assistantName = this.plugin.settings.assistantName || "Life OS";
-      const welcome = this.logEl.createDiv({ cls: "lifeos-chat-welcome" });
+      const staging = this.logEl.ownerDocument.createElement("div");
+      const welcome = staging.createDiv({ cls: "lifeos-chat-welcome" });
       welcome.createEl("h2", { text: `从当前状态继续` });
       const copy = welcome.createEl("p");
       copy.createEl("span", { cls: "lifeos-chat-welcome-assistant-name", text: assistantName });
@@ -2141,14 +2254,46 @@ export class LifeOSChatView extends ItemView {
             ? "任何写入都会先预览确认"
             : "默认只问答，不主动改动本地内容"
       });
+      this.logEl.replaceChildren(welcome);
       return;
     }
-    for (const message of this.messages) this.renderMessage(message);
+
+    const nextBubbles: HTMLElement[] = [];
+    const lastMessage = this.messages[this.messages.length - 1] ?? null;
+    const lastAssistant = lastMessage?.role === "ai" ? lastMessage : null;
+    for (const message of this.messages) {
+      const signature = [
+        message.role,
+        message.content,
+        message === lastAssistant ? "latest" : "previous",
+        message === lastAssistant ? String(this.lastContextBundle?.sources.length ?? 0) : "0"
+      ].join("\u0000");
+      const rendered = this.renderedMessageEls.get(message);
+      if (rendered?.signature === signature) {
+        nextBubbles.push(rendered.bubble);
+        continue;
+      }
+
+      const staging = this.logEl.ownerDocument.createElement("div");
+      const content = this.renderMessage(message, staging);
+      const bubble = content.closest(".lifeos-chat-bubble") as HTMLElement | null;
+      if (!bubble) continue;
+      this.renderedMessageEls.set(message, { bubble, signature });
+      nextBubbles.push(bubble);
+    }
+    this.logEl.replaceChildren(...nextBubbles);
+    if (wasNearBottom) {
+      window.requestAnimationFrame(() => {
+        if (this.logEl) this.logEl.scrollTop = this.logEl.scrollHeight;
+      });
+    } else {
+      this.logEl.scrollTop = Math.min(previousScrollTop, Math.max(0, this.logEl.scrollHeight - this.logEl.clientHeight));
+    }
   }
 
-  private renderMessage(message: ChatMessage): HTMLElement {
+  private renderMessage(message: ChatMessage, parent: HTMLElement = this.logEl): HTMLElement {
     const roleClass = message.role === "user" ? "lifeos-chat-bubble-user" : "lifeos-chat-bubble-ai";
-    const bubble = this.logEl.createDiv({ cls: `lifeos-chat-bubble ${roleClass}` });
+    const bubble = parent.createDiv({ cls: `lifeos-chat-bubble ${roleClass}` });
     const header = bubble.createDiv({ cls: "lifeos-chat-bubble-header" });
     header.createDiv({ cls: "lifeos-chat-bubble-label", text: message.role === "user" ? "我" : (this.plugin.settings.assistantName || "Life OS") });
     const actions = header.createDiv({ cls: "lifeos-chat-message-actions" });
@@ -2194,7 +2339,8 @@ export class LifeOSChatView extends ItemView {
     }
     if (message.role === "ai") this.renderMessageActivity(bubble, message);
     const content = bubble.createDiv({ cls: "lifeos-chat-bubble-content" });
-    renderMarkdownDisplay(this.app, this, content, message.content);
+    content.appendChild(content.ownerDocument.createTextNode(message.content));
+    void renderMarkdownDisplay(this.app, this, content, message.content);
     if (message.role === "ai") this.renderWritebackActions(bubble, message.content);
     return content;
   }
@@ -4273,6 +4419,21 @@ export class LifeOSChatView extends ItemView {
 
   private composerHeightBounds(): { min: number; max: number } {
     const viewportHeight = Math.max(420, window.visualViewport?.height ?? window.innerHeight ?? 760);
+    const paneWidth = this.inputEl?.closest<HTMLElement>(".lifeos-chat-main")?.getBoundingClientRect().width
+      ?? window.innerWidth
+      ?? 1024;
+    if (paneWidth <= 320) {
+      return {
+        min: 64,
+        max: 64
+      };
+    }
+    if (paneWidth <= 520) {
+      return {
+        min: 64,
+        max: Math.round(Math.min(160, Math.max(112, viewportHeight * 0.2)))
+      };
+    }
     return {
       min: 64,
       max: Math.round(Math.min(420, Math.max(180, viewportHeight * 0.42)))

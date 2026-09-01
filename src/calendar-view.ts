@@ -4,6 +4,7 @@ import type { IPlugin } from "./plugin-api";
 import { formatDate } from "./utils";
 import { createLifeOsShell } from "./lifeos-shell";
 import { renderMarkdownDisplay } from "./utils/markdown-render";
+import { renderStableView } from "./utils/stable-view-refresh";
 
 interface DayData {
   diary: boolean;
@@ -18,6 +19,9 @@ export class CalendarView extends ItemView {
   private month: number;
   private monthData = new Map<string, DayData>();
   private rootEl!: HTMLElement;
+  private renderPromise: Promise<void> | null = null;
+  private renderQueued = false;
+  private renderRequestRevision = 0;
 
   constructor(leaf: WorkspaceLeaf, private plugin: IPlugin) {
     super(leaf);
@@ -38,22 +42,50 @@ export class CalendarView extends ItemView {
       title: "日历",
       subtitle: "按时间查看任务、日记、学习打卡与复盘痕迹",
       showDirectory: true,
-      onRefresh: () => this.onOpen()
+      onRefresh: () => void this.render()
     });
     this.rootEl = content.createDiv({ cls: "pls-calendar-panel" });
-    await this.render();
+    await this.render(false);
   }
 
-  private async render(): Promise<void> {
-    this.rootEl.empty();
+  async onClose(): Promise<void> {
+    this.renderQueued = false;
+    this.renderRequestRevision += 1;
+  }
+
+  private async render(preserveScroll = true): Promise<void> {
+    this.renderRequestRevision += 1;
+    this.renderQueued = true;
+    if (this.renderPromise) return this.renderPromise;
+
+    const run = async (): Promise<void> => {
+      while (this.renderQueued) {
+        this.renderQueued = false;
+        const revision = this.renderRequestRevision;
+        await this.renderPass(revision, preserveScroll);
+      }
+    };
+    this.renderPromise = run().finally(() => {
+      this.renderPromise = null;
+    });
+    return this.renderPromise;
+  }
+
+  private async renderPass(revision: number, preserveScroll: boolean): Promise<void> {
     await this.gatherMonthData();
+    if (revision !== this.renderRequestRevision || !this.rootEl?.isConnected) return;
 
-    // Card wrapper matching dashboard section aesthetic
-    const card = this.rootEl.createDiv({ cls: "pls-calendar-card" });
-    card.createDiv({ cls: "pls-calendar-accent" });
+    await renderStableView(this.rootEl, (staging) => {
+      // Card wrapper matching dashboard section aesthetic
+      const card = staging.createDiv({ cls: "pls-calendar-card" });
+      card.createDiv({ cls: "pls-calendar-accent" });
 
-    this.renderHeader(card);
-    this.renderGrid(card);
+      this.renderHeader(card);
+      this.renderGrid(card);
+    }, {
+      preserveScroll,
+      isCurrent: () => revision === this.renderRequestRevision && this.rootEl.isConnected
+    });
   }
 
   private pad(n: number): string { return String(n).padStart(2, "0"); }

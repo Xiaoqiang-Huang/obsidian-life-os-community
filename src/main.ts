@@ -41,6 +41,7 @@ import {
   normalizePaddleOcrEndpoint,
   normalizePdfOcrEngine,
   normalizeHiddenSidebarItems,
+  normalizeAiTaskExtractionLimit,
   normalizeTaskFormDraft,
   normalizeThemeStyle,
   normalizeUiFrameworkSettings,
@@ -114,6 +115,7 @@ import {
   type WeixinConnectionStatus
 } from "./services/weixin/WeixinIlinkService";
 import { DailyNoteService } from "./services/DailyNoteService";
+import { TaskService } from "./services/TaskService";
 import { formatMemoryCandidate } from "./services/lifeos-logic";
 import {
   applyWritebackItems,
@@ -179,6 +181,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   private modalTextareaObserver: MutationObserver | null = null;
   private liquidGlassObserver: MutationObserver | null = null;
   private liquidGlassRefreshTimer: number | null = null;
+  private lifeOsFileStylingFrame: number | null = null;
   private aiEditPopover: AiEditPopoverController | null = null;
   private aiEditPointerDown: { x: number; y: number } | null = null;
   private aiEditSelectionTimer: number | null = null;
@@ -635,6 +638,10 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     }
     this.modalTextareaObserver?.disconnect();
     this.modalTextareaObserver = null;
+    if (this.lifeOsFileStylingFrame !== null) {
+      window.cancelAnimationFrame(this.lifeOsFileStylingFrame);
+      this.lifeOsFileStylingFrame = null;
+    }
     if (this.aiEditSelectionTimer) {
       window.clearTimeout(this.aiEditSelectionTimer);
       this.aiEditSelectionTimer = null;
@@ -688,6 +695,9 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.settings.customExamProfileName = this.settings.customExamProfileName ?? "";
     this.settings.lastTaskDraft = normalizeTaskFormDraft((storedData as Record<string, unknown>).lastTaskDraft);
     this.settings.hiddenSidebarItems = normalizeHiddenSidebarItems((storedData as Record<string, unknown>).hiddenSidebarItems);
+    this.settings.aiTaskExtractionLimit = normalizeAiTaskExtractionLimit(
+      (storedData as Record<string, unknown>).aiTaskExtractionLimit
+    );
     this.settings.customAiSkillCategories = normalizeCustomAiSkillCategories((storedData as Record<string, unknown>).customAiSkillCategories);
     this.settings.importedAiSkills = normalizeImportedAiSkillRecords(storedImportedAiSkills);
     this.settings.aiSkillOverrides = normalizeAiSkillOverrides(storedAiSkillOverrides);
@@ -1594,6 +1604,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       }
     };
 
+    const taskLimit = normalizeAiTaskExtractionLimit(this.settings.aiTaskExtractionLimit);
     const content = await this.app.vault.read(file);
     const plainContent = content
       .replace(/^---[\s\S]*?---\s*/m, "")
@@ -1614,7 +1625,9 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
         {
           role: "user",
           content:
-            "从下面内容提取需要记录的待办。只返回 JSON 数组，每项包含 title、due_date、category。没有待办则返回 []。\n\n" +
+            `从下面内容提取真正需要继续执行、尚未完成的待办，最多返回 ${taskLimit} 项。` +
+            "按重要性和紧迫性排序，不要把同一件事拆成大量子步骤，不要把背景、结论、已完成事项或泛泛建议当成任务。" +
+            "只返回 JSON 数组，每项包含 title、due_date、category。没有待办则返回 []。\n\n" +
             content
         }
       ]
@@ -1651,12 +1664,24 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       const openContent = await this.app.vault.read(openAbstract);
       existingTasks = parseOpenTasks(openContent);
     }
-    const newLines = dedupTaskLines(taskLines, existingTasks);
-    const dupCount = taskLines.length - newLines.length;
+    const eligibleTaskLines = await new TaskService(this.app, this.fileSystem())
+      .filterSuppressedAutomaticTaskLines(taskLines);
+    const deduplicatedLines = dedupTaskLines(eligibleTaskLines, existingTasks);
+    const newLines = deduplicatedLines.slice(0, taskLimit);
+    const suppressedCount = taskLines.length - eligibleTaskLines.length;
+    const dupCount = eligibleTaskLines.length - deduplicatedLines.length;
+    const limitedCount = deduplicatedLines.length - newLines.length;
 
     if (newLines.length === 0) {
-      notify(dupCount > 0 ? `全部 ${dupCount} 条待办已存在，跳过。` : "没有识别到新的待办。");
+      if (suppressedCount > 0) {
+        notify(`识别到的 ${suppressedCount} 条待办已被你删除，不再自动恢复。`);
+      } else {
+        notify(dupCount > 0 ? `全部 ${dupCount} 条待办已存在，跳过。` : "没有识别到新的待办。");
+      }
       return [];
+    }
+    if (limitedCount > 0) {
+      notify(`已按设置保留优先级最高的 ${newLines.length} 条待办，另 ${limitedCount} 条未写入。`);
     }
 
     const lines = newLines.join("\n");
@@ -1894,16 +1919,21 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     const openFile = await ensureFile(this.app, openPath, "# 未完成待办\n\n");
     const openContent = await this.app.vault.read(openFile);
     const candidateLines = openTaskLines.map((line) => this.makeCarriedTaskLine(line, sourceDate));
-    const dailyLines = dedupTaskLines(candidateLines, parseOpenTasks(targetContent));
-    const openLines = dedupTaskLines(candidateLines, parseOpenTasks(openContent));
+    const eligibleLines = await new TaskService(this.app, this.fileSystem())
+      .filterSuppressedAutomaticTaskLines(candidateLines);
+    const dailyLines = dedupTaskLines(eligibleLines, parseOpenTasks(targetContent));
+    // Only mirror tasks that were newly added to the target daily note. If the
+    // daily copy already exists, a restart must not repopulate a task that the
+    // user explicitly removed from the canonical task file.
+    const openLines = dedupTaskLines(dailyLines, parseOpenTasks(openContent));
+
+    if (openLines.length > 0) {
+      await this.app.vault.append(openFile, `\n## ${targetDate} 继承自 ${sourceDate}\n\n${openLines.join("\n")}\n`);
+    }
 
     if (dailyLines.length > 0) {
       const carryBlock = `\n\n## 待办延续\n\n> 来自 ${sourceDate} 未完成事项\n\n${dailyLines.join("\n")}\n`;
       await this.app.vault.append(targetFile, carryBlock);
-    }
-
-    if (openLines.length > 0) {
-      await this.app.vault.append(openFile, `\n## ${targetDate} 继承自 ${sourceDate}\n\n${openLines.join("\n")}\n`);
     }
 
     return dailyLines.length;
@@ -3159,7 +3189,11 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   }
 
   private queueLifeOsFileStyling(): void {
-    window.setTimeout(() => this.decorateLifeOsFileLeaves(), 0);
+    if (this.lifeOsFileStylingFrame !== null) return;
+    this.lifeOsFileStylingFrame = window.requestAnimationFrame(() => {
+      this.lifeOsFileStylingFrame = null;
+      this.decorateLifeOsFileLeaves();
+    });
   }
 
   private decorateLifeOsFileLeaves(): void {
@@ -3216,13 +3250,13 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   }
 
   private async buildRuleTaskWritebackItems(file: TFile, content: string, notify: (message: string) => void): Promise<WritebackItem[]> {
+    const taskLimit = normalizeAiTaskExtractionLimit(this.settings.aiTaskExtractionLimit);
     const candidates = content
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter((line) => line && !line.startsWith("#"))
       .map((line) => line.replace(/^[-*]\s*(\[[ xX]\]\s*)?/, "").replace(/^\d+[.、]\s*/, "").trim())
-      .filter((line) => /待办|明天|需要|要做|计划|完成|整理|复盘|学习|阅读|练习/.test(line))
-      .slice(0, 8);
+      .filter((line) => /待办|明天|需要|要做|计划|完成|整理|复盘|学习|阅读|练习/.test(line));
 
     const taskLines = candidates.map((line, index) => `- [ ] ${line} #pls/task #pls/rule ^${makeId(`rule-task-${index + 1}`)}`);
     if (taskLines.length === 0) {
@@ -3230,12 +3264,35 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       return [];
     }
     const openPath = this.path("Tasks", "open.md");
+    const openAbstract = this.app.vault.getAbstractFileByPath(openPath);
+    let existingTasks = [] as ReturnType<typeof parseOpenTasks>;
+    if (openAbstract instanceof TFile) {
+      existingTasks = parseOpenTasks(await this.app.vault.read(openAbstract));
+    }
+    const eligibleTaskLines = await new TaskService(this.app, this.fileSystem())
+      .filterSuppressedAutomaticTaskLines(taskLines);
+    const deduplicatedLines = dedupTaskLines(eligibleTaskLines, existingTasks);
+    const newLines = deduplicatedLines.slice(0, taskLimit);
+    const suppressedCount = taskLines.length - eligibleTaskLines.length;
+    const dupCount = eligibleTaskLines.length - deduplicatedLines.length;
+    const limitedCount = deduplicatedLines.length - newLines.length;
+    if (newLines.length === 0) {
+      if (suppressedCount > 0) {
+        notify(`识别到的 ${suppressedCount} 条待办已被你删除，不再自动恢复。`);
+      } else {
+        notify(dupCount > 0 ? `全部 ${dupCount} 条待办已存在，跳过。` : "没有识别到新的待办。");
+      }
+      return [];
+    }
+    if (limitedCount > 0) {
+      notify(`已按设置保留前 ${newLines.length} 条待办，另 ${limitedCount} 条未写入。`);
+    }
     return [
       {
         id: makeId("tasks-rule-open"),
         kind: "task",
         title: "写入待办任务",
-        content: `\n${taskLines.join("\n")}\n`,
+        content: `\n${newLines.join("\n")}\n`,
         targetPath: openPath,
         sourcePath: file.path,
         checked: true

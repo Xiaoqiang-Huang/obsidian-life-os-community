@@ -1,4 +1,4 @@
-import { ItemView, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
+import { ItemView, Notice, TAbstractFile, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import { DASHBOARD_VIEW_TYPE } from "../constants";
 import { createButton } from "../components/Button";
 import { createCard } from "../components/Card";
@@ -17,8 +17,15 @@ import { TaskService } from "../services/TaskService";
 import { LlmWikiQueueService } from "../services/LlmWikiQueueService";
 import { getExamProfileLabel } from "../settings";
 import { currentDateLabel, today } from "../utils/dates";
+import { renderStableView } from "../utils/stable-view-refresh";
 
 export class LifeOSDashboardView extends ItemView {
+  private refreshTimer: number | null = null;
+  private renderPromise: Promise<void> | null = null;
+  private renderQueued = false;
+  private renderRequestRevision = 0;
+  private preserveScrollOnNextRender = true;
+
   constructor(leaf: WorkspaceLeaf, private plugin: PersonalLifeSystemPlugin) {
     super(leaf);
   }
@@ -32,18 +39,67 @@ export class LifeOSDashboardView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
-    await this.render();
-    this.registerEvent(this.app.vault.on("modify", () => void this.render()));
-    this.registerEvent(this.app.vault.on("create", () => void this.render()));
-    this.registerEvent(this.app.vault.on("delete", () => void this.render()));
+    await this.render(false);
+    const refresh = (file: TAbstractFile): void => {
+      if (this.shouldRefreshForFile(file)) this.scheduleVaultRefresh();
+    };
+    this.registerEvent(this.app.vault.on("modify", refresh));
+    this.registerEvent(this.app.vault.on("create", refresh));
+    this.registerEvent(this.app.vault.on("delete", refresh));
+    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+      if (this.shouldRefreshForFile(file) || this.shouldRefreshForFile(oldPath)) this.scheduleVaultRefresh();
+    }));
   }
 
-  private async render(): Promise<void> {
-    await this.plugin.ensureBaseStructure();
-    const container = this.containerEl.children[1];
-    container.empty();
+  async onClose(): Promise<void> {
+    if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
+    this.refreshTimer = null;
+    this.renderRequestRevision += 1;
+  }
 
-    const main = createLifeOSShell(container as HTMLElement, this.plugin, "dashboard");
+  private scheduleVaultRefresh(): void {
+    if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
+    this.refreshTimer = window.setTimeout(() => {
+      this.refreshTimer = null;
+      void this.render(true);
+    }, 120);
+  }
+
+  private shouldRefreshForFile(file: TAbstractFile | string): boolean {
+    const path = (typeof file === "string" ? file : file.path).replace(/\\/g, "/");
+    const root = this.plugin.getRoot().replace(/\\/g, "/").replace(/\/+$/g, "");
+    return path === root || path.startsWith(`${root}/`);
+  }
+
+  private async render(preserveScroll = true): Promise<void> {
+    if (this.refreshTimer !== null) {
+      window.clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+    this.renderRequestRevision += 1;
+    this.renderQueued = true;
+    this.preserveScrollOnNextRender = preserveScroll;
+    if (this.renderPromise) return this.renderPromise;
+
+    const run = async (): Promise<void> => {
+      while (this.renderQueued) {
+        this.renderQueued = false;
+        const revision = this.renderRequestRevision;
+        await this.renderPass(revision, this.preserveScrollOnNextRender);
+      }
+    };
+    this.renderPromise = run().finally(() => {
+      this.renderPromise = null;
+    });
+    return this.renderPromise;
+  }
+
+  private async renderPass(revision: number, preserveScroll: boolean): Promise<void> {
+    const container = this.containerEl.children[1] as HTMLElement | undefined;
+    if (!container) return;
+    await this.plugin.ensureBaseStructure();
+    if (revision !== this.renderRequestRevision) return;
+
     const fs = new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage);
     const tasks = new TaskService(this.app, fs);
     const openTasks = await tasks.loadOpenTasks();
@@ -69,6 +125,7 @@ export class LifeOSDashboardView extends ItemView {
       pendingReviewDrafts.length,
       examEnabled
     );
+    if (revision !== this.renderRequestRevision) return;
     const heroActions = [
       ...(examEnabled
         ? [{ label: "立即打卡", icon: "graduation-cap", primary: true, onClick: () => void this.plugin.showCheckinModal() }]
@@ -78,7 +135,9 @@ export class LifeOSDashboardView extends ItemView {
       { label: "打开今日日记", icon: "book-open", onClick: () => void this.plugin.openTodayNote(false) }
     ];
 
-    createHeroHeader(main, {
+    await renderStableView(container, async (staging) => {
+      const main = createLifeOSShell(staging, this.plugin, "dashboard");
+      createHeroHeader(main, {
       kicker: "今日行动",
       title: "今天",
       description: "先完成一件重要的小事。",
@@ -114,7 +173,11 @@ export class LifeOSDashboardView extends ItemView {
 
     this.renderAssistant(right);
     this.renderQuickActions(right, hasTodayNote);
-    this.renderWorkflowGuide(right);
+      this.renderWorkflowGuide(right);
+    }, {
+      preserveScroll,
+      isCurrent: () => revision === this.renderRequestRevision
+    });
   }
 
   private getTodayRecommendation(

@@ -1,4 +1,4 @@
-import { ItemView, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
+import { ItemView, Notice, TAbstractFile, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import { createButton } from "../components/Button";
 import { createCard } from "../components/Card";
 import { createHeroHeader } from "../components/HeroHeader";
@@ -9,6 +9,7 @@ import { listExamFiles, parseFrontmatter } from "../exam/data";
 import { getExamMetricProfiles, getExamProfileLabel } from "../settings";
 import { ensureFile, ensureFolder } from "../utils";
 import { today, formatDate } from "../utils/dates";
+import { renderStableView } from "../utils/stable-view-refresh";
 
 interface CheckinRecord {
   date: string;
@@ -31,6 +32,11 @@ const MOODS = [
 
 export class CheckinView extends ItemView {
   private moodValue = "neutral";
+  private refreshTimer: number | null = null;
+  private renderPromise: Promise<void> | null = null;
+  private renderQueued = false;
+  private renderRequestRevision = 0;
+  private preserveScrollOnNextRender = true;
 
   constructor(leaf: WorkspaceLeaf, private plugin: PersonalLifeSystemPlugin) {
     super(leaf);
@@ -45,18 +51,66 @@ export class CheckinView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
-    await this.render();
-    this.registerEvent(this.app.vault.on("modify", () => void this.render()));
-    this.registerEvent(this.app.vault.on("create", () => void this.render()));
+    await this.render(false);
+    const refresh = (file: TAbstractFile): void => {
+      if (this.shouldRefreshForFile(file)) this.scheduleVaultRefresh();
+    };
+    this.registerEvent(this.app.vault.on("modify", refresh));
+    this.registerEvent(this.app.vault.on("create", refresh));
+    this.registerEvent(this.app.vault.on("delete", refresh));
+    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+      if (this.shouldRefreshForFile(file) || this.shouldRefreshForFile(oldPath)) this.scheduleVaultRefresh();
+    }));
   }
 
-  private async render(): Promise<void> {
-    await this.plugin.ensureBaseStructure();
-    const container = this.containerEl.children[1];
-    container.empty();
+  async onClose(): Promise<void> {
+    if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
+    this.refreshTimer = null;
+    this.renderRequestRevision += 1;
+  }
 
-    const main = createLifeOSShell(container as HTMLElement, this.plugin, "checkins");
-    main.addClass("lifeos-checkin-page");
+  private scheduleVaultRefresh(): void {
+    if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
+    this.refreshTimer = window.setTimeout(() => {
+      this.refreshTimer = null;
+      void this.render(true);
+    }, 120);
+  }
+
+  private shouldRefreshForFile(file: TAbstractFile | string): boolean {
+    const path = (typeof file === "string" ? file : file.path).replace(/\\/g, "/");
+    const root = this.plugin.path("Exam", "Checkins").replace(/\\/g, "/").replace(/\/+$/g, "");
+    return path === root || path.startsWith(`${root}/`);
+  }
+
+  private async render(preserveScroll = true): Promise<void> {
+    if (this.refreshTimer !== null) {
+      window.clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+    this.renderRequestRevision += 1;
+    this.renderQueued = true;
+    this.preserveScrollOnNextRender = preserveScroll;
+    if (this.renderPromise) return this.renderPromise;
+
+    const run = async (): Promise<void> => {
+      while (this.renderQueued) {
+        this.renderQueued = false;
+        const revision = this.renderRequestRevision;
+        await this.renderPass(revision, this.preserveScrollOnNextRender);
+      }
+    };
+    this.renderPromise = run().finally(() => {
+      this.renderPromise = null;
+    });
+    return this.renderPromise;
+  }
+
+  private async renderPass(revision: number, preserveScroll: boolean): Promise<void> {
+    const container = this.containerEl.children[1] as HTMLElement | undefined;
+    if (!container) return;
+    await this.plugin.ensureBaseStructure();
+    if (revision !== this.renderRequestRevision) return;
 
     const checkinsPath = this.plugin.path("Exam", "Checkins");
     await ensureFolder(this.app, checkinsPath);
@@ -64,8 +118,12 @@ export class CheckinView extends ItemView {
     const existingFile = this.app.vault.getAbstractFileByPath(`${checkinsPath}/${date}.md`);
     const record = existingFile instanceof TFile ? await this.readRecord(existingFile) : null;
     const streak = await this.calculateStreak(checkinsPath, date);
+    if (revision !== this.renderRequestRevision) return;
 
-    createHeroHeader(main, {
+    await renderStableView(container, (staging) => {
+      const main = createLifeOSShell(staging, this.plugin, "checkins");
+      main.addClass("lifeos-checkin-page");
+      createHeroHeader(main, {
       kicker: "学习打卡",
       title: record ? "今日已打卡" : "今日学习打卡",
       description: record ? "今天已经留下进度。你可以查看记录，也可以更新今日打卡。" : "记录一次学习动作，让长期趋势更完整。",
@@ -79,7 +137,11 @@ export class CheckinView extends ItemView {
 
     const grid = main.createDiv({ cls: "lifeos-checkin-page-grid" });
     this.renderForm(grid, record, streak);
-    this.renderSide(grid, record, streak);
+      this.renderSide(grid, record, streak);
+    }, {
+      preserveScroll,
+      isCurrent: () => revision === this.renderRequestRevision
+    });
   }
 
   private renderForm(parent: HTMLElement, record: CheckinRecord | null, streak: number): void {

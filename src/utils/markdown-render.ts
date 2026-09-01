@@ -31,22 +31,22 @@ export function renderMarkdownDisplay(
 ): Promise<void> {
   const revision = (markdownRenderRevisions.get(el) ?? 0) + 1;
   markdownRenderRevisions.set(el, revision);
-  el.empty();
   el.addClass("lifeos-markdown-content");
   const normalized = normalizeDisplayMarkdown(markdown);
-  if (!normalized) return Promise.resolve();
+  if (!normalized) {
+    el.empty();
+    return Promise.resolve();
+  }
 
   el.setAttribute("aria-busy", "true");
   const staging = el.ownerDocument.createElement("div");
   return MarkdownRenderer.renderMarkdown(normalized, staging, sourcePath, component)
     .then(() => {
       if (markdownRenderRevisions.get(el) !== revision) return;
-      el.empty();
-      while (staging.firstChild) el.appendChild(staging.firstChild);
+      el.replaceChildren(...Array.from(staging.childNodes));
     })
     .catch(() => {
       if (markdownRenderRevisions.get(el) !== revision) return;
-      el.empty();
       el.setText(normalized);
     })
     .finally(() => {

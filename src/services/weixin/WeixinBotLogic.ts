@@ -84,6 +84,20 @@ export interface WeixinSkillDescriptor {
   lens?: string;
 }
 
+export interface WeixinSkillIntentCandidate {
+  skillId: string;
+  skillName: string;
+  score: number;
+  matchedTerms: string[];
+  domainMatches: number;
+}
+
+export interface WeixinSkillIntentResolution {
+  skillId: string;
+  confidence: number;
+  matchedTerms: string[];
+}
+
 export interface WeixinSkillInvocation {
   matched: true;
   keyword: string;
@@ -848,6 +862,18 @@ function pushSkillAlias(target: string[], value: unknown): void {
   if (!target.some((item) => normalizedSkillAlias(item) === normalizedSkillAlias(alias))) target.push(alias);
 }
 
+function pushSkillDescriptionAliases(target: string[], description: unknown): void {
+  const summary = cleanText(description, 600);
+  if (!summary) return;
+  const identityPattern = /(?:^|[。；;，,\n])\s*([\p{L}\p{N}][\p{L}\p{N}·._\-\s]{1,24}?)\s*[（(]\s*([\p{L}\p{N}][\p{L}\p{N}·._\-\s]{1,16}?)\s*[）)]/gu;
+  for (const match of summary.matchAll(identityPattern)) {
+    const nickname = match[2]?.trim() ?? "";
+    if (!nickname || SKILL_SUBJECT_SUFFIX_RE.test(nickname)) continue;
+    if (/^(?:方法|方法论|框架|系统|课程|用户|老师|教练|技能|skill)$/iu.test(nickname)) continue;
+    pushSkillAlias(target, nickname);
+  }
+}
+
 /**
  * Build user-facing aliases from the actual installed Skill name. This keeps
  * imported Skills usable without a second alias database: e.g. three Skills
@@ -881,6 +907,7 @@ export function getWeixinSkillAliases(skill: WeixinSkillDescriptor): string[] {
     pushSkillAlias(aliases, "花生十三");
     pushSkillAlias(aliases, "花生");
   }
+  pushSkillDescriptionAliases(aliases, skill.description);
   return aliases;
 }
 
@@ -918,6 +945,223 @@ const WEIXIN_SKILL_TOPIC_RULES: Array<{ candidate: RegExp; query: RegExp; weight
   { candidate: /面试/u, query: /(?:结构化面试|无领导|面试题|答题框架)/u, weight: 12 },
   { candidate: /(?:常识|公基)/u, query: /(?:常识判断|公共基础|公基|时政常识)/u, weight: 12 }
 ];
+
+const WEIXIN_SKILL_GENERAL_INTENT_RULES: Array<{ candidate: RegExp; query: RegExp; weight: number }> = [
+  {
+    candidate: /(?:提示词|prompt|指令优化|prompt\s*(?:engineer|optimizer))/iu,
+    query: /(?:提示词|prompt|系统提示|指令).{0,24}(?:优化|改写|完善|生成|约束|输出格式|结构化)/iu,
+    weight: 18
+  },
+  {
+    candidate: /(?:费曼|feynman)/iu,
+    query: /(?:讲懂|通俗|小白|从零|直觉|类比).{0,18}(?:解释|理解|学习|概念)|(?:把|将).{0,24}(?:讲懂|讲明白|听懂|真正理解)|(?:讲|解释).{0,16}(?:让我|给我)?(?:听懂|明白|真正理解)/iu,
+    weight: 20
+  },
+  {
+    candidate: /(?:teach|教学|讲解)/iu,
+    query: /(?:教我|带我学|学习).{0,18}(?:技能|概念|知识)|(?:讲|解释).{0,16}(?:让我|给我)?(?:听懂|明白)/iu,
+    weight: 10
+  },
+  {
+    candidate: /(?:巴菲特|buffett|价值投资)/iu,
+    query: /(?:商业模式|护城河|长期价值|自由现金流|管理层|投资标的|价值投资)/u,
+    weight: 18
+  },
+  {
+    candidate: /(?:芒格|munger|多元思维|心智模型)/iu,
+    query: /(?:心智模型|反向思考|认知偏差|多学科|避免愚蠢)/u,
+    weight: 18
+  },
+  {
+    candidate: /(?:马斯克|musk|第一性原理)/iu,
+    query: /(?:第一性原理|物理极限|成本拆解|重新设计|颠覆式)/u,
+    weight: 18
+  },
+  {
+    candidate: /(?:纳瓦尔|naval)/iu,
+    query: /(?:财富|杠杆|长期主义|产品化自己|专长)/u,
+    weight: 15
+  },
+  {
+    candidate: /(?:科研|论文|学术|research|paper|文献)/iu,
+    query: /(?:科研|论文|文献综述|研究问题|实验设计|研究假设|审稿|投稿)/u,
+    weight: 12
+  }
+];
+
+const WEIXIN_SKILL_INTENT_STOP_TERMS = new Set([
+  "一下", "一个", "一种", "这个", "那个", "这些", "那些", "怎么", "如何", "为什么", "为何",
+  "帮我", "请问", "可以", "需要", "用户", "当前", "内容", "问题", "回答", "解答", "进行",
+  "使用", "适用", "用途", "触发", "方法", "方法论", "思路", "框架", "视角", "模式", "技能",
+  "老师", "教练", "完整", "核心", "系统", "分析", "学习", "建议", "skill", "the", "and", "for",
+  "with", "from", "this", "that", "user", "method", "framework"
+]);
+
+function normalizedSkillIntentText(value: unknown, maxChars = 4_000): string {
+  return cleanText(value, maxChars)
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/\.skill\b/giu, " skill ")
+    .replace(/[^\p{L}\p{N}+#]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function skillIntentTerms(value: unknown, maxChars = 4_000): Set<string> {
+  const source = normalizedSkillIntentText(value, maxChars);
+  const terms = new Set<string>();
+  for (const chunk of source.match(/[a-z][a-z0-9+#.-]{1,31}|[\p{Script=Han}]{2,}/giu) || []) {
+    if (/^[a-z]/iu.test(chunk)) {
+      if (chunk.length >= 3 && !WEIXIN_SKILL_INTENT_STOP_TERMS.has(chunk)) terms.add(chunk);
+      continue;
+    }
+    const maxSize = Math.min(6, chunk.length);
+    for (let size = 2; size <= maxSize; size += 1) {
+      for (let index = 0; index + size <= chunk.length; index += 1) {
+        const term = chunk.slice(index, index + size);
+        if (!WEIXIN_SKILL_INTENT_STOP_TERMS.has(term)) terms.add(term);
+      }
+    }
+  }
+  return terms;
+}
+
+function skillIntentTermWeight(term: string): number {
+  if (/^[a-z]/iu.test(term)) return Math.min(2.8, 1 + term.length / 8);
+  if (term.length <= 2) return 0.16;
+  if (term.length === 3) return 0.55;
+  if (term.length === 4) return 1.25;
+  if (term.length === 5) return 2;
+  return 2.8;
+}
+
+function skillIntentCuePhrases(skill: WeixinSkillDescriptor): string[] {
+  const source = [skill.name, skill.description, skill.lens].filter(Boolean).join("\n").slice(0, 4_000);
+  const phrases: string[] = [];
+  const push = (value: string) => {
+    const phrase = normalizedSkillIntentText(value, 80).replace(/\s+/gu, "");
+    if (phrase.length < 2 || phrase.length > 18 || WEIXIN_SKILL_INTENT_STOP_TERMS.has(phrase)) return;
+    if (!phrases.includes(phrase)) phrases.push(phrase);
+  };
+  for (const match of source.matchAll(/[「『“"]([^」』”"\n]{2,24})[」』”"]/gu)) push(match[1]);
+  for (const line of source.split(/\r?\n/u)) {
+    const trigger = line.match(/(?:触发(?:词|条件)?|适用于|用于|用途|when\s+to\s+use)\s*[：:]?\s*(.+)$/iu)?.[1];
+    if (!trigger) continue;
+    for (const part of trigger.split(/[、，,；;\/|｜·•（）()]+/u)) push(part.replace(/^[①②③④⑤⑥⑦⑧⑨\d.\-\s]+/u, ""));
+  }
+  return phrases;
+}
+
+function isSubstantiveNaturalSkillIntent(value: unknown): boolean {
+  const source = cleanText(value, 6_000);
+  if (!source) return false;
+  if (/(?:听说|听闻|知道|认识|觉得|认为|提到|喜欢|关注).{0,36}(?:有名|厉害|不错|很火|出名)?[。.!！?？]?$/u.test(source)) return false;
+  return /(?:怎么|如何|为何|为什么|能否|可否|帮我|请|解释|讲(?:解|懂|明白)?|分析|解答?|计算|算|判断|选择|选|批改|修改|改写|写|生成|优化|学习|规划|建议|总结|复盘|评估|对比|拆解|采用|使用|调用|用).{0,80}/u.test(source)
+    || /(?:题|文章|材料|方案|提示词|论文|项目|概念|模型|报告).{0,24}(?:做|答|改|写|选|算|看|学)/u.test(source);
+}
+
+/**
+ * Recall installed Skills from the user's task wording, even when the message
+ * never says “Skill” and never names a teacher/persona. The scorer combines
+ * stable domain rules with IDF-weighted lexical overlap from each installed
+ * Skill's own description and trigger metadata. Generic words such as “分析”
+ * are deliberately weak so ordinary chat does not inherit a random persona.
+ */
+export function rankWeixinSkillIntentCandidates(
+  query: unknown,
+  skills: WeixinSkillDescriptor[],
+  limit = 12
+): WeixinSkillIntentCandidate[] {
+  const source = cleanText(query, 6_000);
+  if (!source || skills.length === 0) return [];
+  const queryTerms = skillIntentTerms(source, 2_000);
+  const descriptors = skills.map((skill, index) => {
+    const descriptor = [skill.name, skill.description, skill.lens].filter(Boolean).join(" ").slice(0, 4_000);
+    return {
+      skill,
+      index,
+      descriptor,
+      terms: skillIntentTerms(descriptor, 4_000),
+      cues: skillIntentCuePhrases(skill)
+    };
+  });
+  const documentFrequency = new Map<string, number>();
+  for (const descriptor of descriptors) {
+    for (const term of descriptor.terms) documentFrequency.set(term, (documentFrequency.get(term) || 0) + 1);
+  }
+  const sourceCompact = normalizedSkillIntentText(source, 2_000).replace(/\s+/gu, "");
+  const total = Math.max(1, descriptors.length);
+  return descriptors
+    .map(({ skill, index, descriptor, terms, cues }) => {
+      if (skill.id === "lifeos-general") return null;
+      let score = 0;
+      let domainMatches = 0;
+      const matchedTerms: string[] = [];
+      for (const rule of [...WEIXIN_SKILL_TOPIC_RULES, ...WEIXIN_SKILL_GENERAL_INTENT_RULES]) {
+        if (!rule.query.test(source) || !rule.candidate.test(descriptor)) continue;
+        score += rule.weight;
+        domainMatches += 1;
+      }
+      let lexicalScore = 0;
+      for (const term of queryTerms) {
+        if (!terms.has(term)) continue;
+        const frequency = documentFrequency.get(term) || 1;
+        const idf = Math.log2((total + 1) / (frequency + 1)) + 1;
+        lexicalScore += skillIntentTermWeight(term) * idf;
+        if ((term.length >= 3 || /^[a-z]/iu.test(term)) && matchedTerms.length < 16) matchedTerms.push(term);
+      }
+      score += Math.min(32, lexicalScore);
+      for (const cue of cues) {
+        if (!sourceCompact.includes(cue)) continue;
+        score += Math.min(10, 3 + cue.length * 0.65);
+        if (!matchedTerms.includes(cue) && matchedTerms.length < 16) matchedTerms.push(cue);
+      }
+      const normalizedName = normalizedSkillAlias(skill.name);
+      if (normalizedName.length >= 2 && normalizedSkillAlias(source).includes(normalizedName)) score += 28;
+      return {
+        skillId: skill.id,
+        skillName: skill.name,
+        score: Math.round(score * 10) / 10,
+        matchedTerms: matchedTerms.sort((a, b) => b.length - a.length).slice(0, 8),
+        domainMatches,
+        index
+      };
+    })
+    .filter((item): item is WeixinSkillIntentCandidate & { index: number } => Boolean(item && item.score >= 4.5))
+    .sort((a, b) => b.score - a.score || b.domainMatches - a.domainMatches || a.index - b.index)
+    .slice(0, Math.max(1, Math.min(30, limit)))
+    .map(({ index: _index, ...candidate }) => candidate);
+}
+
+/** Return a deterministic choice only when the best candidate is clearly ahead. */
+export function resolveWeixinSkillIntentByQuery(
+  query: unknown,
+  skills: WeixinSkillDescriptor[]
+): WeixinSkillIntentResolution | null {
+  const ranked = rankWeixinSkillIntentCandidates(query, skills, 3);
+  const first = ranked[0];
+  if (!first || first.score < 10 || !isSubstantiveNaturalSkillIntent(query)) return null;
+  const second = ranked[1];
+  const margin = second ? first.score - second.score : first.score;
+  const clear = !second || margin >= 4 || first.score >= second.score * 1.22;
+  if (!clear) return null;
+  const confidence = Math.max(0.62, Math.min(0.98, 0.58 + first.score / 100 + Math.max(0, margin) / 35));
+  return {
+    skillId: first.skillId,
+    confidence: Math.round(confidence * 100) / 100,
+    matchedTerms: first.matchedTerms
+  };
+}
+
+/** Relevant-but-ambiguous candidates should enter the bounded AI reranker. */
+export function shouldRouteWeixinSkillIntent(
+  query: unknown,
+  candidates: WeixinSkillIntentCandidate[]
+): boolean {
+  if (!isSubstantiveNaturalSkillIntent(query)) return false;
+  const first = candidates[0];
+  return Boolean(first && (first.score >= 8 || first.domainMatches > 0));
+}
 
 /**
  * Deterministically narrow nickname collisions before spending an AI call.

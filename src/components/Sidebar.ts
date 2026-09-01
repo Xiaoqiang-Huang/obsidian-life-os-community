@@ -118,10 +118,9 @@ function syncNavGroupVisibility(group: HTMLElement): void {
 
 function markNavigationPending(button: HTMLButtonElement): void {
   button.addClass("is-pending");
-  const root = button.closest(".lifeos-root");
-  root?.addClass("is-navigating");
+  button.setAttr("aria-busy", "true");
   window.setTimeout(() => {
     button.removeClass("is-pending");
-    root?.removeClass("is-navigating");
+    button.removeAttribute("aria-busy");
   }, 360);
 }

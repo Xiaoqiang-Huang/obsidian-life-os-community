@@ -12,9 +12,10 @@ import {
   type LifeOsPurchaseCatalog,
   type LifeOsPurchaseProduct
 } from "../licensing/payment-catalog";
-import { resolveLicenseStatus } from "../licensing/entitlement";
+import { compareLicensePlans, resolveLicenseStatus } from "../licensing/entitlement";
 import { verifyLicenseEntitlementToken } from "../licensing/entitlement-token";
 import {
+  isPendingOrderStale,
   parseStoredPendingOrder,
   shouldResumeOrderPolling,
   storedOrderClaimTokenFor
@@ -29,7 +30,7 @@ const MAX_CONSECUTIVE_POLL_FAILURES = 3;
 const ENTITLEMENT_CLOCK_SKEW_NOTICE =
   "授权已生成，但当前电脑时间和授权服务器时间不一致。请同步系统时间后再点激活；兑换码不要重复输入，可到账号中心复制授权码。";
 
-type ActivationAttempt = "activated" | "device-quota" | "failed";
+type ActivationAttempt = "activated" | "preserved-higher-plan" | "device-quota" | "failed";
 type PurchaseCatalogStatus = "loading" | "ready" | "error";
 type ProInputOptions = {
   type?: string;
@@ -184,7 +185,9 @@ export class ProLicenseView extends ItemView {
     if (restoredOrder && !this.pendingOrder) {
       this.pendingOrder = restoredOrder;
     }
-    this.renderTrialCard(section);
+    if (this.resolveStatus(this.plugin.settings.licenseSnapshot) === "free") {
+      this.renderTrialCard(section);
+    }
     this.purchaseCatalogHost = section.createDiv({ cls: "lifeos-pro-catalog-host" });
     this.renderPurchaseCatalog(this.purchaseCatalogHost);
 
@@ -302,21 +305,49 @@ export class ProLicenseView extends ItemView {
     this.cardTitle(status, "支付服务已连接", "badge-check");
     status.createEl("p", { text: "商品和金额已从当前授权服务同步；创建订单前还会再次核对，避免版本变化导致支付失败。" });
     const grid = parent.createDiv({ cls: "lifeos-pro-product-grid" });
-    if (this.purchaseCatalog.monthly) this.productCard(grid, this.purchaseCatalog.monthly);
-    if (this.purchaseCatalog.lifetime) this.productCard(grid, this.purchaseCatalog.lifetime);
+    const currentStatus = this.resolveStatus(this.plugin.settings.licenseSnapshot);
+    if (currentStatus !== "lifetime-pro" && this.purchaseCatalog.monthly) {
+      this.productCard(grid, this.purchaseCatalog.monthly, currentStatus);
+    }
+    if (this.purchaseCatalog.lifetime) {
+      this.productCard(grid, this.purchaseCatalog.lifetime, currentStatus);
+    }
   }
 
-  private productCard(parent: HTMLElement, product: LifeOsPurchaseProduct): void {
+  private productCard(
+    parent: HTMLElement,
+    product: LifeOsPurchaseProduct,
+    currentStatus: LicenseStatusLabel
+  ): void {
     const card = parent.createDiv({ cls: "lifeos-pro-product lifeos-card" });
-    card.createDiv({ cls: "lifeos-pro-product-title", text: product.title });
+    const isLifetime = product.kind === "lifetime";
+    const isLifetimeMember = currentStatus === "lifetime-pro";
+    const isMonthlyMember = currentStatus === "monthly-pro";
+    const title = isLifetime && isMonthlyMember ? "升级为永久 Pro" : product.title;
+    card.createDiv({ cls: "lifeos-pro-product-title", text: title });
     card.createDiv({ cls: "lifeos-pro-product-price", text: product.price });
     card.createEl("p", { text: product.description });
     card.createDiv({ cls: "lifeos-pro-product-meta", text: product.maxDevices });
-    const purchase = this.button(card, "选择支付宝支付", "qr-code", () => void this.createOrder(product), true);
+    if (isLifetime && isMonthlyMember) {
+      card.createEl("p", {
+        cls: "lifeos-pro-upgrade-note",
+        text: "升级后永久授权会自动接管当前设备；原月付授权仍保留在账号中心，不会影响永久授权。"
+      });
+    }
+    const purchaseText = isLifetimeMember && isLifetime
+      ? "已是永久 Pro"
+      : isLifetime && isMonthlyMember
+        ? "升级为永久 Pro（支付宝）"
+        : isMonthlyMember && !isLifetime
+          ? "续费月付 Pro（支付宝）"
+          : "选择支付宝支付";
+    const purchase = this.button(card, purchaseText, "qr-code", () => void this.createOrder(product), true);
     const hasActiveOrder = Boolean(this.pendingOrder && shouldResumeOrderPolling(this.pendingOrder.order.status));
-    purchase.disabled = this.orderCreationInFlight || hasActiveOrder;
+    purchase.disabled = this.orderCreationInFlight || hasActiveOrder || (isLifetimeMember && isLifetime);
     if (hasActiveOrder) {
       purchase.title = "已有待处理订单，请先完成支付或等待订单结束。";
+    } else if (isLifetimeMember && isLifetime) {
+      purchase.title = "当前设备已经使用永久 Pro，无需重复购买。";
     }
   }
 
@@ -350,6 +381,13 @@ export class ProLicenseView extends ItemView {
       this.button(actions, "复制支付链接", "copy", () => void this.copyText(paymentInfo.directUrl, "支付链接已复制。"));
       this.button(actions, "打开网页支付", "external-link", () => { this.openExternalLinkOrNotify(paymentInfo.directUrl, "浏览器阻止了打开支付页，支付链接已显示在页面上。"); }, true);
     }
+    if (isPendingOrderStale(result.order)) {
+      panel.createEl("p", {
+        cls: "lifeos-pro-warning",
+        text: "这个订单已超过 48 小时且仍未支付。请先检查一次订单状态；若确认没有付款，可清除本地记录后重新购买。"
+      });
+      this.button(actions, "清除旧订单并重新购买", "trash-2", () => void this.abandonPendingOrder(result.order));
+    }
   }
 
   private async createOrder(product: LifeOsPurchaseProduct): Promise<void> {
@@ -359,6 +397,13 @@ export class ProLicenseView extends ItemView {
     }
     if (this.pendingOrder && shouldResumeOrderPolling(this.pendingOrder.order.status)) {
       new Notice("已有待处理订单，请先完成支付或等待订单结束。");
+      return;
+    }
+    const currentStatus = this.resolveStatus(this.plugin.settings.licenseSnapshot);
+    if (currentStatus === "lifetime-pro") {
+      new Notice(product.kind === "lifetime"
+        ? "当前设备已经是永久 Pro，无需重复购买。"
+        : "当前设备已经是永久 Pro，不能再用月付授权覆盖。", 6000);
       return;
     }
     const email = this.plugin.settings.licenseEmail.trim();
@@ -463,6 +508,14 @@ export class ProLicenseView extends ItemView {
           ? { ...this.pendingOrder, order: result.order }
           : this.pendingOrder;
         const activated = await this.activateLicense(result.licenseKey);
+        if (activated === "preserved-higher-plan") {
+          this.pendingOrder = null;
+          this.clearPendingOrderSettings();
+          await this.plugin.saveSettings();
+          new Notice("订单已支付，但当前设备已有更高等级授权，已保留原授权。新授权可在账号中心查看。", 8000);
+          await this.render();
+          return;
+        }
         if (activated !== "activated") {
           this.plugin.settings.licenseKey = result.licenseKey;
           await this.plugin.saveSettings();
@@ -492,10 +545,8 @@ export class ProLicenseView extends ItemView {
       }
       if (result.order.status === "paid" && !result.licenseKey) {
         this.stopPolling();
-        this.pendingOrder = this.pendingOrder
-          ? { ...this.pendingOrder, order: result.order }
-          : this.pendingOrder;
-        this.plugin.settings.licenseLastOrderSnapshot = JSON.stringify(result.order);
+        this.pendingOrder = null;
+        this.clearPendingOrderSettings();
         this.licenseIssueMessage = "订单已支付，但当前设备缺少订单校验信息。请打开账号中心，用购买邮箱找回授权码后在本页激活。";
         await this.plugin.saveSettings();
         new Notice(this.licenseIssueMessage, 8000);
@@ -560,6 +611,21 @@ export class ProLicenseView extends ItemView {
     this.plugin.settings.licenseLastPaymentSnapshot = "";
   }
 
+  private async abandonPendingOrder(order: PaymentOrder): Promise<void> {
+    if (!isPendingOrderStale(order)) return;
+    const confirmed = window.confirm(
+      "只清除当前设备里的旧订单记录，不会取消或退款。请确认你没有支付这个旧订单，并且不要再使用旧支付链接。是否继续？"
+    );
+    if (!confirmed) return;
+    this.stopPolling();
+    this.pendingOrder = null;
+    this.clearPendingOrderSettings();
+    await this.plugin.saveSettings();
+    new Notice("旧订单记录已清除，现在可以重新选择月付或永久 Pro。", 6000);
+    await this.render();
+    void this.refreshPurchaseCatalog(false);
+  }
+
   private async requestTrialCode(email: string): Promise<void> {
     if (!email.includes("@")) {
       new Notice("请先填写有效邮箱。");
@@ -580,6 +646,10 @@ export class ProLicenseView extends ItemView {
   }
 
   private async verifyTrialCode(email: string, code: string): Promise<void> {
+    if (this.resolveStatus(this.plugin.settings.licenseSnapshot) !== "free") {
+      new Notice("当前设备已有有效授权，无需再激活试用。", 6000);
+      return;
+    }
     if (!email.includes("@")) {
       new Notice("请先填写有效邮箱。");
       return;
@@ -594,8 +664,10 @@ export class ProLicenseView extends ItemView {
         code,
         installationId: this.plugin.settings.licenseInstallationId
       });
-      await this.saveLicenseResult(result, result.licenseKey || this.plugin.settings.licenseKey || "");
-      new Notice("30 天试用已激活。");
+      const saved = await this.saveLicenseResult(result, result.licenseKey || this.plugin.settings.licenseKey || "");
+      new Notice(saved
+        ? "30 天试用已激活。"
+        : "当前设备已有更高等级授权，试用授权未覆盖现有授权。", 6000);
       await this.render();
     } catch (error) {
       new Notice(error instanceof Error ? error.message : String(error));
@@ -630,7 +702,12 @@ export class ProLicenseView extends ItemView {
         licenseKey,
         installationId: this.plugin.settings.licenseInstallationId
       });
-      await this.saveLicenseResult(result, licenseKey);
+      const saved = await this.saveLicenseResult(result, licenseKey);
+      if (!saved) {
+        new Notice("检测到当前设备已有更高等级授权，已阻止旧月付或试用授权覆盖。", 7000);
+        await this.render();
+        return "preserved-higher-plan";
+      }
       new Notice("授权已激活。");
       await this.render();
       return "activated";
@@ -655,21 +732,35 @@ export class ProLicenseView extends ItemView {
       new Notice("请填写有效邮箱。");
       return;
     }
+    if (this.resolveStatus(this.plugin.settings.licenseSnapshot) === "lifetime-pro") {
+      new Notice("当前设备已经是永久 Pro，无需兑换限时授权；兑换码不会被消耗。", 7000);
+      return;
+    }
     try {
       const result = await this.client.redeem({
         code,
         email,
         installationId: this.plugin.settings.licenseInstallationId
       });
-      await this.saveLicenseResult(result, result.licenseKey);
-      new Notice("兑换成功，已激活当前设备。");
+      const saved = await this.saveLicenseResult(result, result.licenseKey);
+      new Notice(saved
+        ? "兑换成功，已激活当前设备。"
+        : "兑换成功，但当前设备已有更高等级授权，因此没有覆盖现有授权。", 7000);
       await this.render();
     } catch (error) {
       new Notice(error instanceof Error ? error.message : String(error));
     }
   }
 
-  private async saveLicenseResult(result: ActivationResult | RedeemResult, licenseKey: string): Promise<void> {
+  private async saveLicenseResult(result: ActivationResult | RedeemResult, licenseKey: string): Promise<boolean> {
+    const currentToken = this.plugin.settings.licenseEntitlementToken;
+    if (currentToken && this.plugin.settings.licenseSnapshot) {
+      try {
+        await verifyLicenseEntitlementToken(currentToken, this.plugin.settings.licenseInstallationId);
+      } catch {
+        // An invalid or expired existing token must not block a valid activation.
+      }
+    }
     try {
       await verifyLicenseEntitlementToken(result.entitlementToken, this.plugin.settings.licenseInstallationId);
     } catch (error) {
@@ -682,17 +773,25 @@ export class ProLicenseView extends ItemView {
       }
       throw error;
     }
-    if (licenseKey) this.plugin.settings.licenseKey = licenseKey;
-    this.plugin.settings.licenseEntitlementToken = result.entitlementToken;
-    this.plugin.settings.licenseSnapshot = {
+    const candidateSnapshot: LicenseStateSnapshot = {
       license: result.license,
       activation: result.activation,
       entitlement: result.entitlement,
       activeActivationCount: result.activeActivationCount ?? null,
       updatedAt: new Date().toISOString()
     };
+    const currentStatus = this.resolveStatus(this.plugin.settings.licenseSnapshot);
+    const candidateStatus = resolveLicenseStatus(candidateSnapshot, new Date(), result.entitlementToken);
+    if (compareLicensePlans(currentStatus, candidateStatus) === "downgrade") {
+      this.licenseIssueMessage = `已保留当前${this.statusText(currentStatus)}；${this.statusText(candidateStatus)}不会覆盖更高等级授权。`;
+      return false;
+    }
+    if (licenseKey) this.plugin.settings.licenseKey = licenseKey;
+    this.plugin.settings.licenseEntitlementToken = result.entitlementToken;
+    this.plugin.settings.licenseSnapshot = candidateSnapshot;
     this.plugin.settings.licenseLastCheckedAt = new Date().toISOString();
     await this.plugin.saveSettings();
+    return true;
   }
 
   private resolveStatus(snapshot: LicenseStateSnapshot | null): LicenseStatusLabel {

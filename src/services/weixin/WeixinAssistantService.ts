@@ -101,9 +101,12 @@ import {
   parseWeixinProposalDecision,
   parseWeixinReminderTime,
   parseWeixinSkillInvocation,
+  rankWeixinSkillIntentCandidates,
+  resolveWeixinSkillIntentByQuery,
   resolveWeixinReviewWindow,
   resolveWeixinSkillCandidateByQuery,
   sanitizeWeixinRelativePath,
+  shouldRouteWeixinSkillIntent,
   weixinCommandKeepsPendingImages,
   weixinReminderRouteRef,
   WeixinPendingImageStore,
@@ -111,6 +114,7 @@ import {
   type WeixinLifeOSAction,
   type WeixinLifeOSPeriod,
   type WeixinProposalDecision,
+  type WeixinSkillIntentCandidate,
   type WeixinSkillInvocation,
   type WeixinWritebackEnvelope,
   type WeixinAssistantDiagnostics,
@@ -478,8 +482,27 @@ export class WeixinAssistantService {
     const command = parseWeixinCommand(effectiveRequest.content);
     if (command) return this.handleCommand(effectiveRequest, command.name, command.args);
 
-    const semanticRoute = !skillInvocation && this.shouldRunSemanticRouter(effectiveRequest.content)
-      ? await this.resolveSemanticRoute(effectiveRequest.content, availableSkills, history)
+    const skillIntentCandidates = !skillInvocation
+      ? rankWeixinSkillIntentCandidates(effectiveRequest.content, availableSkills)
+      : [];
+    const inferredSkillIntent = !skillInvocation
+      ? resolveWeixinSkillIntentByQuery(effectiveRequest.content, availableSkills)
+      : null;
+    const inferredSkillIds = inferredSkillIntent ? [inferredSkillIntent.skillId] : [];
+    const semanticRoute = !skillInvocation
+      && inferredSkillIds.length === 0
+      && this.shouldRunSemanticRouter(
+        effectiveRequest.content,
+        skillIntentCandidates,
+        getWeixinImageContentParts(effectiveRequest.media).length > 0
+      )
+      ? await this.resolveSemanticRoute(
+        effectiveRequest.content,
+        availableSkills,
+        history,
+        skillIntentCandidates,
+        effectiveRequest.media
+      )
       : null;
     if (semanticRoute?.action) {
       const result = await this.handleLifeOSAction(effectiveRequest, semanticRoute.action);
@@ -505,8 +528,13 @@ export class WeixinAssistantService {
     const rawIsFollowUp = isWeixinContextDependentFollowUp(rawRequest);
     const rewriteAnchor = durableState.lastSubstantiveQuery || durableState.lastStandaloneQuery;
     const currentRequest = await this.rewriteStandaloneQuery(rawRequest, history, rewriteAnchor);
+    const routedSkillIds = skillInvocation?.skillIds?.length
+      ? skillInvocation.skillIds
+      : inferredSkillIds.length > 0
+        ? inferredSkillIds
+        : semanticRoute?.skillIds;
     const selectedSkillIds = resolveWeixinConversationSkillIds(
-      skillInvocation?.skillIds || semanticRoute?.skillIds,
+      routedSkillIds,
       durableState.lastSkillIds,
       availableSkills.map((skill) => skill.id),
       rawRequest
@@ -895,12 +923,21 @@ export class WeixinAssistantService {
         .filter((skill) => !query
           || skill.name.toLowerCase().includes(query)
           || skill.id.toLowerCase().includes(query)
-          || skill.description.toLowerCase().includes(query))
-        .slice(0, 30);
+          || skill.description.toLowerCase().includes(query));
+      const importedSkills = skills.filter((skill) => skill.source === "github" || skill.source === "local-file");
+      const builtInSkills = skills.filter((skill) => skill.source !== "github" && skill.source !== "local-file");
+      const sections = [
+        ...(importedSkills.length > 0
+          ? [`已导入（${importedSkills.length}）：`, ...importedSkills.map((skill) => `- ${skill.name}`)]
+          : []),
+        ...(builtInSkills.length > 0
+          ? [`内置（${builtInSkills.length}）：`, ...builtInSkills.map((skill) => `- ${skill.name}`)]
+          : [])
+      ];
       return { reply: skills.length > 0
         ? [
-          "可用 Skill：",
-          ...skills.map((skill) => `- ${skill.name}`),
+          `可用 Skill（${skills.length}）：`,
+          ...sections,
           "调用示例：用费曼的方法解释这个概念；小P，帮我解这道题；陈怀安分析这份资料。"
         ].join("\n")
         : "没有找到匹配 Skill。可以直接描述想采用的方法，Life OS 会尝试语义匹配。" };
@@ -1085,10 +1122,16 @@ export class WeixinAssistantService {
     }
   }
 
-  private shouldRunSemanticRouter(content: string): boolean {
+  private shouldRunSemanticRouter(
+    content: string,
+    skillCandidates: WeixinSkillIntentCandidate[] = [],
+    hasImages = false
+  ): boolean {
     const text = content.trim();
     if (!text || text.length > 6_000 || !this.ai.isConfigured()) return false;
-    return /(?:帮我|请|需要|想要|给我).{0,16}(?:记日记|生成日记|整理日记|待办|任务|复盘|总结|收藏|知识库|提醒)/u.test(text)
+    return shouldRouteWeixinSkillIntent(text, skillCandidates)
+      || (hasImages && /(?:这|那|上|前).{0,8}(?:张|个)?(?:图|图片|题)|(?:帮我|请|能不能).{0,12}(?:看|解|做|分析|判断|回答)/u.test(text))
+      || /(?:帮我|请|需要|想要|给我).{0,16}(?:记日记|生成日记|整理日记|待办|任务|复盘|总结|收藏|知识库|提醒)/u.test(text)
       || /(?:用|按照|采用|调用|选择).{0,32}(?:方法|思路|框架|视角|技能|skill)/iu.test(text)
       || /(?:哪个|合适|适合).{0,12}(?:skill|技能|方法论)/iu.test(text)
       || /(?:结合|对照|参考).{0,24}(?:我的|Life\s*OS|知识库|日记|记忆|项目).{0,24}(?:最新|官网|联网|网页|公开资料)/iu.test(text)
@@ -1250,55 +1293,95 @@ export class WeixinAssistantService {
   private async resolveSemanticRoute(
     content: string,
     skills: AiSkill[],
-    history: ChatMessage[] = []
+    history: ChatMessage[] = [],
+    intentCandidates: WeixinSkillIntentCandidate[] = [],
+    media: unknown[] = []
   ): Promise<WeixinSemanticRoute | null> {
-    const skillCatalog = skills.slice(0, 120).map((skill) => ({
+    const candidateMap = new Map(intentCandidates.map((candidate) => [candidate.skillId, candidate]));
+    const catalogSkills = intentCandidates.length > 0
+      ? intentCandidates
+        .map((candidate) => skills.find((skill) => skill.id === candidate.skillId))
+        .filter((skill): skill is AiSkill => Boolean(skill))
+      : skills.slice(0, 120);
+    const skillCatalog = catalogSkills.slice(0, intentCandidates.length > 0 ? 16 : 120).map((skill) => ({
       id: skill.id,
       name: skill.name,
-      description: skill.description.slice(0, 160),
-      lens: skill.lens.slice(0, 100)
+      description: skill.description.slice(0, 360),
+      lens: skill.lens.slice(0, 160),
+      intentScore: candidateMap.get(skill.id)?.score || 0,
+      matchedTerms: candidateMap.get(skill.id)?.matchedTerms || []
     }));
-    const response = await this.ai.complete({
-      model: await this.resolveWeixinTextModel(),
-      reasoningEffort: "low",
-      temperature: 0,
-      messages: [
-        {
-          role: "system",
-          content: [
-            "你是 Life OS 微信消息路由器，只做意图分类，不回答用户问题。",
-            "仅当用户明确要求现在执行操作时选择写入类 intent；讨论功能、询问方法或举例一律选择 chat。",
-            "若用户要求采用某位人物、方法论或 Skill 的方式回答，从目录中选择唯一最匹配的 skillId；不确定就留空。",
-            "tools 是本轮需要读取的数据源：最新外部事实、官网、新闻选择 web-search；用户自己的日记、任务、记忆、项目和知识库选择 lifeos-search；明确要求结合两者时可以同时选择。普通闲聊留空。",
-            "结合最近对话补全代词、日期和未完成操作，但不得把旧话题强加给新问题。",
-            "只输出一个 JSON 对象，不要 Markdown：",
-            '{"intent":"chat|diary-add|diary-read|diary-generate|task-list|task-add|task-complete|task-update|task-delete|task-clear-all|review-generate|summary-generate|link-save|knowledge-save|reminder-add|reminder-list|reminder-cancel","confidence":0,"skillId":"","skillConfidence":0,"query":"","title":"","content":"","when":"","date":"today|yesterday|YYYY-MM-DD","period":"today|week|month","url":"","collection":"","id":"","tools":["web-search|lifeos-search"]}'
-          ].join("\n")
-        },
-        {
-          role: "user",
-          content: [
-            `当前日期：${today()}`,
-            `最近对话：\n${this.compactHistory(history).slice(-6).map((item) => `${item.role}: ${item.content.slice(0, 800)}`).join("\n") || "无"}`,
-            `用户消息：\n${content}`,
-            `可用工具：\n${JSON.stringify(WEIXIN_AGENT_TOOL_REGISTRY)}`,
-            `可用 Skill：\n${JSON.stringify(skillCatalog)}`
-          ].join("\n\n")
-        }
-      ]
-    });
-    if (!response.ok || !response.text?.trim()) return null;
+    const allowedSkillIds = new Set(skillCatalog.map((skill) => skill.id));
+    const fallbackSkillIds = shouldRouteWeixinSkillIntent(content, intentCandidates)
+      && (intentCandidates[0]?.score || 0) >= 12
+      ? [intentCandidates[0].skillId]
+      : [];
+    const fallback = (): WeixinSemanticRoute | null => fallbackSkillIds.length > 0
+      ? { action: null, skillIds: fallbackSkillIds, query: content, tools: [] }
+      : null;
+    const imageParts = getWeixinImageContentParts(media);
+    let response;
+    try {
+      response = await this.ai.complete({
+        model: imageParts.length > 0
+          ? this.settings.visionAiModel.trim() || undefined
+          : await this.resolveWeixinTextModel(),
+        reasoningEffort: "low",
+        temperature: 0,
+        messages: [
+          {
+            role: "system",
+            content: [
+              "你是 Life OS 微信消息路由器，只做意图分类，不回答用户问题。",
+              "仅当用户明确要求现在执行操作时选择写入类 intent；讨论功能、询问方法或举例一律选择 chat。",
+              "Skill 选择必须分析本轮任务意图，不要求用户说出 Skill 名称，也不要求出现‘使用/调用 Skill’。只要题型、目标或工作场景与某个已安装 Skill 的用途或触发条件明显匹配，就选择唯一最合适的 skillId。",
+              "候选已按本地召回相关度排序。优先比较 description、matchedTerms 与当前问题；同领域候选都可用时选择触发条件最贴近当前细节的一项，仍完全相同时选择列表第一项。普通闲聊、纯事实问答或没有相关候选时 skillId 留空。",
+              "Skill 是本轮局部选择。不得因为历史消息曾使用某个 Skill，就把它强加给一个新的独立问题；历史只用于补全‘前面那题/继续/换一种方法’等明确指代。",
+              "若收到图片，要根据图片可见题型与用户文字共同判断，不得只凭上一张图片或旧话题。",
+              "tools 是本轮需要读取的数据源：最新外部事实、官网、新闻选择 web-search；用户自己的日记、任务、记忆、项目和知识库选择 lifeos-search；明确要求结合两者时可以同时选择。普通闲聊留空。",
+              "结合最近对话补全代词、日期和未完成操作，但不得把旧话题强加给新问题。",
+              "只输出一个 JSON 对象，不要 Markdown：",
+              '{"intent":"chat|diary-add|diary-read|diary-generate|task-list|task-add|task-complete|task-update|task-delete|task-clear-all|review-generate|summary-generate|link-save|knowledge-save|reminder-add|reminder-list|reminder-cancel","confidence":0,"skillId":"","skillConfidence":0,"query":"","title":"","content":"","when":"","date":"today|yesterday|YYYY-MM-DD","period":"today|week|month","url":"","collection":"","id":"","tools":["web-search|lifeos-search"]}'
+            ].join("\n")
+          },
+          {
+            role: "user",
+            content: imageParts.length > 0
+              ? [{
+                type: "text",
+                text: [
+                  `当前日期：${today()}`,
+                  `最近对话：\n${this.compactHistory(history).slice(-6).map((item) => `${item.role}: ${item.content.slice(0, 800)}`).join("\n") || "无"}`,
+                  `用户消息：\n${content}`,
+                  `可用工具：\n${JSON.stringify(WEIXIN_AGENT_TOOL_REGISTRY)}`,
+                  `Skill 候选：\n${JSON.stringify(skillCatalog)}`
+                ].join("\n\n")
+              }, ...imageParts]
+              : [
+                `当前日期：${today()}`,
+                `最近对话：\n${this.compactHistory(history).slice(-6).map((item) => `${item.role}: ${item.content.slice(0, 800)}`).join("\n") || "无"}`,
+                `用户消息：\n${content}`,
+                `可用工具：\n${JSON.stringify(WEIXIN_AGENT_TOOL_REGISTRY)}`,
+                `Skill 候选：\n${JSON.stringify(skillCatalog)}`
+              ].join("\n\n")
+          }
+        ]
+      });
+    } catch {
+      return fallback();
+    }
+    if (!response.ok || !response.text?.trim()) return fallback();
     const match = response.text.match(/\{[\s\S]*\}/u);
-    if (!match) return null;
+    if (!match) return fallback();
     let record: Record<string, unknown>;
     try {
       record = JSON.parse(match[0]) as Record<string, unknown>;
     } catch {
-      return null;
+      return fallback();
     }
     const skillId = String(record.skillId || "").trim();
     const skillConfidence = Number(record.skillConfidence || 0);
-    const skillIds = skillConfidence >= 0.78 && skills.some((skill) => skill.id === skillId) ? [skillId] : [];
+    const skillIds = skillConfidence >= 0.62 && allowedSkillIds.has(skillId) ? [skillId] : fallbackSkillIds;
     const query = String(record.query || content).trim() || content;
     const confidence = Number(record.confidence || 0);
     const tools = Array.isArray(record.tools)

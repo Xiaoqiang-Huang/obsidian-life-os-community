@@ -1,4 +1,4 @@
-# Life OS Assistant 0.3.17
+# Life OS Assistant 0.3.18
 
 <div align="center">
 
@@ -6,7 +6,7 @@
 
 [English](README.md) · [**简体中文**](README.zh-CN.md)
 
-![版本](https://img.shields.io/badge/版本-0.3.17-0f172a?style=flat-square)
+![版本](https://img.shields.io/badge/版本-0.3.18-0f172a?style=flat-square)
 ![Obsidian](https://img.shields.io/badge/Obsidian-1.5.0%2B-7c3aed?style=flat-square)
 ![本地优先](https://img.shields.io/badge/数据-本地优先-15803d?style=flat-square)
 ![移动端](https://img.shields.io/badge/移动端-支持-2563eb?style=flat-square)
@@ -17,11 +17,11 @@
 
 Life OS Assistant 把 Obsidian Vault 变成一个相互关联的工作空间，用于管理**今天、任务、日记、知识、记忆、复盘、AI 助手和项目 AI 会话**。用户可读内容仍然保存在 Vault 的 Markdown 中。AI 写入默认关闭；用户可选择预览确认，也可以主动开启“明确指令自动写入”，但只有当前请求点明唯一目标时才会执行。
 
-当前版本：**0.3.17** · Obsidian **1.5.0+** · `isDesktopOnly: false`
+当前版本：**0.3.18** · Obsidian **1.5.0+** · `isDesktopOnly: false`
 
-> **0.3.17 Agent 工具与工作流更新：** 桌面 AI 助手和微信 Bot 共用的 Life OS Agent 现已提供 38 个受权限控制的工具、持久任务与事件记忆、安全可复用工具配方、更完整的 Skill 路由、上下文压缩、附件生命周期和受控 Vault 写回。本次还新增提示词工作室、任务批量操作、知识库目录导入、可配置侧栏与备考模块，并修复多项任务、弹窗和渲染问题。
+> **0.3.18 稳定性与窄屏体验更新：** 会话任务提取新增数量上限、批量清理与持久删除，重启后不会再次生成已删除任务；导入的 Skill 可由桌面端和微信 Bot 通过自然语言意图共同调用。AI 助手、今日、任务、Skill 管理与公共导航在窄窗口下会自适应重排，并在操作后保留滚动位置和选择状态。月付 Pro 升级买断 Pro 也提供了明确且可恢复的入口。
 
-> **关于配图：** 下方导览图依据 0.3.17 当前的信息架构和已经实现的工作流生成，全部使用虚构数据和中性 Obsidian 主题。实际界面会随你的 Obsidian 主题、窗口尺寸和已启用功能变化。
+> **关于配图：** 下方导览图依据 0.3.18 当前的信息架构和已经实现的工作流生成，全部使用虚构数据和中性 Obsidian 主题。实际界面会随你的 Obsidian 主题、窗口尺寸和已启用功能变化。
 
 ![Life OS 今日总览](readme-assets/01-today-overview.webp)
 
@@ -192,7 +192,7 @@ Life OS 已把微信 iLink Bot 连接层直接内置到插件中，不需要安�
 
 ### 手动安装
 
-创建 `.obsidian/plugins/personal-life-system/`，从精确语义版本 Tag（例如 `0.3.17`）中复制以下三个文件：
+创建 `.obsidian/plugins/personal-life-system/`，从精确语义版本 Tag（例如 `0.3.18`）中复制以下三个文件：
 
 - `main.js`
 - `manifest.json`

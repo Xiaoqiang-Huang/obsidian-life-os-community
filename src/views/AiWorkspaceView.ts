@@ -48,6 +48,7 @@ import {
 import type { LifeOSProject } from "../types";
 import { formatDate } from "../utils/dates";
 import { renderMarkdownDisplay } from "../utils/markdown-render";
+import { renderStableView } from "../utils/stable-view-refresh";
 
 type AiWorkspaceTab = "overview" | "sessions" | "tree" | "versions" | "prompts";
 type ReaderFilter = "all" | "user" | "assistant" | "important";
@@ -70,8 +71,10 @@ export class AiWorkspaceView extends ItemView {
   private treeResizeObserver: ResizeObserver | null = null;
   private treeAnimationFrame = 0;
   private expandedMessageIds = new Set<string>();
-  private rendering = false;
+  private renderPromise: Promise<void> | null = null;
   private renderQueued = false;
+  private renderRequestRevision = 0;
+  private preserveScrollOnNextRender = true;
   private disposed = false;
 
   constructor(leaf: WorkspaceLeaf, private plugin: PersonalLifeSystemPlugin) {
@@ -92,12 +95,13 @@ export class AiWorkspaceView extends ItemView {
 
   async onOpen(): Promise<void> {
     this.disposed = false;
-    await this.render();
+    await this.render(false);
   }
 
   async onClose(): Promise<void> {
     this.disposed = true;
     this.renderQueued = false;
+    this.renderRequestRevision += 1;
     this.disposeTreeCanvas();
   }
 
@@ -114,24 +118,27 @@ export class AiWorkspaceView extends ItemView {
     );
   }
 
-  private async render(): Promise<void> {
+  private async render(preserveScroll = true): Promise<void> {
     if (this.disposed) return;
-    if (this.rendering) {
-      this.renderQueued = true;
-      return;
-    }
-    this.rendering = true;
-    try {
-      do {
+    this.renderRequestRevision += 1;
+    this.renderQueued = true;
+    this.preserveScrollOnNextRender = preserveScroll;
+    if (this.renderPromise) return this.renderPromise;
+
+    const run = async (): Promise<void> => {
+      while (this.renderQueued && !this.disposed) {
         this.renderQueued = false;
-        await this.renderOnce();
-      } while (this.renderQueued && !this.disposed);
-    } finally {
-      this.rendering = false;
-    }
+        const revision = this.renderRequestRevision;
+        await this.renderOnce(revision, this.preserveScrollOnNextRender);
+      }
+    };
+    this.renderPromise = run().finally(() => {
+      this.renderPromise = null;
+    });
+    return this.renderPromise;
   }
 
-  private async renderOnce(): Promise<void> {
+  private async renderOnce(revision: number, preserveScroll: boolean): Promise<void> {
     try {
       await this.plugin.ensureBaseStructure();
       const service = this.service();
@@ -140,45 +147,54 @@ export class AiWorkspaceView extends ItemView {
         new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage)
       );
       const [projects, state] = await Promise.all([projectService.loadProjects(), service.loadState(true)]);
+      if (this.disposed || revision !== this.renderRequestRevision) return;
       this.normalizeSelection(projects, state);
       const container = this.containerEl.children[1] as HTMLElement;
       this.disposeTreeCanvas();
-      container.empty();
-      const main = createLifeOSShell(container, this.plugin, "workspace");
-      main.addClass("lifeos-ai-workspace");
-      this.renderHero(main, projects, state, service);
-      if (projects.length === 0) {
-        this.renderNoProjects(main);
-        return;
-      }
-      this.renderProjectBar(main, projects, state);
-      this.renderTabs(main);
-      const body = main.createDiv({ cls: `lifeos-ai-workspace-body is-${this.activeTab}` });
-      if (this.activeTab === "overview") await this.renderOverview(body, projects, state, service);
-      if (this.activeTab === "sessions") await this.renderSessions(body, projects, state, service);
-      if (this.activeTab === "tree") await this.renderTree(body, projects, state, service);
-      if (this.activeTab === "versions") await this.renderVersions(body, projects, state, service);
-      if (this.activeTab === "prompts") await this.renderPrompts(body, projects, state, service);
+      await renderStableView(container, async (staging) => {
+        const main = createLifeOSShell(staging, this.plugin, "workspace");
+        main.addClass("lifeos-ai-workspace");
+        this.renderHero(main, projects, state, service);
+        if (projects.length === 0) {
+          this.renderNoProjects(main);
+          return;
+        }
+        this.renderProjectBar(main, projects, state);
+        this.renderTabs(main);
+        const body = main.createDiv({ cls: `lifeos-ai-workspace-body is-${this.activeTab}` });
+        if (this.activeTab === "overview") await this.renderOverview(body, projects, state, service);
+        if (this.activeTab === "sessions") await this.renderSessions(body, projects, state, service);
+        if (this.activeTab === "tree") await this.renderTree(body, projects, state, service);
+        if (this.activeTab === "versions") await this.renderVersions(body, projects, state, service);
+        if (this.activeTab === "prompts") await this.renderPrompts(body, projects, state, service);
+      }, {
+        preserveScroll,
+        isCurrent: () => !this.disposed && revision === this.renderRequestRevision
+      });
     } catch (error) {
       console.error("[Life OS] AI Workspace render failed.", error);
-      this.renderFailure(error);
+      await this.renderFailure(error, revision, preserveScroll);
     }
   }
 
-  private renderFailure(error: unknown): void {
+  private async renderFailure(error: unknown, revision: number, preserveScroll: boolean): Promise<void> {
     const container = this.containerEl.children[1] as HTMLElement | undefined;
     if (!container) return;
-    container.empty();
-    const main = container.createDiv({ cls: "lifeos-ai-workspace-failure" });
-    setIcon(main.createSpan(), "triangle-alert");
-    const copy = main.createDiv();
-    copy.createEl("strong", { text: "项目上下文暂时无法显示" });
-    copy.createEl("p", {
-      text: error instanceof Error
-        ? `页面数据没有被修改。错误：${error.message}`
-        : "页面数据没有被修改，请重试。"
+    await renderStableView(container, (staging) => {
+      const main = staging.createDiv({ cls: "lifeos-ai-workspace-failure" });
+      setIcon(main.createSpan(), "triangle-alert");
+      const copy = main.createDiv();
+      copy.createEl("strong", { text: "项目上下文暂时无法显示" });
+      copy.createEl("p", {
+        text: error instanceof Error
+          ? `页面数据没有被修改。错误：${error.message}`
+          : "页面数据没有被修改，请重试。"
+      });
+      createButton(main, "重新加载", () => void this.render(), { icon: "refresh-cw", primary: true });
+    }, {
+      preserveScroll,
+      isCurrent: () => !this.disposed && revision === this.renderRequestRevision
     });
-    createButton(main, "重新加载", () => void this.render(), { icon: "refresh-cw", primary: true });
   }
 
   private renderHero(
