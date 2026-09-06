@@ -26,6 +26,7 @@ import type {
   ContextEngineMode,
   ContextEngineResult,
   ContextEvidence,
+  ContextRetrievalPlan,
   ContextSection,
   ContextSource,
   WebSearchMode,
@@ -80,15 +81,27 @@ export class ContextEngine {
     const inventory = await this.metadata.getInventory();
     const scopedInventory = this.scopeInventoryForProject(inventory, input.projectScopeId);
     let retrievalMessage = input.userMessage;
+    let retrievalInventory = scopedInventory;
+    let retrievalLimit = this.defaultRetrievalLimit(mode);
+    const planningWarnings: string[] = [];
     if (input.useAiPlanner) {
       const plan = await this.planner.plan({ userMessage: input.userMessage, mode, inventory: scopedInventory });
-      retrievalMessage = [input.userMessage, ...plan.keywords, ...plan.tags].filter(Boolean).join(" ");
+      const planned = this.applyRetrievalPlan(scopedInventory, plan, mode);
+      retrievalInventory = planned.inventory;
+      retrievalLimit = planned.limit;
+      planningWarnings.push(...planned.warnings);
+      retrievalMessage = [
+        input.userMessage,
+        ...plan.keywords,
+        ...plan.tags,
+        ...planned.inventory.slice(0, 6).map((item) => item.title)
+      ].filter(Boolean).join(" ");
     }
     const retrieval = await this.adaptiveRetrieval.search({
       userMessage: retrievalMessage,
-      inventory,
-      allowedPaths: scopedInventory.map((item) => item.path),
-      maxResults: mode === "graph" ? 16 : mode === "vector" ? 12 : 10
+      inventory: retrievalInventory,
+      allowedPaths: retrievalInventory.map((item) => item.path),
+      maxResults: retrievalLimit
     });
     const shouldIncludeProjectOverview = Boolean(input.projectScopeId) || /项目|任务|进度|待办|project|task/i.test(input.userMessage);
     const [summarySections, currentNoteSections, urlSections, webSearchSections, projectSections, projectDocumentSections, projectAiWorkspaceSections, coreSections, graphSections] = await Promise.all([
@@ -121,9 +134,110 @@ export class ContextEngine {
         ...coreSections,
         ...summarySections
       ],
-      warnings: retrieval.warnings
+      warnings: [...planningWarnings, ...retrieval.warnings]
     });
     return { ...composed, retrievalTrace: retrieval.trace };
+  }
+
+  /**
+   * Turn an AI retrieval plan into a vault-safe allow-list.  The planner only
+   * sees metadata, and every selector is intersected with the already scoped
+   * inventory, so a hallucinated path can never escape the selected project.
+   */
+  private applyRetrievalPlan(
+    scopedInventory: ContextInventoryItem[],
+    plan: ContextRetrievalPlan,
+    mode: ContextEngineMode
+  ): { inventory: ContextInventoryItem[]; limit: number; warnings: string[] } {
+    const warnings: string[] = [];
+    const hardLimit = this.defaultRetrievalLimit(mode);
+    const limit = Math.max(1, Math.min(hardLimit, Number.isFinite(plan.limit) ? Math.floor(plan.limit) : hardLimit));
+    const pathMatches = this.matchPlannedPaths(scopedInventory, plan.paths);
+    if (pathMatches.length > 0) {
+      return { inventory: pathMatches, limit: Math.min(limit, pathMatches.length), warnings };
+    }
+
+    if (plan.paths.length > 0) {
+      warnings.push("AI 规划的文件路径在当前可用范围内不存在，已改用安全目录范围检索。");
+    }
+    const directoryMatches = this.matchPlannedDirectories(scopedInventory, plan.directories);
+    if (directoryMatches.length > 0) {
+      return { inventory: directoryMatches, limit, warnings };
+    }
+
+    if (plan.directories.length > 0) {
+      warnings.push("AI 规划的目录未匹配当前 Vault，已在当前项目的安全范围内降级检索。");
+    }
+    return { inventory: scopedInventory, limit, warnings };
+  }
+
+  private matchPlannedPaths(inventory: ContextInventoryItem[], selectors: string[]): ContextInventoryItem[] {
+    const normalizedSelectors = selectors
+      .map((selector) => this.normalizeSelector(selector))
+      .filter(Boolean);
+    if (normalizedSelectors.length === 0) return [];
+    return inventory.filter((item) => {
+      const path = this.normalizeSelector(item.path);
+      return normalizedSelectors.some((selector) => path === selector || path.endsWith(`/${selector}`));
+    });
+  }
+
+  private matchPlannedDirectories(inventory: ContextInventoryItem[], selectors: string[]): ContextInventoryItem[] {
+    const directorySelectors = new Set<string>();
+    for (const selector of selectors) {
+      const normalized = this.normalizeSelector(selector).replace(/\/+$/u, "");
+      if (!normalized) continue;
+      directorySelectors.add(normalized);
+      const canonical = this.canonicalPlannerDirectory(selector);
+      if (canonical) {
+        for (const path of this.pathVariants(canonical)) {
+          directorySelectors.add(this.normalizeSelector(path).replace(/\/+$/u, ""));
+        }
+      }
+    }
+    if (directorySelectors.size === 0) return [];
+    return inventory.filter((item) => {
+      const path = this.normalizeSelector(item.path);
+      return Array.from(directorySelectors).some((directory) => (
+        path === directory
+        || path.startsWith(`${directory}/`)
+        || path.includes(`/${directory}/`)
+      ));
+    });
+  }
+
+  private canonicalPlannerDirectory(value: string): string | null {
+    const normalized = this.normalizeSelector(value).split("/").pop() ?? "";
+    const aliases: Record<string, string> = {
+      daily: "Daily",
+      diaries: "Daily",
+      diary: "Daily",
+      日记: "Daily",
+      tasks: "Tasks",
+      task: "Tasks",
+      任务: "Tasks",
+      memory: "Memory",
+      memories: "Memory",
+      记忆: "Memory",
+      knowledge: "Knowledge",
+      知识库: "Knowledge",
+      projects: "Projects",
+      project: "Projects",
+      项目: "Projects"
+    };
+    return aliases[normalized] ?? null;
+  }
+
+  private normalizeSelector(value: string): string {
+    return this.normalizePath(String(value || ""))
+      .replace(/^\.\//u, "")
+      .replace(/^\/+|\/+$/gu, "")
+      .trim()
+      .toLocaleLowerCase();
+  }
+
+  private defaultRetrievalLimit(mode: ContextEngineMode): number {
+    return mode === "graph" ? 16 : mode === "vector" ? 12 : 10;
   }
 
   private scopeInventoryForProject(

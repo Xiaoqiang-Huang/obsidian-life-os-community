@@ -1,6 +1,6 @@
 import type { AiClient, AiMessage, AiResponse, AiStreamCallbacks } from "../../ai";
 import type { LifeOSAgentToolDescriptor } from "../LifeOSAgentToolRegistry";
-import { AgentContextCompactor } from "./AgentContextCompactor";
+import { AgentContextCompactor, type AgentCompactionResult } from "./AgentContextCompactor";
 import { AgentToolRuntime, type AgentToolRuntimeOptions } from "./AgentToolRuntime";
 import type {
   LifeOSAgentEvent,
@@ -10,11 +10,13 @@ import type {
   LifeOSAgentToolExecutionContext,
   LifeOSAgentToolResult
 } from "./LifeOSAgentTypes";
+import type { AgentWorkingCheckpoint } from "./AgentMemoryTypes";
 
 interface AgentLoopInput {
   messages: AiMessage[];
   toolContext: LifeOSAgentToolExecutionContext;
   taskMemory: string;
+  workingCheckpoint?: AgentWorkingCheckpoint;
   hasLocalEvidence: boolean;
   hasWebEvidence: boolean;
   forcePlanner?: boolean;
@@ -52,7 +54,7 @@ export class AgentLoop {
 
   async run(input: AgentLoopInput, signal?: AbortSignal): Promise<LifeOSAgentLoopResult> {
     const state = await this.prepareExecution(input, signal);
-    if (state.terminal) return state.terminal;
+    if (state.terminal) return { ...state.terminal, compaction: state.compaction };
     const modelStarted = this.event(input, state.events, "model-started", "调用 AI 生成最终回答");
     await this.emit(input, modelStarted);
     const response = await this.ai.complete({
@@ -76,7 +78,8 @@ export class AgentLoop {
       toolResults: state.toolResults,
       messages: state.messages,
       modelCalls: state.modelCalls,
-      toolCalls: state.toolResults.length
+      toolCalls: state.toolResults.length,
+      compaction: state.compaction
     };
   }
 
@@ -89,7 +92,7 @@ export class AgentLoop {
     if (state.terminal) {
       if (state.terminal.ok) callbacks.onDone?.(state.terminal.text);
       else callbacks.onError?.(state.terminal.error || "Agent 已停止。");
-      return state.terminal;
+      return { ...state.terminal, compaction: state.compaction };
     }
     const modelStarted = this.event(input, state.events, "model-started", "调用 AI 并流式生成最终回答");
     await this.emit(input, modelStarted);
@@ -132,7 +135,8 @@ export class AgentLoop {
       toolResults: state.toolResults,
       messages: state.messages,
       modelCalls: state.modelCalls,
-      toolCalls: state.toolResults.length
+      toolCalls: state.toolResults.length,
+      compaction: state.compaction
     };
   }
 
@@ -141,6 +145,7 @@ export class AgentLoop {
     events: LifeOSAgentEvent[];
     toolResults: LifeOSAgentToolResult[];
     modelCalls: number;
+    compaction: AgentCompactionResult;
     terminal?: LifeOSAgentLoopResult;
   }> {
     const budget = this.normalizeBudget(input.budget);
@@ -150,23 +155,30 @@ export class AgentLoop {
     let messages = [...input.messages];
     const started = this.event(input, events, "turn-started", "开始处理本轮请求");
     await this.emit(input, started);
-    const compacted = this.compactor.compact(messages, { maxChars: budget.maxContextChars, keepRecent: 10, taskMemory: input.taskMemory });
+    const compacted = this.compactor.compact(messages, {
+      maxChars: budget.maxContextChars,
+      keepRecent: 10,
+      taskMemory: input.taskMemory,
+      checkpoint: input.workingCheckpoint
+    });
     messages = compacted.messages;
     if (compacted.compacted) {
       await this.emit(input, this.event(input, events, "context-compacted", `上下文已压缩：${compacted.beforeChars} → ${compacted.afterChars} 字符`, compacted.summary.slice(0, 500), { droppedMessages: compacted.droppedMessages }));
     }
-    if (signal?.aborted) return { messages, events, toolResults, modelCalls, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "aborted", "执行已取消。") };
+    if (signal?.aborted) return { messages, events, toolResults, modelCalls, compaction: compacted, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "aborted", "执行已取消。") };
 
-    const pendingWrite = this.tools.pendingWrite(input.toolContext.sessionId);
+    const runtimeSessionId = input.toolContext.runtimeSessionId || input.toolContext.sessionId;
+    const pendingWrite = this.tools.pendingWrite(runtimeSessionId);
     if (pendingWrite) {
       const decision = this.tools.pendingWriteDecision(input.toolContext.userContent);
       if (decision === "cancel") {
-        this.tools.discardPendingWrite(input.toolContext.sessionId);
+        this.tools.discardPendingWrite(runtimeSessionId);
         return {
           messages,
           events,
           toolResults,
           modelCalls,
+          compaction: compacted,
           terminal: await this.terminal(
             input,
             events,
@@ -197,6 +209,7 @@ export class AgentLoop {
             events,
             toolResults,
             modelCalls,
+            compaction: compacted,
             terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "needs-user", "待确认操作已过期，请重新发起。", true)
           };
         }
@@ -217,6 +230,7 @@ export class AgentLoop {
           events,
           toolResults,
           modelCalls,
+          compaction: compacted,
           terminal: await this.terminal(
             input,
             events,
@@ -232,7 +246,7 @@ export class AgentLoop {
       // A confirmation applies only to the immediately following user turn.
       // Dropping it on an unrelated message prevents a later generic “确认”
       // from unexpectedly executing a stale destructive action.
-      this.tools.discardPendingWrite(input.toolContext.sessionId);
+      this.tools.discardPendingWrite(runtimeSessionId);
     }
 
     const heuristicCalls = input.enableTools === false ? [] : this.heuristicCalls(input);
@@ -244,21 +258,21 @@ export class AgentLoop {
       || this.shouldPlanToolUse(input.toolContext.userContent);
     while (step < budget.maxSteps) {
       step += 1;
-      if (signal?.aborted) return { messages, events, toolResults, modelCalls, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "aborted", "执行已取消。") };
+      if (signal?.aborted) return { messages, events, toolResults, modelCalls, compaction: compacted, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "aborted", "执行已取消。") };
       if (pendingCalls.length === 0 && plannerEnabled && modelCalls < budget.maxModelCalls - 1) {
         const decision = await this.plan(input, messages, events, budget, signal);
         modelCalls += 1;
         if (!decision) break;
         if (decision.action === "final") {
-          if (decision.answer) return { messages, events, toolResults, modelCalls, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "completed", decision.answer, true) };
+          if (decision.answer) return { messages, events, toolResults, modelCalls, compaction: compacted, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "completed", decision.answer, true) };
           break;
         }
-        if (decision.action === "ask") return { messages, events, toolResults, modelCalls, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "needs-user", decision.answer || "还需要你补充信息。", true) };
+        if (decision.action === "ask") return { messages, events, toolResults, modelCalls, compaction: compacted, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "needs-user", decision.answer || "还需要你补充信息。", true) };
         pendingCalls = decision.calls;
       }
       if (pendingCalls.length === 0) break;
       if (toolResults.length + pendingCalls.length > budget.maxToolCalls) {
-        return { messages, events, toolResults, modelCalls, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "budget-exhausted", "本轮需要的工具调用超过安全预算，请缩小问题范围。") };
+        return { messages, events, toolResults, modelCalls, compaction: compacted, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "budget-exhausted", "本轮需要的工具调用超过安全预算，请缩小问题范围。") };
       }
       const nestedModelCalls = pendingCalls.reduce(
         (sum, call) => sum + Math.max(0, this.tools.descriptor(call.name)?.modelCallCost || 0),
@@ -268,14 +282,14 @@ export class AgentLoop {
       // keeps vision/research/review subagents inside the same global budget
       // instead of hiding additional model calls behind tool executors.
       if (modelCalls + nestedModelCalls + 1 > budget.maxModelCalls) {
-        return { messages, events, toolResults, modelCalls, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "budget-exhausted", "本轮子代理与最终回答将超过模型调用预算，请缩小任务或提高本轮预算。") };
+        return { messages, events, toolResults, modelCalls, compaction: compacted, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "budget-exhausted", "本轮子代理与最终回答将超过模型调用预算，请缩小任务或提高本轮预算。") };
       }
       for (const call of pendingCalls) {
         const signature = `${call.name}:${JSON.stringify(call.input || {})}`;
         const count = (signatures.get(signature) || 0) + 1;
         signatures.set(signature, count);
         if (count > budget.maxRepeatedCalls) {
-          return { messages, events, toolResults, modelCalls, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "tool-failure", `工具 ${call.name} 重复调用未产生新信息，已停止。`) };
+          return { messages, events, toolResults, modelCalls, compaction: compacted, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "tool-failure", `工具 ${call.name} 重复调用未产生新信息，已停止。`) };
         }
         const eventType = call.name.startsWith("subagent-") ? "subagent-started" : "tool-started";
         await this.emit(input, this.event(input, events, eventType, `正在执行：${this.toolLabel(call.name)}`, "", {}, call.name, call.id));
@@ -292,14 +306,14 @@ export class AgentLoop {
         await this.emit(input, this.event(input, events, type, result.needsConfirmation ? (result.confirmationSummary || "写入等待确认") : result.ok ? `${this.toolLabel(result.toolId)}完成` : `${this.toolLabel(result.toolId)}失败`, result.ok ? result.output.slice(0, 500) : result.error || "", {}, result.toolId, result.callId, result.durationMs));
       }
       const awaiting = results.find((result) => result.needsConfirmation);
-      if (awaiting) return { messages, events, toolResults, modelCalls, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "needs-user", awaiting.confirmationSummary || "该写入需要你确认。", true) };
+      if (awaiting) return { messages, events, toolResults, modelCalls, compaction: compacted, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "needs-user", awaiting.confirmationSummary || "该写入需要你确认。", true) };
       const successful = results.filter((result) => result.ok);
       if (successful.length === 0) {
         const error = results.map((result) => result.error).filter(Boolean).join("；") || "工具没有返回有效结果。";
         const stopReason = results.some((result) => /只读|权限|拒绝/u.test(result.error || ""))
           ? "permission-denied" as const
           : "tool-failure" as const;
-        return { messages, events, toolResults, modelCalls, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, stopReason, error) };
+        return { messages, events, toolResults, modelCalls, compaction: compacted, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, stopReason, error) };
       }
       messages = this.appendToolResults(messages, successful);
       pendingCalls = [];
@@ -307,8 +321,8 @@ export class AgentLoop {
       // the final model call synthesizes it. Forced planner mode may continue.
       if (!input.forcePlanner) break;
     }
-    if (step >= budget.maxSteps && input.forcePlanner) return { messages, events, toolResults, modelCalls, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "max-steps", "已达到本轮最大执行步数，请把任务拆小后继续。") };
-    return { messages, events, toolResults, modelCalls };
+    if (step >= budget.maxSteps && input.forcePlanner) return { messages, events, toolResults, modelCalls, compaction: compacted, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "max-steps", "已达到本轮最大执行步数，请把任务拆小后继续。") };
+    return { messages, events, toolResults, modelCalls, compaction: compacted };
   }
 
   private heuristicCalls(input: AgentLoopInput): LifeOSAgentToolCall[] {

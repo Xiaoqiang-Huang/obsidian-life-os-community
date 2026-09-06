@@ -77,6 +77,18 @@ export type WebSearchMode = "auto" | "always" | "off";
 export type WebSearchProviderType = "built-in" | "tavily" | "brave" | "searxng";
 export type ChatSendBehavior = "enterToSend" | "modEnterToSend";
 export type ChatWritebackMode = "off" | "confirm" | "explicit-auto";
+/**
+ * Controls whether a conversation can read from or contribute to the Agent's
+ * durable recall layer. `temporary` also suppresses the persisted working
+ * checkpoint for the current chat.
+ */
+export type AgentMemoryMode = "standard" | "use-only" | "disabled" | "temporary";
+/**
+ * Durable recall is shared by project by default so desktop and WeChat can
+ * hand work off to each other. Users may opt into stricter channel/account
+ * isolation for sensitive or shared-device workflows.
+ */
+export type AgentMemoryScopeMode = "project" | "project-channel" | "project-account";
 export type WeixinBotPermission = "read-only" | "confirm" | "explicit-auto";
 export type WeixinSenderPolicy = "pairing" | "allowlist" | "open";
 
@@ -571,6 +583,21 @@ export interface PersonalLifeSystemSettings {
   chatSendBehavior: ChatSendBehavior;
   chatDefaultAiReply: boolean;
   chatWritebackMode: ChatWritebackMode;
+  agentMemoryEnabled: boolean;
+  agentMemoryDefaultMode: AgentMemoryMode;
+  agentMemoryScopeMode: AgentMemoryScopeMode;
+  /** Idle time after which a working checkpoint is considered stale. */
+  agentMemoryIdleHours: number;
+  /** Maximum pending memory extraction jobs processed in one background pass. */
+  agentMemoryMaxSessionsPerRun: number;
+  /** Maximum candidate memories extracted from one turn. */
+  agentMemoryMaxItemsPerSession: number;
+  /** Retention window for inactive working checkpoints and generated recall. */
+  agentMemoryRetentionDays: number;
+  /** Generated memories below this confidence are not injected into answers. */
+  agentMemoryMinConfidence: number;
+  agentMemoryAutoSkillSuggestions: boolean;
+  agentMemoryImportExternal: boolean;
   /** @deprecated use chatWritebackMode */
   autoApplyChatToDaily: boolean;
   autoReviewEnabled: boolean;
@@ -587,6 +614,8 @@ export interface PersonalLifeSystemSettings {
   taskManagerShowCompleted: boolean;
   /** Maximum number of new tasks kept from one AI or rule-based extraction. */
   aiTaskExtractionLimit: number;
+  /** Maximum number of project-context/review tasks allowed into one automatic extraction or carryover batch. */
+  projectContextTaskExtractionLimit: number;
   backgroundImagePath: string;
   browserCaptureEnabled: boolean;
   browserCaptureSetupVersion: number;
@@ -626,6 +655,53 @@ export function normalizeThemeStyle(value: string | undefined | null): ThemeStyl
 
 export const DEFAULT_AI_TASK_EXTRACTION_LIMIT = 8;
 export const MAX_AI_TASK_EXTRACTION_LIMIT = 50;
+export const DEFAULT_PROJECT_CONTEXT_TASK_EXTRACTION_LIMIT = 5;
+export const MAX_PROJECT_CONTEXT_TASK_EXTRACTION_LIMIT = 50;
+export const DEFAULT_AGENT_MEMORY_IDLE_HOURS = 72;
+export const DEFAULT_AGENT_MEMORY_MAX_SESSIONS_PER_RUN = 4;
+export const DEFAULT_AGENT_MEMORY_MAX_ITEMS_PER_SESSION = 8;
+export const DEFAULT_AGENT_MEMORY_RETENTION_DAYS = 365;
+export const DEFAULT_AGENT_MEMORY_MIN_CONFIDENCE = 0.62;
+
+export function normalizeAgentMemoryMode(value: unknown): AgentMemoryMode {
+  return value === "use-only" || value === "disabled" || value === "temporary" || value === "standard"
+    ? value
+    : "standard";
+}
+
+export function normalizeAgentMemoryScopeMode(value: unknown): AgentMemoryScopeMode {
+  return value === "project-channel" || value === "project-account" || value === "project"
+    ? value
+    : "project";
+}
+
+function normalizeAgentMemoryInteger(value: unknown, fallback: number, min: number, max: number): number {
+  if (value === undefined || value === null || String(value).trim() === "") return fallback;
+  const parsed = Math.floor(Number(value));
+  return Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback;
+}
+
+export function normalizeAgentMemoryIdleHours(value: unknown): number {
+  return normalizeAgentMemoryInteger(value, DEFAULT_AGENT_MEMORY_IDLE_HOURS, 1, 24 * 90);
+}
+
+export function normalizeAgentMemoryMaxSessionsPerRun(value: unknown): number {
+  return normalizeAgentMemoryInteger(value, DEFAULT_AGENT_MEMORY_MAX_SESSIONS_PER_RUN, 1, 20);
+}
+
+export function normalizeAgentMemoryMaxItemsPerSession(value: unknown): number {
+  return normalizeAgentMemoryInteger(value, DEFAULT_AGENT_MEMORY_MAX_ITEMS_PER_SESSION, 1, 24);
+}
+
+export function normalizeAgentMemoryRetentionDays(value: unknown): number {
+  return normalizeAgentMemoryInteger(value, DEFAULT_AGENT_MEMORY_RETENTION_DAYS, 7, 3650);
+}
+
+export function normalizeAgentMemoryMinConfidence(value: unknown): number {
+  if (value === undefined || value === null || String(value).trim() === "") return DEFAULT_AGENT_MEMORY_MIN_CONFIDENCE;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(0.98, Math.max(0.1, parsed)) : DEFAULT_AGENT_MEMORY_MIN_CONFIDENCE;
+}
 
 export function normalizeAiTaskExtractionLimit(value: unknown): number {
   if (value === undefined || value === null || String(value).trim() === "") {
@@ -634,6 +710,15 @@ export function normalizeAiTaskExtractionLimit(value: unknown): number {
   const parsed = Math.floor(Number(value));
   if (!Number.isFinite(parsed)) return DEFAULT_AI_TASK_EXTRACTION_LIMIT;
   return Math.min(MAX_AI_TASK_EXTRACTION_LIMIT, Math.max(1, parsed));
+}
+
+export function normalizeProjectContextTaskExtractionLimit(value: unknown): number {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return DEFAULT_PROJECT_CONTEXT_TASK_EXTRACTION_LIMIT;
+  }
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed)) return DEFAULT_PROJECT_CONTEXT_TASK_EXTRACTION_LIMIT;
+  return Math.min(MAX_PROJECT_CONTEXT_TASK_EXTRACTION_LIMIT, Math.max(1, parsed));
 }
 
 export function normalizeBrowserCapturePort(value: unknown): number {
@@ -1234,6 +1319,16 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   chatSendBehavior: "enterToSend",
   chatDefaultAiReply: true,
   chatWritebackMode: "off",
+  agentMemoryEnabled: true,
+  agentMemoryDefaultMode: "standard",
+  agentMemoryScopeMode: "project",
+  agentMemoryIdleHours: DEFAULT_AGENT_MEMORY_IDLE_HOURS,
+  agentMemoryMaxSessionsPerRun: DEFAULT_AGENT_MEMORY_MAX_SESSIONS_PER_RUN,
+  agentMemoryMaxItemsPerSession: DEFAULT_AGENT_MEMORY_MAX_ITEMS_PER_SESSION,
+  agentMemoryRetentionDays: DEFAULT_AGENT_MEMORY_RETENTION_DAYS,
+  agentMemoryMinConfidence: DEFAULT_AGENT_MEMORY_MIN_CONFIDENCE,
+  agentMemoryAutoSkillSuggestions: true,
+  agentMemoryImportExternal: false,
   autoApplyChatToDaily: false,
   autoReviewEnabled: false,
   autoReviewTime: "22:30",
@@ -1246,6 +1341,7 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   hiddenSidebarItems: [],
   taskManagerShowCompleted: true,
   aiTaskExtractionLimit: DEFAULT_AI_TASK_EXTRACTION_LIMIT,
+  projectContextTaskExtractionLimit: DEFAULT_PROJECT_CONTEXT_TASK_EXTRACTION_LIMIT,
   backgroundImagePath: "",
   browserCaptureEnabled: true,
   browserCaptureSetupVersion: 1,

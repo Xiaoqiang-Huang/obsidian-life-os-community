@@ -85,6 +85,7 @@ export function completeTaskMarkdown(openContent: string, doneContent: string, t
 export function undoTaskMarkdown(openContent: string, doneContent: string, originalDoneLine: string): {
   openContent: string;
   doneContent: string;
+  openLine: string;
 } {
   const removed = removeTaskBlock(doneContent, originalDoneLine);
   const sourceLine = removed.removedLine || originalDoneLine;
@@ -96,7 +97,8 @@ export function undoTaskMarkdown(openContent: string, doneContent: string, origi
   const openBlock = [openLine, ...userTaskDetailLines(removed.removedBodyLines)].join("\n");
   return {
     openContent: openContent.includes(openLine) ? openContent : appendLine(openContent, openBlock),
-    doneContent: ensureTrailingNewline(removed.content)
+    doneContent: ensureTrailingNewline(removed.content),
+    openLine
   };
 }
 

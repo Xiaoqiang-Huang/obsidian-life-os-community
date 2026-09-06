@@ -42,13 +42,22 @@ import {
   normalizePdfOcrEngine,
   normalizeHiddenSidebarItems,
   normalizeAiTaskExtractionLimit,
+  normalizeProjectContextTaskExtractionLimit,
+  normalizeAgentMemoryMode,
+  normalizeAgentMemoryScopeMode,
+  normalizeAgentMemoryIdleHours,
+  normalizeAgentMemoryMaxSessionsPerRun,
+  normalizeAgentMemoryMaxItemsPerSession,
+  normalizeAgentMemoryRetentionDays,
+  normalizeAgentMemoryMinConfidence,
   normalizeTaskFormDraft,
   normalizeThemeStyle,
   normalizeUiFrameworkSettings,
   setStoredAiApiKey,
   setStoredAiProviderConfig,
   THEME_STYLES,
-  type ThemeStyle
+  type ThemeStyle,
+  type AgentMemoryMode
 } from "./settings";
 import { normalizeInstallationId } from "./licensing/installation-id";
 import { hasProAccess, requireProFeature } from "./licensing/entitlement";
@@ -124,6 +133,7 @@ import {
   type WritebackItem
 } from "./writeback-preview";
 import { dedupTaskLines, parseOpenTasks, parseTaskLine } from "./tasks/task-actions";
+import { capProjectContextTaskLines, isProjectContextTaskSource } from "./tasks/task-extraction-policy";
 import type {
   IPlugin,
   InterviewPracticeData,
@@ -137,6 +147,13 @@ export interface ActiveChatRuntimeState {
   updatedAt: number;
   /** Isolates pending Agent writes, attachments and task memory per visible chat. */
   sessionId?: string;
+  /** Per-conversation recall/contribution policy; it must not leak between chats. */
+  memoryMode?: AgentMemoryMode;
+  /** Structured compaction survives view remounts without re-injecting old turns. */
+  compressedSummary?: string;
+  compressedMessageCount?: number;
+  compressedSourceCount?: number;
+  compressedUpdatedAt?: string;
 }
 
 interface AiEditRuntimeDiagnostics {
@@ -177,6 +194,8 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   activeChatState: ActiveChatRuntimeState = { messages: [], draftInput: "", updatedAt: 0 };
   private dailyMaintenancePromise: Promise<void> | null = null;
   private dailyMaintenanceRunDate = "";
+  private agentMemoryQueueRunning = false;
+  private agentMemoryMaintenanceRunning = false;
   private midnightTimer: number | null = null;
   private modalTextareaObserver: MutationObserver | null = null;
   private liquidGlassObserver: MutationObserver | null = null;
@@ -617,6 +636,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.scheduleMidnightCheck();
     void this.refreshTrackedAiWorkspaceSessions(false);
     void this.runAutoReview("startup");
+    void this.runAgentMemoryBackgroundPass(true);
     this.registerInterval(window.setInterval(() => {
       void this.refreshTrackedAiWorkspaceSessions(false);
     }, 60_000));
@@ -629,6 +649,12 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.registerInterval(window.setInterval(() => {
       if (new Date().getHours() === 0) void this.runWeixinDailyDigest("timer");
     }, 60_000));
+    this.registerInterval(window.setInterval(() => {
+      void this.runAgentMemoryBackgroundPass(false);
+    }, 120_000));
+    this.registerInterval(window.setInterval(() => {
+      void this.runAgentMemoryMaintenancePass();
+    }, 6 * 60 * 60_000));
   }
 
   onunload(): void {
@@ -698,6 +724,33 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.settings.aiTaskExtractionLimit = normalizeAiTaskExtractionLimit(
       (storedData as Record<string, unknown>).aiTaskExtractionLimit
     );
+    this.settings.projectContextTaskExtractionLimit = normalizeProjectContextTaskExtractionLimit(
+      (storedData as Record<string, unknown>).projectContextTaskExtractionLimit
+    );
+    this.settings.agentMemoryEnabled = (storedData as Record<string, unknown>).agentMemoryEnabled !== false;
+    this.settings.agentMemoryDefaultMode = normalizeAgentMemoryMode(
+      (storedData as Record<string, unknown>).agentMemoryDefaultMode
+    );
+    this.settings.agentMemoryScopeMode = normalizeAgentMemoryScopeMode(
+      (storedData as Record<string, unknown>).agentMemoryScopeMode
+    );
+    this.settings.agentMemoryIdleHours = normalizeAgentMemoryIdleHours(
+      (storedData as Record<string, unknown>).agentMemoryIdleHours
+    );
+    this.settings.agentMemoryMaxSessionsPerRun = normalizeAgentMemoryMaxSessionsPerRun(
+      (storedData as Record<string, unknown>).agentMemoryMaxSessionsPerRun
+    );
+    this.settings.agentMemoryMaxItemsPerSession = normalizeAgentMemoryMaxItemsPerSession(
+      (storedData as Record<string, unknown>).agentMemoryMaxItemsPerSession
+    );
+    this.settings.agentMemoryRetentionDays = normalizeAgentMemoryRetentionDays(
+      (storedData as Record<string, unknown>).agentMemoryRetentionDays
+    );
+    this.settings.agentMemoryMinConfidence = normalizeAgentMemoryMinConfidence(
+      (storedData as Record<string, unknown>).agentMemoryMinConfidence
+    );
+    this.settings.agentMemoryAutoSkillSuggestions = (storedData as Record<string, unknown>).agentMemoryAutoSkillSuggestions !== false;
+    this.settings.agentMemoryImportExternal = (storedData as Record<string, unknown>).agentMemoryImportExternal === true;
     this.settings.customAiSkillCategories = normalizeCustomAiSkillCategories((storedData as Record<string, unknown>).customAiSkillCategories);
     this.settings.importedAiSkills = normalizeImportedAiSkillRecords(storedImportedAiSkills);
     this.settings.aiSkillOverrides = normalizeAiSkillOverrides(storedAiSkillOverrides);
@@ -797,6 +850,34 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   async saveSettings(): Promise<void> {
     this.settings.autoReviewTime = normalizeAutoReviewTime(this.settings.autoReviewTime);
     await this.saveData(this.settings);
+  }
+
+  private async runAgentMemoryBackgroundPass(includeMaintenance = false): Promise<void> {
+    if (!this.agent || this.agentMemoryQueueRunning || this.settings.agentMemoryEnabled === false) return;
+    this.agentMemoryQueueRunning = true;
+    try {
+      await this.agent.processPendingMemories();
+      if (includeMaintenance) await this.runAgentMemoryMaintenancePass();
+    } catch (error) {
+      console.warn("[Life OS] Agent memory background pass failed", error);
+    } finally {
+      this.agentMemoryQueueRunning = false;
+    }
+  }
+
+  private async runAgentMemoryMaintenancePass(): Promise<void> {
+    if (!this.agent || this.agentMemoryMaintenanceRunning || this.settings.agentMemoryEnabled === false) return;
+    this.agentMemoryMaintenanceRunning = true;
+    try {
+      await this.agent.runMemoryMaintenance();
+      if (this.settings.agentMemoryImportExternal) {
+        await this.agent.importExternalMemories();
+      }
+    } catch (error) {
+      console.warn("[Life OS] Agent memory maintenance failed", error);
+    } finally {
+      this.agentMemoryMaintenanceRunning = false;
+    }
   }
 
   private async runAutoReview(trigger: AutoReviewTrigger): Promise<void> {
@@ -1604,8 +1685,8 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       }
     };
 
-    const taskLimit = normalizeAiTaskExtractionLimit(this.settings.aiTaskExtractionLimit);
     const content = await this.app.vault.read(file);
+    const taskLimit = this.taskExtractionLimitForSource(file, content);
     const plainContent = content
       .replace(/^---[\s\S]*?---\s*/m, "")
       .replace(/[#>\-\[\]\s_：:0-9/]+/g, "")
@@ -1616,7 +1697,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     }
     if (!this.ai.isConfigured()) {
       notify("AI 未配置，已使用规则提取。你也可以先在设置里配置 AI。");
-      return this.buildRuleTaskWritebackItems(file, content, notify);
+      return this.buildRuleTaskWritebackItems(file, content, notify, taskLimit);
     }
     const response = await this.ai.complete({
       responseFormat: "json",
@@ -1904,6 +1985,12 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     return `- [ ] ${title} ${tagText} 📌 ${fromDate}${dueText} ^${makeId("pls-carry")}`;
   }
 
+  private taskExtractionLimitForSource(file: TFile, content: string): number {
+    return isProjectContextTaskSource(file.path, content)
+      ? normalizeProjectContextTaskExtractionLimit(this.settings.projectContextTaskExtractionLimit)
+      : normalizeAiTaskExtractionLimit(this.settings.aiTaskExtractionLimit);
+  }
+
   private async carryOpenTasksToDate(
     sourceFile: TFile,
     sourceDate: string,
@@ -1921,7 +2008,11 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     const candidateLines = openTaskLines.map((line) => this.makeCarriedTaskLine(line, sourceDate));
     const eligibleLines = await new TaskService(this.app, this.fileSystem())
       .filterSuppressedAutomaticTaskLines(candidateLines);
-    const dailyLines = dedupTaskLines(eligibleLines, parseOpenTasks(targetContent));
+    const cappedEligibleLines = capProjectContextTaskLines(
+      eligibleLines,
+      normalizeProjectContextTaskExtractionLimit(this.settings.projectContextTaskExtractionLimit)
+    );
+    const dailyLines = dedupTaskLines(cappedEligibleLines, parseOpenTasks(targetContent));
     // Only mirror tasks that were newly added to the target daily note. If the
     // daily copy already exists, a restart must not repopulate a task that the
     // user explicitly removed from the canonical task file.
@@ -3249,8 +3340,12 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     }
   }
 
-  private async buildRuleTaskWritebackItems(file: TFile, content: string, notify: (message: string) => void): Promise<WritebackItem[]> {
-    const taskLimit = normalizeAiTaskExtractionLimit(this.settings.aiTaskExtractionLimit);
+  private async buildRuleTaskWritebackItems(
+    file: TFile,
+    content: string,
+    notify: (message: string) => void,
+    taskLimit = this.taskExtractionLimitForSource(file, content)
+  ): Promise<WritebackItem[]> {
     const candidates = content
       .split(/\r?\n/)
       .map((line) => line.trim())

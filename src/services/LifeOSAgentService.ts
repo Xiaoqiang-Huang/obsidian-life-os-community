@@ -8,11 +8,13 @@ import {
   type AiStreamCallbacks
 } from "../ai";
 import type {
+  AgentMemoryMode,
   AiReasoningEffort,
   AssistantStyle,
   AssistantVerbosity,
   PersonalLifeSystemSettings
 } from "../settings";
+import { normalizeAgentMemoryMode, normalizeAgentMemoryScopeMode } from "../settings";
 import {
   composeAiSkillPrompt,
   createImportedAiSkills,
@@ -43,11 +45,30 @@ import {
   LIFEOS_AGENT_TOOL_REGISTRY
 } from "./LifeOSAgentToolRegistry";
 import { AgentAttachmentLifecycleService } from "./agent/AgentAttachmentLifecycleService";
-import { AgentContextCompactor } from "./agent/AgentContextCompactor";
+import { AgentContextCompactor, type AgentCompactionResult } from "./agent/AgentContextCompactor";
 import { AgentEventStore } from "./agent/AgentEventStore";
 import { AgentLoop } from "./agent/AgentLoop";
 import { AgentSkillRouterService } from "./agent/AgentSkillRouterService";
 import { AgentTaskMemoryService } from "./agent/AgentTaskMemoryService";
+import { AgentWorkingMemoryStore } from "./agent/AgentWorkingMemoryStore";
+import { AgentMemoryStore } from "./agent/AgentMemoryStore";
+import { AgentMemoryPipeline, type AgentMemoryPipelineResult } from "./agent/AgentMemoryPipeline";
+import {
+  AgentExternalMemoryImporter,
+  type AgentExternalMemoryImportResult
+} from "./agent/AgentExternalMemoryImporter";
+import {
+  emptyAgentWorkingCheckpoint,
+  buildAgentMemoryScope,
+  resolveAgentMemoryPolicy,
+  type AgentMemoryDiagnostics,
+  type AgentMemoryPolicy,
+  type AgentMemoryRecallResult,
+  type AgentMemoryRecord,
+  type AgentSkillSuggestion,
+  type AgentWorkingCheckpoint,
+  type AgentWorkingMemoryState
+} from "./agent/AgentMemoryTypes";
 import {
   AgentToolRecipeService,
   type LifeOSAgentToolRecipe
@@ -106,12 +127,20 @@ export interface LifeOSAgentBuildMessagesInput {
   imageParts?: AiImageUrlContentPart[];
   taskMemory?: string;
   skillIndexSummary?: string;
+  accountScopeId?: string;
+  memoryMode?: AgentMemoryMode;
+  memoryPrompt?: string;
+  compressedSummary?: string;
+  compressedMessageCount?: number;
+  compressedSourceCount?: number;
 }
 
 export interface LifeOSAgentPreparedTurn {
   channel: LifeOSAgentChannel;
   content: string;
   sessionId: string;
+  /** Internal composite key; never shown as the public conversation id. */
+  runtimeMemoryKey: string;
   turnId: string;
   messages: AiMessage[];
   context: ChatContextBundle;
@@ -119,6 +148,14 @@ export interface LifeOSAgentPreparedTurn {
   selectedSkillIds: string[];
   skillRoute: LifeOSAgentSkillRoute;
   taskMemory: string;
+  projectScopeId: string;
+  accountScopeId?: string;
+  memoryPolicy: AgentMemoryPolicy;
+  memoryRecall: AgentMemoryRecallResult;
+  workingCheckpoint: AgentWorkingCheckpoint;
+  compressedSummary: string;
+  compressedMessageCount: number;
+  compressedSourceCount: number;
   imageParts: AiImageUrlContentPart[];
   preparedAt: string;
   preparationEvents: LifeOSAgentEvent[];
@@ -191,12 +228,17 @@ export class LifeOSAgentService {
   readonly attachments = new AgentAttachmentLifecycleService();
   readonly events: AgentEventStore;
   readonly taskMemory = new AgentTaskMemoryService();
+  readonly workingMemory: AgentWorkingMemoryStore;
+  readonly memories: AgentMemoryStore;
+  readonly memoryPipeline: AgentMemoryPipeline;
+  readonly externalMemory: AgentExternalMemoryImporter;
   readonly skillRouter: AgentSkillRouterService;
   readonly tools: AgentToolRuntime;
   private readonly compactor = new AgentContextCompactor();
   private readonly loop: AgentLoop;
   private readonly toolRecipes: AgentToolRecipeService;
   private loadedToolRecipeIds = new Set<string>();
+  private readonly runtimeMemoryKeysBySession = new Map<string, Set<string>>();
 
   constructor(
     private app: App,
@@ -206,6 +248,10 @@ export class LifeOSAgentService {
     private persistSettings: () => Promise<void> = async () => {}
   ) {
     this.events = new AgentEventStore(app, getSettings);
+    this.workingMemory = new AgentWorkingMemoryStore(app, getSettings);
+    this.memories = new AgentMemoryStore(app, getSettings);
+    this.memoryPipeline = new AgentMemoryPipeline(ai, this.memories, getSettings);
+    this.externalMemory = new AgentExternalMemoryImporter(app, getSettings, this.memories, ai);
     this.skillRouter = new AgentSkillRouterService(getSettings);
     this.tools = new AgentToolRuntime(LIFEOS_AGENT_TOOL_REGISTRY);
     this.toolRecipes = new AgentToolRecipeService(app, this.fileSystem(), (id) => this.tools.descriptor(id));
@@ -267,12 +313,33 @@ export class LifeOSAgentService {
         ? await this.buildContext(input.contextOptions)
         : EMPTY_CONTEXT;
     const contextMs = Date.now() - contextStartedAt;
-    const sessionId = input.sessionId || this.sessionId(input.channel, input.projectScopeId || input.contextOptions?.projectScopeId || "");
+    const projectScopeId = input.projectScopeId || input.contextOptions?.projectScopeId || "";
+    const sessionId = input.sessionId || this.sessionId(input.channel, projectScopeId);
+    const runtimeMemoryKey = this.taskMemoryKey(sessionId, input.channel, projectScopeId, input.accountScopeId);
     const turnId = input.turnId || this.turnId(sessionId);
+    const memoryMode = normalizeAgentMemoryMode(input.memoryMode || this.getSettings().agentMemoryDefaultMode);
+    const memoryPolicy = resolveAgentMemoryPolicy(memoryMode, this.getSettings().agentMemoryEnabled !== false);
+    const loadedWorkingState = memoryPolicy.use && !memoryPolicy.temporary
+      ? await this.workingMemory.load(sessionId, {
+        channel: input.channel,
+        projectScopeId,
+        ...(input.accountScopeId ? { accountScopeId: input.accountScopeId } : {})
+      })
+      : null;
+    const workingState = loadedWorkingState && this.workingStateMatches(
+      loadedWorkingState,
+      input.channel,
+      projectScopeId,
+      input.accountScopeId
+    ) ? loadedWorkingState : null;
+    const knownRuntimeKey = this.runtimeMemoryKeysBySession.get(sessionId)?.has(runtimeMemoryKey) === true;
+    if (workingState) this.taskMemory.restore(runtimeMemoryKey, workingState.taskMemory);
+    else if (!knownRuntimeKey || memoryPolicy.mode === "disabled") this.taskMemory.clear(runtimeMemoryKey);
+    this.trackTaskMemoryKey(sessionId, runtimeMemoryKey);
     const imageParts = [...(input.imageParts || [])];
     const stagedAttachments = imageParts.length > 0
       ? this.attachments.stage(
-        sessionId,
+          runtimeMemoryKey,
         imageParts.map((part, index) => ({
           kind: "image" as const,
           name: `图片 ${index + 1}`,
@@ -283,7 +350,7 @@ export class LifeOSAgentService {
       )
       : [];
     const boundAttachments = stagedAttachments.length > 0
-      ? this.attachments.bindPending(sessionId, turnId)
+      ? this.attachments.bindPending(runtimeMemoryKey, turnId)
       : [];
     const skillRoute = this.skillRouter.route(
       input.content,
@@ -292,8 +359,37 @@ export class LifeOSAgentService {
     );
     const selectedSkillIds = skillRoute.selectedIds;
     const selectedSkills = this.resolveSkills(selectedSkillIds);
-    this.taskMemory.observeUserTurn(sessionId, input.content);
-    const taskMemory = this.taskMemory.toPrompt(sessionId);
+    this.taskMemory.observeUserTurn(runtimeMemoryKey, input.content);
+    const taskMemory = this.taskMemory.toPrompt(runtimeMemoryKey);
+    const workingCheckpoint = this.checkpointFromTaskMemory(
+      runtimeMemoryKey,
+      workingState?.checkpoint || emptyAgentWorkingCheckpoint(),
+      projectScopeId,
+      input.projectLabel
+    );
+    const memoryScope = buildAgentMemoryScope(
+      normalizeAgentMemoryScopeMode(this.getSettings().agentMemoryScopeMode),
+      projectScopeId,
+      input.channel,
+      input.accountScopeId
+    );
+    const memoryRecall = memoryPolicy.use
+      ? await this.memories.recall(
+        this.memoryQuery(input.content, workingCheckpoint),
+        memoryScope,
+        2
+      )
+      : this.emptyMemoryRecall(memoryScope);
+    for (const record of memoryRecall.records) {
+      workingCheckpoint.evidenceRefs = this.uniqueMemoryValues([
+        ...workingCheckpoint.evidenceRefs,
+        `记忆 ${record.id}`,
+        ...record.evidence.map((evidence) => evidence.path || evidence.hash)
+      ]);
+    }
+    const compressedSummary = input.compressedSummary ?? workingState?.compressedSummary ?? "";
+    const compressedMessageCount = Math.max(0, Math.floor(input.compressedMessageCount ?? workingState?.compressedMessageCount ?? 0));
+    const compressedSourceCount = Math.max(0, Math.floor(input.compressedSourceCount ?? workingState?.compressedSourceCount ?? 0));
     const messages = this.buildMessages({
       ...input,
       sessionId,
@@ -301,11 +397,47 @@ export class LifeOSAgentService {
       context: input.context ?? context.promptContext,
       selectedSkillIds,
       taskMemory,
-      skillIndexSummary: skillRoute.indexSummary
+      skillIndexSummary: skillRoute.indexSummary,
+      memoryPrompt: memoryRecall.records.length > 0 ? memoryRecall.prompt : "",
+      compressedSummary,
+      compressedMessageCount,
+      compressedSourceCount
     });
     const webSources = context.sources.filter((source) => source.type === "url" && /^https?:\/\//iu.test(source.path));
     const route = context.retrievalTrace?.route || (webSources.length > 0 ? "web" : context.sources.length > 0 ? "local" : "general");
     const preparedEvents: LifeOSAgentEvent[] = [
+      {
+        id: `${turnId}-memory-loaded`,
+        sessionId,
+        turnId,
+        sequence: -6,
+        timestamp: new Date().toISOString(),
+        channel: input.channel,
+        type: "memory-state-loaded",
+        summary: workingState ? "已恢复本会话工作状态" : memoryPolicy.use ? "本会话暂无可恢复工作状态" : "本轮未使用持久记忆",
+        metadata: {
+          mode: memoryPolicy.mode,
+          restored: Boolean(workingState),
+          temporary: memoryPolicy.temporary
+        }
+      },
+      {
+        id: `${turnId}-memory-recalled`,
+        sessionId,
+        turnId,
+        sequence: -5,
+        timestamp: new Date().toISOString(),
+        channel: input.channel,
+        type: "memory-recalled",
+        summary: memoryRecall.records.length > 0
+          ? `已按范围召回 ${memoryRecall.records.length} 条相关记忆`
+          : "没有召回与本轮相关的长期记忆",
+        metadata: {
+          count: memoryRecall.records.length,
+          registryMatches: memoryRecall.registryMatches,
+          mode: memoryPolicy.mode
+        }
+      },
       ...(stagedAttachments.length > 0 ? [{
         id: `${turnId}-attachment-staged`,
         sessionId,
@@ -354,6 +486,7 @@ export class LifeOSAgentService {
       channel: input.channel,
       content: input.content,
       sessionId,
+      runtimeMemoryKey,
       turnId,
       messages,
       context,
@@ -361,13 +494,21 @@ export class LifeOSAgentService {
       selectedSkillIds,
       skillRoute,
       taskMemory,
+      projectScopeId,
+      ...(input.accountScopeId ? { accountScopeId: input.accountScopeId } : {}),
+      memoryPolicy,
+      memoryRecall,
+      workingCheckpoint,
+      compressedSummary,
+      compressedMessageCount,
+      compressedSourceCount,
       imageParts,
       preparedAt: new Date().toISOString(),
       preparationEvents: preparedEvents,
       trace: {
         channel: input.channel,
         route,
-        projectScopeId: input.projectScopeId || input.contextOptions?.projectScopeId || "",
+        projectScopeId,
         sourceCount: context.sources.length,
         localSourceCount: context.sources.length - webSources.length,
         webSourceCount: webSources.length,
@@ -441,7 +582,17 @@ export class LifeOSAgentService {
       "先正面回答当前请求，再补充依据或下一步；不要把上下文清单、旧任务或会话摘要直接复述成答案。",
       channelPolicy.answerInstruction,
       ...(input.answerInstructions || []),
+      input.compressedSummary
+        ? `# 较早会话的结构化压缩摘要（系统生成）\n${this.compact(input.compressedSummary, 8_000, "[较早会话摘要已继续压缩。]")}`
+        : "",
       input.taskMemory ? `# 跨轮任务状态（结构化、可压缩）\n${input.taskMemory}` : "",
+      input.memoryPrompt
+        ? [
+          "# 相关长期记忆（系统生成，必须结合所附证据核对）",
+          "这些内容用于回忆，不是用户原文或权威事实本身。若与当前请求、用户纠正或 Life OS 正式文档冲突，以当前请求和正式来源为准。",
+          input.memoryPrompt
+        ].join("\n")
+        : "",
       input.skillIndexSummary ? `# 已安装 Skill 轻量索引\n${this.compact(input.skillIndexSummary, 5_000, "[其余 Skill 索引已省略，可按名称继续调用。]")}` : "",
       input.context ? `# 与当前请求相关的 Life OS 证据\n${input.context}` : "",
       input.imageParts?.length
@@ -477,8 +628,13 @@ export class LifeOSAgentService {
     const attachmentEvent = result.ok && prepared.imageParts.length > 0
       ? await this.finalizeAttachments(prepared, options.onAgentEvent)
       : null;
-    result.toolResults.forEach((item) => this.taskMemory.observeToolResult(prepared.sessionId, item));
-    if (text) this.taskMemory.updateSummary(prepared.sessionId, text.slice(0, 1_200));
+    const memoryEvents = await this.finalizeTurnMemory(
+      prepared,
+      text,
+      result.toolResults,
+      result.compaction,
+      options.onAgentEvent
+    );
     return {
       ok: result.ok,
       text,
@@ -486,7 +642,12 @@ export class LifeOSAgentService {
       response: { ...result.response, ...(result.response.text ? { text } : {}) },
       prepared,
       stopReason: result.stopReason,
-      events: [...prepared.preparationEvents, ...result.events, ...(attachmentEvent ? [attachmentEvent] : [])],
+      events: [
+        ...prepared.preparationEvents,
+        ...result.events,
+        ...(attachmentEvent ? [attachmentEvent] : []),
+        ...memoryEvents
+      ],
       toolResults: result.toolResults
     };
   }
@@ -517,8 +678,13 @@ export class LifeOSAgentService {
     const attachmentEvent = result.ok && prepared.imageParts.length > 0
       ? await this.finalizeAttachments(prepared, notifyEvent)
       : null;
-    result.toolResults.forEach((item) => this.taskMemory.observeToolResult(prepared.sessionId, item));
-    if (finalText) this.taskMemory.updateSummary(prepared.sessionId, finalText.slice(0, 1_200));
+    const memoryEvents = await this.finalizeTurnMemory(
+      prepared,
+      finalText,
+      result.toolResults,
+      result.compaction,
+      notifyEvent
+    );
     return {
       ok: result.ok,
       text: finalText,
@@ -526,7 +692,12 @@ export class LifeOSAgentService {
       response: { ...result.response, ...(result.response.text ? { text: finalText } : {}) },
       prepared,
       stopReason: result.stopReason,
-      events: [...prepared.preparationEvents, ...result.events, ...(attachmentEvent ? [attachmentEvent] : [])],
+      events: [
+        ...prepared.preparationEvents,
+        ...result.events,
+        ...(attachmentEvent ? [attachmentEvent] : []),
+        ...memoryEvents
+      ],
       toolResults: result.toolResults
     };
   }
@@ -577,6 +748,185 @@ export class LifeOSAgentService {
     };
   }
 
+  async processPendingMemories(limit?: number): Promise<AgentMemoryPipelineResult> {
+    return this.memoryPipeline.processPending(limit);
+  }
+
+  async runMemoryMaintenance(): Promise<AgentMemoryDiagnostics> {
+    await this.workingMemory.pruneExpired();
+    return this.memories.runMaintenance();
+  }
+
+  async importExternalMemories(projectId?: string): Promise<AgentExternalMemoryImportResult> {
+    return this.externalMemory.importProject(projectId);
+  }
+
+  async getMemoryDiagnostics(): Promise<AgentMemoryDiagnostics> {
+    const [diagnostics, workingStates] = await Promise.all([
+      this.memories.diagnostics(),
+      this.workingMemory.list()
+    ]);
+    return { ...diagnostics, workingStateCount: workingStates.length };
+  }
+
+  async listAgentMemories(includeInactive = false): Promise<AgentMemoryRecord[]> {
+    return this.memories.listRecords(includeInactive);
+  }
+
+  async forgetAgentMemory(recordId: string): Promise<boolean> {
+    return this.memories.forget(recordId);
+  }
+
+  async confirmAgentMemory(recordId: string): Promise<boolean> {
+    return this.memories.confirm(recordId);
+  }
+
+  async listAgentSkillSuggestions(): Promise<AgentSkillSuggestion[]> {
+    return this.memories.listSkillSuggestions();
+  }
+
+  async dismissAgentSkillSuggestion(suggestionId: string): Promise<boolean> {
+    return this.memories.dismissSkillSuggestion(suggestionId);
+  }
+
+  async clearWorkingMemory(
+    sessionId: string,
+    scope?: { channel: LifeOSAgentChannel; projectScopeId: string; accountScopeId?: string }
+  ): Promise<void> {
+    if (scope) {
+      const runtimeKey = this.taskMemoryKey(sessionId, scope.channel, scope.projectScopeId, scope.accountScopeId);
+      this.taskMemory.clear(runtimeKey);
+      this.attachments.clear(runtimeKey);
+      const tracked = this.runtimeMemoryKeysBySession.get(sessionId);
+      tracked?.delete(runtimeKey);
+      if (tracked?.size === 0) this.runtimeMemoryKeysBySession.delete(sessionId);
+    } else {
+      const tracked = this.runtimeMemoryKeysBySession.get(sessionId);
+      for (const runtimeKey of tracked || [sessionId]) {
+        this.taskMemory.clear(runtimeKey);
+        this.attachments.clear(runtimeKey);
+      }
+      this.runtimeMemoryKeysBySession.delete(sessionId);
+    }
+    await this.workingMemory.remove(sessionId, scope);
+  }
+
+  private async finalizeTurnMemory(
+    prepared: LifeOSAgentPreparedTurn,
+    assistantContent: string,
+    toolResults: LifeOSAgentToolResult[],
+    compaction?: AgentCompactionResult,
+    onEvent?: (event: LifeOSAgentEvent) => void | Promise<void>
+  ): Promise<LifeOSAgentEvent[]> {
+    toolResults.forEach((item) => this.taskMemory.observeToolResult(prepared.runtimeMemoryKey, item));
+    if (assistantContent) this.taskMemory.updateSummary(prepared.runtimeMemoryKey, assistantContent.slice(0, 1_200));
+    const events: LifeOSAgentEvent[] = [];
+    const emit = async (event: LifeOSAgentEvent) => {
+      events.push(event);
+      await this.events.append(event);
+      await onEvent?.(event);
+    };
+    const checkpoint = this.checkpointFromTaskMemory(
+      prepared.runtimeMemoryKey,
+      compaction?.checkpoint || prepared.workingCheckpoint,
+      prepared.projectScopeId
+    );
+    const didCompact = compaction?.compacted === true;
+    const compressedSummary = didCompact && compaction?.summary
+      ? compaction.summary
+      : prepared.compressedSummary;
+    const compressedMessageCount = prepared.compressedMessageCount
+      + (didCompact ? Math.max(0, compaction?.droppedMessages || 0) : 0);
+    const compressedSourceCount = prepared.compressedSourceCount
+      + (didCompact ? prepared.context.sources.length : 0);
+    if (prepared.memoryPolicy.use && !prepared.memoryPolicy.temporary) {
+      const now = new Date().toISOString();
+      try {
+        await this.workingMemory.save({
+          schemaVersion: 1,
+          sessionId: prepared.sessionId,
+          channel: prepared.channel,
+          projectScopeId: prepared.projectScopeId,
+          ...(prepared.accountScopeId ? { accountScopeId: prepared.accountScopeId } : {}),
+          policy: prepared.memoryPolicy,
+          taskMemory: this.taskMemory.snapshot(prepared.runtimeMemoryKey),
+          checkpoint,
+          compressedSummary,
+          compressedMessageCount,
+          compressedSourceCount,
+          lastTurnId: prepared.turnId,
+          lastTurnAt: now,
+          updatedAt: now
+        });
+        await emit({
+          id: `${prepared.turnId}-memory-saved`,
+          sessionId: prepared.sessionId,
+          turnId: prepared.turnId,
+          sequence: 10_001,
+          timestamp: now,
+          channel: prepared.channel,
+          type: "memory-state-saved",
+          summary: "已保存本会话工作状态",
+          metadata: { mode: prepared.memoryPolicy.mode, saved: true }
+        });
+      } catch (error) {
+        await emit({
+          id: `${prepared.turnId}-memory-save-failed`,
+          sessionId: prepared.sessionId,
+          turnId: prepared.turnId,
+          sequence: 10_001,
+          timestamp: now,
+          channel: prepared.channel,
+          type: "memory-state-saved",
+          summary: "本会话工作状态保存失败，本轮回答不受影响",
+          detail: this.compact(String(error instanceof Error ? error.message : error), 400),
+          metadata: { mode: prepared.memoryPolicy.mode, saved: false }
+        });
+      }
+    }
+    if (prepared.memoryPolicy.contribute && assistantContent.trim()) {
+      try {
+        const enqueued = await this.memoryPipeline.enqueueTurn({
+          sessionId: prepared.sessionId,
+          turnId: prepared.turnId,
+          channel: prepared.channel,
+          projectScopeId: prepared.projectScopeId,
+          ...(prepared.accountScopeId ? { accountScopeId: prepared.accountScopeId } : {}),
+          userContent: prepared.content,
+          assistantContent,
+          toolResults
+        });
+        if (enqueued) {
+          await emit({
+            id: `${prepared.turnId}-memory-extraction-enqueued`,
+            sessionId: prepared.sessionId,
+            turnId: prepared.turnId,
+            sequence: 10_002,
+            timestamp: new Date().toISOString(),
+            channel: prepared.channel,
+            type: "memory-extraction-enqueued",
+            summary: "已将本轮加入后台记忆提炼队列",
+            metadata: { queued: true }
+          });
+        }
+      } catch (error) {
+        await emit({
+          id: `${prepared.turnId}-memory-extraction-failed`,
+          sessionId: prepared.sessionId,
+          turnId: prepared.turnId,
+          sequence: 10_002,
+          timestamp: new Date().toISOString(),
+          channel: prepared.channel,
+          type: "memory-extraction-enqueued",
+          summary: "后台记忆提炼排队失败，本轮回答不受影响",
+          detail: this.compact(String(error instanceof Error ? error.message : error), 400),
+          metadata: { queued: false }
+        });
+      }
+    }
+    return events;
+  }
+
   private loopInput(
     prepared: LifeOSAgentPreparedTurn,
     options: LifeOSAgentRunOptions
@@ -593,6 +943,7 @@ export class LifeOSAgentService {
       toolContext: {
         channel: prepared.channel,
         sessionId: prepared.sessionId,
+        runtimeSessionId: prepared.runtimeMemoryKey,
         turnId: prepared.turnId,
         projectScopeId: prepared.trace.projectScopeId,
         userContent: prepared.content,
@@ -602,6 +953,7 @@ export class LifeOSAgentService {
         explicitWriteIntent: options.explicitWriteIntent ?? this.hasExplicitWriteIntent(prepared.content)
       },
       taskMemory: prepared.taskMemory,
+      workingCheckpoint: prepared.workingCheckpoint,
       hasLocalEvidence: prepared.context.sources.length > webSources.length,
       hasWebEvidence: webSources.length > 0,
       enableTools: options.enableTools !== false,
@@ -1045,6 +1397,81 @@ export class LifeOSAgentService {
       : "note";
   }
 
+  private workingStateMatches(
+    state: AgentWorkingMemoryState,
+    channel: LifeOSAgentChannel,
+    projectScopeId: string,
+    accountScopeId?: string
+  ): boolean {
+    return state.channel === channel
+      && state.projectScopeId === projectScopeId
+      && String(state.accountScopeId || "") === String(accountScopeId || "");
+  }
+
+  private checkpointFromTaskMemory(
+    sessionId: string,
+    previous: AgentWorkingCheckpoint = emptyAgentWorkingCheckpoint(),
+    projectScopeId = "",
+    projectLabel = ""
+  ): AgentWorkingCheckpoint {
+    const task = this.taskMemory.snapshot(sessionId);
+    return {
+      objective: task.goal || previous.objective,
+      activeWork: task.currentFocus || previous.activeWork,
+      decisions: this.uniqueMemoryValues([...previous.decisions, ...task.decisions]),
+      constraints: this.uniqueMemoryValues([...previous.constraints, ...task.constraints]),
+      corrections: this.uniqueMemoryValues([...previous.corrections, ...task.corrections]),
+      unresolved: this.uniqueMemoryValues([...previous.unresolved, ...task.unresolved]),
+      nextActions: this.uniqueMemoryValues([...previous.nextActions, ...task.openItems, ...task.nextActions]),
+      entities: this.uniqueMemoryValues([
+        ...previous.entities,
+        projectLabel,
+        projectScopeId
+      ]),
+      recentTopics: this.uniqueMemoryValues([...previous.recentTopics, ...task.recentTopics]),
+      evidenceRefs: this.uniqueMemoryValues(previous.evidenceRefs)
+    };
+  }
+
+  private memoryQuery(content: string, checkpoint: AgentWorkingCheckpoint): string {
+    return this.uniqueMemoryValues([
+      content,
+      checkpoint.objective,
+      checkpoint.activeWork,
+      ...checkpoint.corrections.slice(-4),
+      ...checkpoint.recentTopics.slice(-8),
+      ...checkpoint.entities.slice(-4)
+    ], 20).join("\n").slice(0, 3_000);
+  }
+
+  private emptyMemoryRecall(scope: AgentMemoryRecallResult["scope"]): AgentMemoryRecallResult {
+    return {
+      records: [],
+      registryMatches: 0,
+      queryKeywords: [],
+      scope: { ...scope },
+      prompt: "本轮未启用长期记忆。"
+    };
+  }
+
+  private uniqueMemoryValues(items: Array<string | null | undefined>, limit = 16): string[] {
+    const seen = new Set<string>();
+    const values: string[] = [];
+    for (const item of items) {
+      const clean = String(item || "")
+        .replace(/data:[^\s;]+;base64,[A-Za-z0-9+/=]{64,}/giu, "[已移除内联数据]")
+        .replace(/\s+/gu, " ")
+        .trim()
+        .slice(0, 320);
+      if (!clean) continue;
+      const key = clean.toLocaleLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      values.push(clean);
+    }
+    return values.slice(-Math.max(1, limit));
+  }
+
   private fileSystem(): FileSystemService {
     const settings = this.getSettings();
     return new FileSystemService(this.app, settings.rootFolder, settings.directoryLanguage);
@@ -1068,8 +1495,8 @@ export class LifeOSAgentService {
     prepared: LifeOSAgentPreparedTurn,
     onEvent?: (event: LifeOSAgentEvent) => void | Promise<void>
   ): Promise<LifeOSAgentEvent | null> {
-    const consumed = this.attachments.markConsumed(prepared.sessionId, prepared.turnId);
-    const referenceable = this.attachments.markReferenceable(prepared.sessionId, prepared.turnId);
+    const consumed = this.attachments.markConsumed(prepared.runtimeMemoryKey, prepared.turnId);
+    const referenceable = this.attachments.markReferenceable(prepared.runtimeMemoryKey, prepared.turnId);
     if (consumed.length === 0 && referenceable.length === 0) return null;
     const event: LifeOSAgentEvent = {
       id: `${prepared.turnId}-attachment-referenceable`,
@@ -1097,6 +1524,21 @@ export class LifeOSAgentService {
 
   private sessionId(channel: LifeOSAgentChannel, projectScopeId: string): string {
     return `${channel}:${projectScopeId || "global"}`;
+  }
+
+  private taskMemoryKey(
+    sessionId: string,
+    channel: LifeOSAgentChannel,
+    projectScopeId: string,
+    accountScopeId?: string
+  ): string {
+    return [sessionId, channel, projectScopeId || "global", accountScopeId || "default"].join("\u001f");
+  }
+
+  private trackTaskMemoryKey(sessionId: string, runtimeMemoryKey: string): void {
+    const keys = this.runtimeMemoryKeysBySession.get(sessionId) || new Set<string>();
+    keys.add(runtimeMemoryKey);
+    this.runtimeMemoryKeysBySession.set(sessionId, keys);
   }
 
   private turnId(sessionId: string): string {
@@ -1160,7 +1602,7 @@ export class LifeOSAgentService {
     return text.replace(/(?:\r?\n){1,2}(?:AI\s*生成|AI生成)\s*$/u, "").trim();
   }
 
-  private compact(value: string, maxChars: number, suffix: string): string {
+  private compact(value: string, maxChars: number, suffix = "…"): string {
     const text = String(value || "").trim();
     if (text.length <= maxChars) return text;
     return `${text.slice(0, maxChars).trimEnd()}\n\n${suffix}`;
@@ -1176,13 +1618,27 @@ export {
   AgentContextCompactor,
   AgentEventStore,
   AgentLoop,
+  AgentMemoryPipeline,
+  AgentMemoryStore,
+  AgentExternalMemoryImporter,
   AgentSkillRouterService,
   AgentTaskMemoryService,
   AgentToolRuntime,
+  AgentWorkingMemoryStore,
+  buildAgentMemoryScope,
+  emptyAgentWorkingCheckpoint,
   hasLifeOSWriteIntent,
+  resolveAgentMemoryPolicy,
   shouldRunLegacyChatWriteback
 };
 export type {
+  AgentMemoryDiagnostics,
+  AgentMemoryPolicy,
+  AgentMemoryRecallResult,
+  AgentMemoryRecord,
+  AgentSkillSuggestion,
+  AgentWorkingCheckpoint,
+  AgentWorkingMemoryState,
   LifeOSAgentEvent,
   LifeOSAgentLoopBudget,
   LifeOSAgentPermissionMode,

@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.3.19 - 2026-09-06
+
+### Added
+
+- Added scope-aware Agent working memory and durable memory shared by the desktop assistant and Weixin Bot, with standard, use-only, temporary, and disabled modes; confirmation, forgetting, evidence opening, external import, diagnostics, and Skill suggestions are available from the Memory center.
+- Added resumable working checkpoints for long conversations and tasks, preserving the current objective, active work, decisions, constraints, corrections, unresolved questions, next actions, and evidence without carrying the entire transcript into every request.
+- Added task drag-and-drop between Today, Pending, and Completed, lane-specific quick selection, completed-task cleanup with backup, and an independent configurable cap for tasks extracted from project context.
+- Added compact mobile primary navigation and a More menu so every enabled Life OS page remains reachable in narrow panes.
+
+### Changed
+
+- Context retrieval now follows explicit retrieval plans for exact files and directories, applies bounded evidence limits, scopes memory by account, channel, project, and session, and verifies that cited sources actually support the answer.
+- The Memory center now exposes Agent memory records, scope filters, evidence links, confirmation and forgetting controls, and suggested reusable Skills.
+- Project documents are collapsed by default, document counts reflect the records actually available to the selected project, and task actions use compact icon controls while preserving accessible labels and tooltips.
+
+### Fixed
+
+- Fixed unrelated or stale memories leaking across projects, channels, accounts, sessions, or later image follow-ups.
+- Fixed project document totals disagreeing with the visible project groups, project-context extraction creating an excessive task backlog, and narrow/mobile navigation hiding enabled pages.
+- Fixed task workflow friction caused by oversized controls and repeated clicks when moving or clearing tasks.
+
+### Validation
+
+- Passed 715 plugin service and workflow tests, TypeScript checks, UI class/behavior/overflow guards, writeback-destination checks, Pro compatibility checks, and the production build.
+- Passed all 69 payment-worker tests and payment-worker TypeScript checks.
+- Verified source and release community exports, privacy exclusions, forbidden-content scans, exact version alignment, and the three required Obsidian release assets.
+
 ## 0.3.18 - 2026-09-01
 
 ### Added

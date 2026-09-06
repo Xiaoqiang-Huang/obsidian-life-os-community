@@ -111,9 +111,10 @@ export class AgentToolRuntime {
   async confirmPendingWrite(
     context: LifeOSAgentToolExecutionContext
   ): Promise<LifeOSAgentToolResult | null> {
-    const pending = this.pendingWrite(context.sessionId);
+    const sessionKey = this.runtimeSessionKey(context);
+    const pending = this.pendingWrite(sessionKey);
     if (!pending) return null;
-    this.pendingWrites.delete(context.sessionId);
+    this.pendingWrites.delete(sessionKey);
     return this.execute(
       {
         ...pending.call,
@@ -198,7 +199,7 @@ export class AgentToolRuntime {
           : { allowed: false, summary: defaultConfirmationSummary };
         if (!confirmation.allowed) {
           const confirmationSummary = confirmation.summary || defaultConfirmationSummary;
-          this.pendingWrites.set(context.sessionId, {
+          this.pendingWrites.set(this.runtimeSessionKey(context), {
             descriptorId: descriptor.id,
             call: {
               id: call.id,
@@ -233,7 +234,7 @@ export class AgentToolRuntime {
         durationMs: Date.now() - startedAt,
         ...(typeof value === "string" || !value.metadata ? {} : { metadata: value.metadata })
       };
-      this.pendingWrites.delete(context.sessionId);
+      this.pendingWrites.delete(this.runtimeSessionKey(context));
       this.resultCache.set(cacheKey, result);
       if (this.resultCache.size > 400) this.resultCache.delete(this.resultCache.keys().next().value as string);
       return result;
@@ -283,7 +284,11 @@ export class AgentToolRuntime {
   }
 
   private cacheKey(call: LifeOSAgentToolCall, context: LifeOSAgentToolExecutionContext): string {
-    return [context.sessionId, context.turnId, call.name, JSON.stringify(call.input || {})].join("\u001f");
+    return [this.runtimeSessionKey(context), context.turnId, call.name, JSON.stringify(call.input || {})].join("\u001f");
+  }
+
+  private runtimeSessionKey(context: LifeOSAgentToolExecutionContext): string {
+    return String(context.runtimeSessionId || context.sessionId || "").trim();
   }
 
   private clearToolCache(id: string): void {

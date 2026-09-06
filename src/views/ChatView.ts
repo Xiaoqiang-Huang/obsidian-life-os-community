@@ -48,8 +48,8 @@ import {
   type WebContextRequestOptions,
   type WebSearchGrounding
 } from "../services/WebContextService";
-import { applyAiProviderSelection, getAvailableAiProviderOptions, getCivilServiceInterviewThinkingModelPrompt, getExamChatModeLabel, getExamProfileLabel, localizeLifeOsPathParts, normalizeChatWritebackMode, normalizeDirectoryLanguage, type AiProviderOption, type AiReasoningEffort, type AssistantStyle, type AssistantVerbosity } from "../settings";
-import type { ChatContextMode, ChatWritebackMode, WebSearchMode } from "../settings";
+import { applyAiProviderSelection, getAvailableAiProviderOptions, getCivilServiceInterviewThinkingModelPrompt, getExamChatModeLabel, getExamProfileLabel, localizeLifeOsPathParts, normalizeAgentMemoryMode, normalizeChatWritebackMode, normalizeDirectoryLanguage, type AiProviderOption, type AiReasoningEffort, type AssistantStyle, type AssistantVerbosity } from "../settings";
+import type { AgentMemoryMode, ChatContextMode, ChatWritebackMode, WebSearchMode } from "../settings";
 import { requireProFeature, type ProFeatureId } from "../licensing/entitlement";
 import type { ChatMessage, LifeOSProject, LifeOSProjectDocument, LifeOSProjectSummary, LifeOSTask } from "../types";
 import { appendWritebackItems, applyWritebackItems, openWritebackPreview, type WritebackItem } from "../writeback-preview";
@@ -67,7 +67,7 @@ type ChatRunStatus = "completed" | "interrupted" | "error" | "saved";
 type RequestedWriteTarget = "diary" | "knowledge" | "memory" | "project-document" | null;
 type WritebackTarget = "diary" | "knowledge" | "memory" | "project-document";
 type ProjectWhiteboardChatIntent = "generate" | "adjust";
-type ChatComposerControlId = "mode" | "project" | "model" | "skill" | "web" | "reasoning" | "context" | "aiReply" | "writeback" | "board" | "length" | "style";
+type ChatComposerControlId = "mode" | "project" | "model" | "skill" | "web" | "reasoning" | "context" | "memory" | "aiReply" | "writeback" | "board" | "length" | "style";
 type ChatActivityStepState = "pending" | "active" | "done" | "skipped" | "error";
 type ChatActivityStepId = string;
 
@@ -152,6 +152,12 @@ const CHAT_WRITEBACK_MODE_LABELS: Record<ChatWritebackMode, string> = {
   confirm: "写入前确认",
   "explicit-auto": "明确指令自动写入"
 };
+const AGENT_MEMORY_MODE_LABELS: Record<AgentMemoryMode, string> = {
+  standard: "使用并沉淀",
+  "use-only": "仅使用",
+  temporary: "临时会话",
+  disabled: "不使用"
+};
 const AI_REASONING_EFFORT_OPTIONS: Array<{ id: UiChatReasoningEffort; label: string }> = [
   { id: "default", label: "默认" },
   { id: "low", label: "low" },
@@ -170,6 +176,7 @@ const CHAT_COMPOSER_CONTROL_ORDER = [
   "web",
   "reasoning",
   "context",
+  "memory",
   "aiReply",
   "writeback",
   "board",
@@ -210,6 +217,7 @@ export class LifeOSChatView extends ItemView {
   private length: UiChatLength;
   private reasoningEffort: UiChatReasoningEffort;
   private webSearchMode: WebSearchMode;
+  private memoryMode: AgentMemoryMode;
   private selectedSkillIds: string[];
   private selectedProjectScopeId = "";
   private isSkillPickerExpanded = false;
@@ -245,6 +253,7 @@ export class LifeOSChatView extends ItemView {
     this.length = plugin.settings.assistantVerbosity || "normal";
     this.reasoningEffort = this.normalizeReasoningEffort(plugin.settings.aiReasoningEffort);
     this.webSearchMode = normalizeWebSearchMode(plugin.settings.defaultWebSearchMode);
+    this.memoryMode = normalizeAgentMemoryMode(plugin.settings.agentMemoryDefaultMode);
     this.importedAiSkills = createImportedAiSkills(plugin.settings.importedAiSkills);
     this.selectedSkillIds = normalizeAiSkillIds(plugin.settings.defaultAiSkillIds, plugin.settings.defaultAiSkillId, this.importedAiSkills, plugin.settings.aiSkillOverrides);
   }
@@ -317,6 +326,13 @@ export class LifeOSChatView extends ItemView {
   private restoreActiveChatState(): void {
     const restoredSessionId = String(this.plugin.activeChatState.sessionId || "").trim();
     if (restoredSessionId) this.agentSessionId = restoredSessionId;
+    this.memoryMode = normalizeAgentMemoryMode(
+      this.plugin.activeChatState.memoryMode ?? this.plugin.settings.agentMemoryDefaultMode
+    );
+    this.compressedContextSummary = String(this.plugin.activeChatState.compressedSummary || "");
+    this.compressedContextMessageCount = Math.max(0, Math.floor(Number(this.plugin.activeChatState.compressedMessageCount) || 0));
+    this.compressedContextSourceCount = Math.max(0, Math.floor(Number(this.plugin.activeChatState.compressedSourceCount) || 0));
+    this.compressedContextUpdatedAt = String(this.plugin.activeChatState.compressedUpdatedAt || "");
     const messages = this.plugin.activeChatState.messages ?? [];
     if (messages.length === 0) return;
     this.messages = messages
@@ -326,6 +342,7 @@ export class LifeOSChatView extends ItemView {
           && typeof message.content === "string";
       })
       .map((message) => ({ role: message.role, content: message.content }));
+    this.compressedContextMessageCount = Math.min(this.compressedContextMessageCount, this.messages.length);
   }
 
   private persistActiveChatState(): void {
@@ -333,7 +350,12 @@ export class LifeOSChatView extends ItemView {
       messages: this.messages.map((message) => ({ role: message.role, content: message.content })),
       draftInput: this.inputEl?.value ?? "",
       updatedAt: Date.now(),
-      sessionId: this.agentSessionId
+      sessionId: this.agentSessionId,
+      memoryMode: this.memoryMode,
+      compressedSummary: this.compressedContextSummary,
+      compressedMessageCount: this.compressedContextMessageCount,
+      compressedSourceCount: this.compressedContextSourceCount,
+      compressedUpdatedAt: this.compressedContextUpdatedAt
     };
   }
 
@@ -342,7 +364,12 @@ export class LifeOSChatView extends ItemView {
       messages: [],
       draftInput: "",
       updatedAt: Date.now(),
-      sessionId: this.agentSessionId
+      sessionId: this.agentSessionId,
+      memoryMode: this.memoryMode,
+      compressedSummary: "",
+      compressedMessageCount: 0,
+      compressedSourceCount: 0,
+      compressedUpdatedAt: ""
     };
   }
 
@@ -488,6 +515,7 @@ export class LifeOSChatView extends ItemView {
     this.webSearchSummaryEl = addSummaryItem("联网", WEB_SEARCH_MODE_LABELS[this.webSearchMode]);
     const context = summary.createDiv({ cls: "lifeos-chat-control-summary-context" });
     context.createSpan({ text: CONTEXT_MODE_LABELS[this.contextMode] });
+    context.createSpan({ text: `记忆：${AGENT_MEMORY_MODE_LABELS[this.memoryMode]}` });
     context.createSpan({ text: CHAT_WRITEBACK_MODE_LABELS[this.currentWritebackMode()] });
   }
 
@@ -592,6 +620,17 @@ export class LifeOSChatView extends ItemView {
             this.plugin.settings.defaultChatContextMode = value;
             void this.plugin.saveSettings();
           });
+          break;
+        case "memory":
+          this.renderComposerSelect(controls, "memory", "记忆", [
+            { value: "standard", label: AGENT_MEMORY_MODE_LABELS.standard },
+            { value: "use-only", label: AGENT_MEMORY_MODE_LABELS["use-only"] },
+            { value: "temporary", label: AGENT_MEMORY_MODE_LABELS.temporary },
+            { value: "disabled", label: AGENT_MEMORY_MODE_LABELS.disabled }
+          ], this.memoryMode, (value) => {
+            this.memoryMode = normalizeAgentMemoryMode(value);
+            this.persistActiveChatState();
+          }, "当前会话独立设置：临时会话不会读取或沉淀长期记忆");
           break;
         case "aiReply":
           this.aiToggleEl = this.renderComposerSelect(controls, "aiReply", "AI 回复", [
@@ -1278,7 +1317,7 @@ export class LifeOSChatView extends ItemView {
     });
     const stamp = new Date().toLocaleString();
     const block = [
-      `### ${reason === "auto" ? "自动" : "手动"}压缩 ${stamp}`,
+      `### 早期会话摘要 · ${reason === "auto" ? "自动" : "手动"}压缩 ${stamp}`,
       `覆盖消息：${this.compressedContextMessageCount + 1}-${end}`,
       lines.join("\n")
     ].join("\n");
@@ -1287,6 +1326,7 @@ export class LifeOSChatView extends ItemView {
     this.compressedContextSourceCount += source.length;
     this.compressedContextUpdatedAt = stamp;
     this.renderRuntimeStatus();
+    this.persistActiveChatState();
     return block;
   }
 
@@ -1307,7 +1347,10 @@ export class LifeOSChatView extends ItemView {
   private estimateCurrentContextTokens(extraText = ""): number {
     const texts = [
       this.compressedContextSummary,
-      this.messages.map((message) => `${message.role}: ${message.content}`).join("\n\n"),
+      this.messages
+        .slice(this.compressedContextMessageCount)
+        .map((message) => `${message.role}: ${message.content}`)
+        .join("\n\n"),
       this.lastContextBundle?.promptContext ?? "",
       this.inputEl?.value ?? "",
       extraText
@@ -3295,7 +3338,10 @@ export class LifeOSChatView extends ItemView {
 
     const verification = this.plugin.agent.verifyAnswer(content, bundle.sources, {
       requireCitations: true,
-      minimumCompleteness: 0.6
+      minimumCompleteness: 0.6,
+      verifyClaimSupport: true,
+      minimumSupportCoverage: 0.65,
+      failOnUnsupportedClaim: true
     });
     if (verification.valid || !verification.warningMarkdown) return content;
     if (/\*\*引用检查：\*\*/.test(content)) return content;
@@ -3360,13 +3406,6 @@ export class LifeOSChatView extends ItemView {
         getCivilServiceInterviewThinkingModelPrompt()
       ].join("\n")
       : "";
-    const compressedHistory = this.compressedContextSummary
-      ? [
-        "# 早期会话摘要",
-        "仅在与当前请求相关时使用；完整历史仍保存在 Life OS 中。",
-        this.compactForSummary(this.compressedContextSummary, 5000)
-      ].join("\n")
-      : "";
     const workflowRules = this.workflowRulesForRequest(requestProfile);
     const citationRules = (this.lastContextBundle?.sources.length ?? 0) > 0
       ? [
@@ -3411,11 +3450,14 @@ export class LifeOSChatView extends ItemView {
       modeHint,
       maxHistoryMessages: 4,
       maxHistoryChars: 8_000,
+      memoryMode: this.memoryMode,
+      compressedSummary: this.compressedContextSummary,
+      compressedMessageCount: this.compressedContextMessageCount,
+      compressedSourceCount: this.compressedContextSourceCount,
       skillPromptOverride: skillPrompt,
       systemInstructions: [selectedSkillGuard],
       answerInstructions,
       promptSections: [
-        compressedHistory ? { content: compressedHistory } : { content: "" },
         requestProfile.documentEdit && documentEditMarkdown
           ? { title: "目标文档与编辑约束", content: documentEditMarkdown }
           : { content: "" },
@@ -3433,7 +3475,10 @@ export class LifeOSChatView extends ItemView {
 
   private recentAgentHistory(): Array<{ role: "user" | "assistant"; content: string }> {
     const candidates = this.messages
-      .slice(0, Math.max(0, this.messages.length - 2))
+      .slice(
+        Math.min(this.compressedContextMessageCount, Math.max(0, this.messages.length - 2)),
+        Math.max(0, this.messages.length - 2)
+      )
       .filter((message) => message.content.trim());
     const selected: Array<{ role: "user" | "assistant"; content: string }> = [];
     let remainingChars = 8000;
@@ -4083,6 +4128,7 @@ export class LifeOSChatView extends ItemView {
 
   private startNewConversation(): void {
     this.agentSessionId = randomId("lifeos-chat-session");
+    this.memoryMode = normalizeAgentMemoryMode(this.plugin.settings.agentMemoryDefaultMode);
     this.messages = [];
     this.importedDocuments = [];
     this.lastImportedDocuments = [];

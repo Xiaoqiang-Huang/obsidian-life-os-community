@@ -1,8 +1,8 @@
 ﻿import { App, Notice, PluginSettingTab, setIcon } from "obsidian";
 import type PersonalLifeSystemPlugin from "./main";
 import { Setting } from "obsidian";
-import type { AiProviderType, AiReasoningEffort, AssistantStyle, AssistantVerbosity, ChatContextMode, ChatMode, ChatSendBehavior, ChatWritebackMode, DirectoryLanguage, DisplayLanguage, ExamProfileType, HeatmapRange, LlmWikiCompileDepth, LlmWikiLongMaterialMode, LlmWikiSensitiveDefault, PdfOcrEngine, ThemeStyle, WebSearchProviderType, WeixinBotPermission, WeixinSenderPolicy } from "./settings";
-import { analyzeAiConnectionTestModels, DEFAULT_SETTINGS, EXAM_PROFILE_OPTIONS, getAiProviderPreset, getExamChatModeLabel, getExamProfileLabel, getStoredAiApiKey, getStoredAiProviderConfig, getThemeStyleClasses, normalizeAiApiKeyInput, normalizeAiTaskExtractionLimit, normalizeBrowserCapturePort, normalizeChatWritebackMode, normalizeHiddenSidebarItems, normalizeThemeStyle, setStoredAiApiKey, setStoredAiProviderConfig, SIDEBAR_CONFIGURABLE_ITEMS, THEME_STYLES, validateAiProviderConfig } from "./settings";
+import type { AgentMemoryMode, AgentMemoryScopeMode, AiProviderType, AiReasoningEffort, AssistantStyle, AssistantVerbosity, ChatContextMode, ChatMode, ChatSendBehavior, ChatWritebackMode, DirectoryLanguage, DisplayLanguage, ExamProfileType, HeatmapRange, LlmWikiCompileDepth, LlmWikiLongMaterialMode, LlmWikiSensitiveDefault, PdfOcrEngine, ThemeStyle, WebSearchProviderType, WeixinBotPermission, WeixinSenderPolicy } from "./settings";
+import { analyzeAiConnectionTestModels, DEFAULT_SETTINGS, EXAM_PROFILE_OPTIONS, getAiProviderPreset, getExamChatModeLabel, getExamProfileLabel, getStoredAiApiKey, getStoredAiProviderConfig, getThemeStyleClasses, normalizeAgentMemoryIdleHours, normalizeAgentMemoryMaxItemsPerSession, normalizeAgentMemoryMaxSessionsPerRun, normalizeAgentMemoryMinConfidence, normalizeAgentMemoryRetentionDays, normalizeAiApiKeyInput, normalizeAiTaskExtractionLimit, normalizeBrowserCapturePort, normalizeChatWritebackMode, normalizeHiddenSidebarItems, normalizeProjectContextTaskExtractionLimit, normalizeThemeStyle, setStoredAiApiKey, setStoredAiProviderConfig, SIDEBAR_CONFIGURABLE_ITEMS, THEME_STYLES, validateAiProviderConfig } from "./settings";
 import type { LifeOSNavKey } from "./types";
 import { requireProFeature, resolveLicenseStatus } from "./licensing/entitlement";
 import { createImportedAiSkills, getAiSkillCategories, getAiSkills, getAiSkillsByCategory, normalizeAiSkillIds } from "./services/AiSkillService";
@@ -704,6 +704,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
         await this.saveImmediate("默认记入方式已保存。");
       }
     );
+    this.renderAgentMemorySettings(card);
     this.toggle(card, "启用图片视觉分析", "开启后，AI 助手可把图片附件发送给支持视觉的模型；未开启时图片只作为附件记录，不做识别。", this.plugin.settings.enableVisionFileAnalysis === true, async (value) => {
       this.plugin.settings.enableVisionFileAnalysis = value;
       await this.saveImmediate("图片视觉分析设置已保存。");
@@ -740,6 +741,116 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       this.plugin.settings.paddleOcrEndpoint = paddleEndpoint.value.trim();
       await this.saveImmediate("PaddleOCR 服务地址已保存。");
     };
+  }
+
+  private renderAgentMemorySettings(parent: HTMLElement): void {
+    const details = parent.createEl("details", { cls: "lifeos-agent-memory-settings" });
+    const summary = details.createEl("summary", { cls: "lifeos-agent-memory-settings-summary" });
+    const summaryCopy = summary.createSpan();
+    summaryCopy.createEl("strong", { text: "Agent 记忆与智能上下文" });
+    summaryCopy.createSpan({
+      text: this.plugin.settings.agentMemoryEnabled === false
+        ? "已关闭"
+        : `已开启 · ${this.agentMemoryModeLabel(this.plugin.settings.agentMemoryDefaultMode)}`
+    });
+    const body = details.createDiv({ cls: "lifeos-agent-memory-settings-body" });
+    this.toggle(body, "启用 Agent 记忆", "保存会话工作检查点，并在相关问题中按范围召回已确认或高置信记忆。", this.plugin.settings.agentMemoryEnabled !== false, async (value) => {
+      this.plugin.settings.agentMemoryEnabled = value;
+      await this.saveImmediate(value ? "Agent 记忆已开启。" : "Agent 记忆已关闭；已有内容不会被删除。");
+      this.display();
+    });
+    this.select<AgentMemoryMode>(
+      body,
+      "新会话默认记忆模式",
+      "使用并沉淀会读取与提炼；仅使用不会新增；临时模式既不读取也不保存工作状态。每个会话仍可单独切换。",
+      this.plugin.settings.agentMemoryDefaultMode,
+      [["standard", "使用并沉淀"], ["use-only", "仅使用"], ["temporary", "临时会话"], ["disabled", "不使用"]],
+      async (value) => {
+        this.plugin.settings.agentMemoryDefaultMode = value;
+        await this.saveImmediate("默认记忆模式已保存。");
+      }
+    );
+    this.select<AgentMemoryScopeMode>(
+      body,
+      "长期记忆隔离范围",
+      "按项目共享可让桌面与微信接力；按渠道或账号隔离适合共享设备与敏感项目。",
+      this.plugin.settings.agentMemoryScopeMode,
+      [["project", "同项目跨端共享"], ["project-channel", "按项目与渠道隔离"], ["project-account", "按项目与账号隔离"]],
+      async (value) => {
+        this.plugin.settings.agentMemoryScopeMode = value;
+        await this.saveImmediate("长期记忆隔离范围已保存。");
+      }
+    );
+
+    const numbers = body.createDiv({ cls: "lifeos-agent-memory-number-grid" });
+    const numberSetting = (
+      label: string,
+      description: string,
+      value: number,
+      min: number,
+      max: number,
+      normalize: (raw: unknown) => number,
+      save: (next: number) => void
+    ) => {
+      const row = this.row(numbers, label, description);
+      const input = row.createEl("input", {
+        cls: "lifeos-input",
+        attr: { type: "number", min: String(min), max: String(max), "aria-label": label }
+      });
+      input.value = String(value);
+      input.onchange = () => {
+        const next = normalize(input.value);
+        input.value = String(next);
+        save(next);
+        void this.saveImmediate(`${label}已保存。`);
+      };
+    };
+    numberSetting("工作状态保留（小时）", "超过此空闲时间的会话检查点会在维护时清理。", this.plugin.settings.agentMemoryIdleHours, 1, 2160, normalizeAgentMemoryIdleHours, (value) => { this.plugin.settings.agentMemoryIdleHours = value; });
+    numberSetting("每轮后台任务数", "限制一次后台提炼处理的会话数，避免阻塞界面。", this.plugin.settings.agentMemoryMaxSessionsPerRun, 1, 20, normalizeAgentMemoryMaxSessionsPerRun, (value) => { this.plugin.settings.agentMemoryMaxSessionsPerRun = value; });
+    numberSetting("每轮最多提炼条数", "限制单轮对话进入候选记忆的数量。", this.plugin.settings.agentMemoryMaxItemsPerSession, 1, 24, normalizeAgentMemoryMaxItemsPerSession, (value) => { this.plugin.settings.agentMemoryMaxItemsPerSession = value; });
+    numberSetting("候选保留（天）", "过期候选会标记为陈旧，不会作为普通召回内容。", this.plugin.settings.agentMemoryRetentionDays, 7, 3650, normalizeAgentMemoryRetentionDays, (value) => { this.plugin.settings.agentMemoryRetentionDays = value; });
+    numberSetting("最低召回置信度", "数值范围 0.10–0.98；越高越保守。", this.plugin.settings.agentMemoryMinConfidence, 0.1, 0.98, normalizeAgentMemoryMinConfidence, (value) => { this.plugin.settings.agentMemoryMinConfidence = value; });
+
+    this.toggle(body, "导入项目工具记忆", "维护时读取已绑定项目内 Codex、Claude Code、OpenCode 等工具的记忆快照，作为带来源的候选。", this.plugin.settings.agentMemoryImportExternal === true, async (value) => {
+      this.plugin.settings.agentMemoryImportExternal = value;
+      await this.saveImmediate("外部项目记忆导入设置已保存。");
+    });
+    this.toggle(body, "发现可复用 Skill", "重复出现的工作流程达到阈值后，在记忆页给出 Skill 建议，不会自动创建。", this.plugin.settings.agentMemoryAutoSkillSuggestions !== false, async (value) => {
+      this.plugin.settings.agentMemoryAutoSkillSuggestions = value;
+      await this.saveImmediate("Skill 建议设置已保存。");
+    });
+
+    const diagnostics = body.createDiv({ cls: "lifeos-agent-memory-diagnostics", text: "正在读取记忆索引状态…" });
+    const refreshDiagnostics = async () => {
+      const info = await this.plugin.agent.getMemoryDiagnostics();
+      diagnostics.setText(`存储 ${info.storeId} · ${info.recordCount} 条回忆（${info.confirmedCount} 条已确认）· ${info.workingStateCount} 个工作检查点 · ${info.queuedJobCount} 个待处理任务${info.failedJobCount ? ` · ${info.failedJobCount} 个失败` : ""}`);
+      diagnostics.setAttr("title", `索引：${info.storePath}\n读取路径：${info.readPath}\n最近记忆：${info.latestRecordAt}`);
+    };
+    void refreshDiagnostics().catch((error) => diagnostics.setText(`记忆索引读取失败：${String(error)}`));
+    const actions = body.createDiv({ cls: "lifeos-agent-memory-actions" });
+    this.button(actions, "处理待提炼", () => void (async () => {
+      const result = await this.plugin.agent.processPendingMemories();
+      new Notice(`已处理 ${result.completed}/${result.claimed} 个记忆任务，新增 ${result.added} 条。`);
+      await refreshDiagnostics();
+    })(), true);
+    this.button(actions, "导入项目记忆", () => void (async () => {
+      const result = await this.plugin.agent.importExternalMemories();
+      new Notice(`已扫描 ${result.scanned} 条项目记忆，新增 ${result.added} 条、更新 ${result.updated} 条。`);
+      await refreshDiagnostics();
+    })());
+    this.button(actions, "运行维护", () => void (async () => {
+      await this.plugin.agent.runMemoryMaintenance();
+      new Notice("Agent 记忆维护完成。");
+      await refreshDiagnostics();
+    })());
+    this.button(actions, "打开记忆审核", () => void this.plugin.activateMemory());
+  }
+
+  private agentMemoryModeLabel(mode: AgentMemoryMode): string {
+    if (mode === "use-only") return "仅使用";
+    if (mode === "temporary") return "临时";
+    if (mode === "disabled") return "不使用";
+    return "使用并沉淀";
   }
 
   private renderAutoReview(parent: HTMLElement): void {
@@ -1350,6 +1461,33 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       if (next === this.plugin.settings.aiTaskExtractionLimit) return;
       this.plugin.settings.aiTaskExtractionLimit = next;
       await this.saveImmediate(`单次任务提取上限已设为 ${next} 条。`);
+    })();
+    const projectTaskLimitRow = this.row(
+      card,
+      "项目上下文任务上限",
+      "限制项目上下文、会话复盘和自动复盘进入任务池的数量，同时约束次日自动延续。每轮只保留优先级最高的 1–50 条，默认 5 条。"
+    );
+    const projectTaskLimitInput = projectTaskLimitRow.createEl("input", {
+      cls: "lifeos-input lifeos-setting-number-input",
+      attr: {
+        type: "number",
+        min: "1",
+        max: "50",
+        step: "1",
+        "aria-label": "项目上下文任务上限"
+      }
+    });
+    const currentProjectTaskLimit = normalizeProjectContextTaskExtractionLimit(
+      this.plugin.settings.projectContextTaskExtractionLimit
+    );
+    this.plugin.settings.projectContextTaskExtractionLimit = currentProjectTaskLimit;
+    projectTaskLimitInput.value = String(currentProjectTaskLimit);
+    projectTaskLimitInput.onchange = () => void (async () => {
+      const next = normalizeProjectContextTaskExtractionLimit(projectTaskLimitInput.value);
+      projectTaskLimitInput.value = String(next);
+      if (next === this.plugin.settings.projectContextTaskExtractionLimit) return;
+      this.plugin.settings.projectContextTaskExtractionLimit = next;
+      await this.saveImmediate(`项目上下文任务上限已设为 ${next} 条。`);
     })();
     this.renderSidebarVisibility(card);
   }

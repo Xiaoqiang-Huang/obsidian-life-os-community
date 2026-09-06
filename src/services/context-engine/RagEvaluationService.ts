@@ -26,7 +26,11 @@ export class RagEvaluationService {
     const actual = new Set(input.result.sources.map((source) => this.normalize(source.path)));
     const matched = Array.from(expected).filter((path) => actual.has(path)).length;
     const verification = input.answer
-      ? this.verifier.verify(input.answer, input.result.sources, { requireCitations: input.result.sources.length > 0 })
+      ? this.verifier.verify(input.answer, input.result.sources, {
+        requireCitations: input.result.sources.length > 0,
+        verifyClaimSupport: input.result.sources.length > 0,
+        minimumSupportCoverage: 0.7
+      })
       : null;
     return {
       id: input.id,

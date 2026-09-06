@@ -1,5 +1,6 @@
 import type { AiImageUrlContentPart, AiMessage, AiResponse } from "../../ai";
 import type { ChatContextBundle } from "../ChatContextService";
+import type { AgentCompactionResult } from "./AgentContextCompactor";
 
 export type LifeOSAgentChannel = "desktop" | "weixin";
 
@@ -32,6 +33,11 @@ export type LifeOSAgentEventType =
   | "model-started"
   | "model-streaming"
   | "answer-verified"
+  | "memory-state-loaded"
+  | "memory-state-saved"
+  | "memory-recalled"
+  | "memory-extraction-enqueued"
+  | "memory-extraction-completed"
   | "turn-completed"
   | "turn-stopped";
 
@@ -99,7 +105,14 @@ export type LifeOSAgentPermissionMode = "read-only" | "confirm" | "explicit-auto
 
 export interface LifeOSAgentToolExecutionContext {
   channel: LifeOSAgentChannel;
+  /** Public conversation identity used by tools, routes, logs, and UI events. */
   sessionId: string;
+  /**
+   * Internal identity for transient caches and pending confirmations.
+   * It includes channel/project/account scope so reusing a public chat id can
+   * never confirm or reuse another scope's operation.
+   */
+  runtimeSessionId?: string;
   turnId: string;
   projectScopeId: string;
   userContent: string;
@@ -129,6 +142,8 @@ export interface LifeOSAgentLoopResult {
   messages: AiMessage[];
   modelCalls: number;
   toolCalls: number;
+  /** Structured state produced by the exact compaction used for this run. */
+  compaction?: AgentCompactionResult;
 }
 
 export interface LifeOSAgentTaskMemory {
@@ -138,6 +153,11 @@ export interface LifeOSAgentTaskMemory {
   openItems: string[];
   decisions: string[];
   completedItems: string[];
+  constraints: string[];
+  corrections: string[];
+  unresolved: string[];
+  nextActions: string[];
+  recentTopics: string[];
   lastSummary: string;
   updatedAt: string;
 }

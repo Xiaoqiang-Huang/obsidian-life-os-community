@@ -12,6 +12,7 @@ export function parseTaskLine(line: string, source: "open" | "done"): LifeOSTask
   const text = body
     .replace(/\s*project:[A-Za-z0-9_-]+/g, "")
     .replace(/\s*source:[^\s^]+/g, "")
+    .replace(/\s*lane:(?:today|open)/g, "")
     .replace(/\s*📅\s*20\d{2}-\d{2}-\d{2}/g, "")
     .replace(/\s*✅\s*20\d{2}-\d{2}-\d{2}/g, "")
     .replace(/\s*#[^\s^]+/g, "")

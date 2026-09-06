@@ -32,6 +32,14 @@ export interface TaskArchiveClearResult {
   backupPath: string;
 }
 
+export interface CompletedTaskArchiveClearResult {
+  cleared: number;
+  donePath: string;
+  backupPath: string;
+}
+
+export type TaskLane = "today" | "open" | "done";
+
 export interface TaskBatchUpdate {
   /** `undefined` keeps the original value, `null` clears it. */
   projectId?: string | null;
@@ -77,6 +85,45 @@ export class TaskService {
     await this.app.vault.modify(openFile, result.openContent);
     await this.app.vault.modify(doneFile, result.doneContent);
     return result.doneLine;
+  }
+
+  async moveTaskToLane(task: LifeOSTask, lane: TaskLane, _activeDate = formatDate()): Promise<string> {
+    if (lane === "done") {
+      if (task.source === "done" || task.isDone) return task.line;
+      return this.completeTask(task);
+    }
+
+    if (task.source === "open" && !task.isDone) {
+      const openFile = await ensureFile(this.app, this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
+      const lines = (await this.app.vault.read(openFile)).split(/\r?\n/u);
+      const index = this.findTaskLineIndex(lines, task.line);
+      if (index < 0) throw new Error("待办已变化或已不存在，请重新查看待办后操作。");
+      const nextLine = this.applyLaneToLine(lines[index], lane);
+      if (nextLine !== lines[index]) {
+        lines[index] = nextLine;
+        await this.app.vault.modify(openFile, lines.join("\n"));
+      }
+      await this.unsuppressTaskLine(nextLine);
+      return nextLine;
+    }
+
+    const openFile = await ensureFile(this.app, this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
+    const doneFile = await ensureFile(this.app, this.fs.path("Tasks", "done.md"), DONE_TASKS_FALLBACK);
+    const openContent = await this.app.vault.read(openFile);
+    const doneContent = await this.app.vault.read(doneFile);
+    const restored = undoTaskMarkdown(openContent, doneContent, task.line);
+    if (restored.doneContent === doneContent) {
+      throw new Error("已完成任务已变化或已不存在，请重新查看待办后操作。");
+    }
+    const openLines = restored.openContent.split(/\r?\n/u);
+    const restoredIndex = this.findTaskLineIndex(openLines, restored.openLine);
+    if (restoredIndex < 0) throw new Error("任务已恢复，但无法设置目标分组，请重新加载后再试。");
+    const nextLine = this.applyLaneToLine(openLines[restoredIndex], lane);
+    openLines[restoredIndex] = nextLine;
+    await this.app.vault.modify(openFile, openLines.join("\n"));
+    await this.app.vault.modify(doneFile, restored.doneContent);
+    await this.unsuppressTaskLine(nextLine);
+    return nextLine;
   }
 
   async createTask(data: {
@@ -172,7 +219,7 @@ export class TaskService {
     }
     await this.app.vault.modify(openFile, result.openContent);
     await this.app.vault.modify(doneFile, result.doneContent);
-    await this.unsuppressTaskLine(originalOpenLine);
+    await this.unsuppressTaskLine(result.openLine);
   }
 
   async batchCompleteTasks(tasks: LifeOSTask[]): Promise<TaskBatchResult> {
@@ -224,7 +271,7 @@ export class TaskService {
       const result = undoTaskMarkdown(openContent, doneContent, task.line);
       openContent = result.openContent;
       doneContent = result.doneContent;
-      restoredLines.push(task.line);
+      restoredLines.push(result.openLine);
       succeeded += 1;
     }
     if (succeeded > 0) {
@@ -306,6 +353,37 @@ export class TaskService {
       throw new Error(`任务备份已保存到 ${backupPath}，但清空 open.md 失败：${message}`);
     }
     return { cleared: unfinished.length, openPath, backupPath };
+  }
+
+  /** Preserve the exact completed-task history before clearing the visible archive. */
+  async archiveAndClearDoneTasks(): Promise<CompletedTaskArchiveClearResult> {
+    const donePath = this.fs.path("Tasks", "done.md");
+    const doneFile = await ensureFile(this.app, donePath, DONE_TASKS_FALLBACK);
+    const original = await this.app.vault.read(doneFile);
+    const completed = original
+      .split(/\r?\n/u)
+      .map((line) => parseTaskLine(line, "done"))
+      .filter((task): task is LifeOSTask => task !== null && task.isDone);
+    if (completed.length === 0) return { cleared: 0, donePath, backupPath: "" };
+
+    const archiveFolder = this.fs.path("Tasks", "archive");
+    await ensureFolder(this.app, archiveFolder);
+    const stamp = `${formatDate()}-${formatTime().replace(/[^0-9]/gu, "") || "0000"}`;
+    let backupPath = `${archiveFolder}/done-backup-${stamp}.md`;
+    let suffix = 2;
+    while (this.app.vault.getAbstractFileByPath(backupPath)) {
+      backupPath = `${archiveFolder}/done-backup-${stamp}-${suffix}.md`;
+      suffix += 1;
+    }
+
+    await this.app.vault.create(backupPath, original);
+    try {
+      await this.app.vault.modify(doneFile, DONE_TASKS_FALLBACK);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`已完成任务备份已保存到 ${backupPath}，但清空 done.md 失败：${message}`);
+    }
+    return { cleared: completed.length, donePath, backupPath };
   }
 
   /**
@@ -477,6 +555,13 @@ export class TaskService {
     }
 
     return `${next.trimEnd()}${blockId ? ` ${blockId}` : ""}`;
+  }
+
+  private applyLaneToLine(line: string, lane: Exclude<TaskLane, "done">): string {
+    const blockId = line.match(/\s+(\^[A-Za-z0-9_-]+)\s*$/u)?.[1] || "";
+    const withoutBlockId = line.replace(/\s+\^[A-Za-z0-9_-]+\s*$/u, "").trimEnd();
+    const withoutLane = withoutBlockId.replace(/\s+lane:(?:today|open)(?=\s|$)/gu, "");
+    return `${withoutLane} lane:${lane}${blockId ? ` ${blockId}` : ""}`;
   }
 
   private cleanMetadataToken(value: string): string {

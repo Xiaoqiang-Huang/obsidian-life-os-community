@@ -52,25 +52,49 @@ export function parseTaskLine(line: string): ParsedTask | null {
   return { line: trimmed, title, tags, dueDate, carriedFromDate, blockId, isOpen };
 }
 
-/** Check if a new task duplicates an existing one by comparing normalized titles */
+/**
+ * Build the stable identity used for automatic-task deduplication.
+ * Generated project/review tasks often append changing evidence, source IDs,
+ * carry dates and punctuation to the same action. Those fields must not make a
+ * previously seen task look new after restart.
+ */
+export function normalizeTaskIdentityTitle(title: string): string {
+  return title
+    .normalize("NFKC")
+    .replace(/\s*[|｜]\s*(?:依据|来源|验收|时间)\s*[:：][\s\S]*$/u, "")
+    .replace(/\s*(?:（|\(|【|\[)\s*(?:依据|来源)\s*[:：][\s\S]*$/u, "")
+    .toLocaleLowerCase()
+    .replace(/[\s，。；;、,：:！？!?“”"'`（）()\[\]【】<>《》·•—–_-]+/gu, "")
+    .trim();
+}
+
+/** Check if a new task duplicates an existing one by comparing stable identities. */
 export function findDuplicateTask(
   newTitle: string,
   existingTasks: ParsedTask[]
 ): ParsedTask | undefined {
-  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
-  const newNorm = norm(newTitle);
-  return existingTasks.find((t) => norm(t.title) === newNorm);
+  const newIdentity = normalizeTaskIdentityTitle(newTitle);
+  if (!newIdentity) return undefined;
+  return existingTasks.find((task) => normalizeTaskIdentityTitle(task.title) === newIdentity);
 }
 
-/** Deduplicate AI-extracted task lines against existing tasks in open.md */
+/** Deduplicate automatic task lines against existing tasks and within the incoming batch. */
 export function dedupTaskLines(
   newLines: string[],
   existingTasks: ParsedTask[]
 ): string[] {
+  const seen = new Set(
+    existingTasks
+      .map((task) => normalizeTaskIdentityTitle(task.title))
+      .filter(Boolean)
+  );
   return newLines.filter((line) => {
     const parsed = parseTaskLine(line);
     if (!parsed) return true; // Keep non-task lines
-    return !findDuplicateTask(parsed.title, existingTasks);
+    const identity = normalizeTaskIdentityTitle(parsed.title);
+    if (!identity || seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
   });
 }
 

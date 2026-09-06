@@ -38,11 +38,13 @@ export class ContextComposer {
       const wasTruncated = section.content.length > allowed;
       const content = this.safeSlice(section.content, allowed);
       if (!content.trim()) continue;
+      const includedSource = source ? { ...source, excerpt: content } : null;
+      if (includedSource) sourceByKey.set(this.sourceKey(includedSource), includedSource);
 
       promptContext += `${header}${content}`;
-      includedSections.push({ ...section, content, sourceInfo: source ?? section.sourceInfo });
-      if (source && !sources.some((item) => this.sourceKey(item) === this.sourceKey(source))) {
-        sources.push(source);
+      includedSections.push({ ...section, content, sourceInfo: includedSource ?? section.sourceInfo });
+      if (includedSource && !sources.some((item) => this.sourceKey(item) === this.sourceKey(includedSource))) {
+        sources.push(includedSource);
       }
       if (wasTruncated) this.addWarning(warnings, `“${section.title}”已按上下文预算截取相关片段。`);
     }

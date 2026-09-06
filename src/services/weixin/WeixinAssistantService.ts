@@ -1180,7 +1180,10 @@ export class WeixinAssistantService {
     const verification = this.agent.verifyAnswer(answer, context.sources, {
       requireCitations: requireGrounding,
       minimumCompleteness: 0.7,
-      allowUncitedAdvice: true
+      allowUncitedAdvice: true,
+      verifyClaimSupport: requireGrounding,
+      minimumSupportCoverage: 0.7,
+      failOnUnsupportedClaim: true
     });
     const claimsReadUnavailableBody = unavailableEvidence
       && /(?:已经|已|成功)(?:读到|读取|获取|访问)(?:了)?(?:正文|全文|页面内容)/u.test(answer);
@@ -1268,7 +1271,10 @@ export class WeixinAssistantService {
       const repairedVerification = this.agent.verifyAnswer(repaired, context.sources, {
         requireCitations: requireGrounding,
         minimumCompleteness: 0.7,
-        allowUncitedAdvice: true
+        allowUncitedAdvice: true,
+        verifyClaimSupport: requireGrounding,
+        minimumSupportCoverage: 0.7,
+        failOnUnsupportedClaim: true
       });
       const stillClaimsUnavailable = unavailableEvidence
         && /(?:已经|已|成功)(?:读到|读取|获取|访问)(?:了)?(?:正文|全文|页面内容)/u.test(repaired);
@@ -2402,6 +2408,8 @@ export class WeixinAssistantService {
       content: currentRequest || "用户发送了图片或附件，没有附带文字。请直接观察并回答图片内容。",
       sessionId: `weixin:${weixinConversationKey(request)}`,
       turnId: request.messageId,
+      accountScopeId: request.accountId || "default",
+      memoryMode: this.settings.agentMemoryDefaultMode,
       history: recent,
       context: promptContext,
       projectLabel: project ? `${project.name}（${project.id}）` : "未绑定项目",
