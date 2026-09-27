@@ -67,9 +67,29 @@ export function installLifeOSResponsiveShell(root: HTMLElement): () => void {
   let resizeObserver: ResizeObserver | null = null;
   let detachObserver: MutationObserver | null = null;
   let layoutFrame = 0;
+  let observedParent: HTMLElement | null = null;
+  let wasConnected = root.isConnected;
+  let lastHeight = 0;
+
+  // The shell is initially built in a detached staging element. Follow it to
+  // its real parent when committed, otherwise later removals are never seen.
+  const followParent = () => {
+    if (observedParent === root.parentElement) return;
+    if (observedParent) resizeObserver?.unobserve(observedParent);
+    detachObserver?.disconnect();
+    observedParent = root.parentElement;
+    if (observedParent) {
+      resizeObserver?.observe(observedParent);
+      detachObserver?.observe(observedParent, { childList: true });
+    }
+  };
 
   const update = () => {
+    layoutFrame = 0;
     if (disposed) return;
+    if (wasConnected && !root.isConnected) { cleanup(); return; }
+    wasConnected ||= root.isConnected;
+    followParent();
     const width = measureAvailableWidth(root);
     const height = measureAvailableHeight(root);
     toggleClass(root, "lifeos-is-narrow-pane", width > 0 && width <= NARROW_PANE_WIDTH);
@@ -79,7 +99,17 @@ export function installLifeOSResponsiveShell(root: HTMLElement): () => void {
     toggleClass(root, "lifeos-is-mobile-runtime", Platform.isMobileApp);
     toggleClass(root, "lifeos-is-phone-runtime", Platform.isPhone);
     toggleClass(root, "lifeos-is-tablet-runtime", Platform.isTablet);
-    if (height > 0) root.style.setProperty("--lifeos-pane-viewport-height", `${Math.round(height)}px`);
+    const roundedHeight = Math.round(height);
+    if (roundedHeight > 0 && roundedHeight !== lastHeight) {
+      root.style.setProperty("--lifeos-pane-viewport-height", `${roundedHeight}px`);
+      lastHeight = roundedHeight;
+    }
+  };
+
+  const scheduleUpdate = () => {
+    if (disposed) return;
+    if (wasConnected && !root.isConnected) { cleanup(); return; }
+    if (!layoutFrame) layoutFrame = window.requestAnimationFrame(update);
   };
 
   const cleanup = () => {
@@ -88,34 +118,46 @@ export function installLifeOSResponsiveShell(root: HTMLElement): () => void {
     resizeObserver?.disconnect();
     detachObserver?.disconnect();
     if (layoutFrame) window.cancelAnimationFrame(layoutFrame);
-    window.removeEventListener("resize", update);
-    window.visualViewport?.removeEventListener("resize", update);
+    window.removeEventListener("resize", scheduleUpdate);
+    window.visualViewport?.removeEventListener("resize", scheduleUpdate);
     root.style.removeProperty("--lifeos-pane-viewport-height");
+    root.removeAttribute("data-lifeos-responsive-root");
     if (responsiveRoot.__lifeosResponsiveCleanup === cleanup) {
       delete responsiveRoot.__lifeosResponsiveCleanup;
     }
   };
 
   responsiveRoot.__lifeosResponsiveCleanup = cleanup;
+  root.setAttribute("data-lifeos-responsive-root", "");
 
   if (typeof ResizeObserver === "function") {
-    resizeObserver = new ResizeObserver(update);
+    resizeObserver = new ResizeObserver(scheduleUpdate);
     resizeObserver.observe(root);
-    if (root.parentElement) resizeObserver.observe(root.parentElement);
   } else {
-    window.addEventListener("resize", update);
+    window.addEventListener("resize", scheduleUpdate);
   }
-  window.visualViewport?.addEventListener("resize", update);
+  window.visualViewport?.addEventListener("resize", scheduleUpdate);
 
-  const parent = root.parentElement;
-  if (parent && typeof MutationObserver === "function") {
+  if (typeof MutationObserver === "function") {
     detachObserver = new MutationObserver(() => {
-      if (!root.isConnected) cleanup();
+      if (root.isConnected) {
+        wasConnected = true;
+        followParent();
+        scheduleUpdate();
+      } else if (wasConnected) cleanup();
     });
-    detachObserver.observe(parent, { childList: true });
   }
 
+  followParent();
   update();
-  layoutFrame = window.requestAnimationFrame(update);
+  scheduleUpdate();
   return cleanup;
+}
+
+/** Release both mounted shells and staging shells whose render was discarded. */
+export function disposeLifeOSResponsiveShells(scope: HTMLElement): void {
+  (scope as ResponsiveRoot).__lifeosResponsiveCleanup?.();
+  scope.querySelectorAll<ResponsiveRoot>("[data-lifeos-responsive-root]").forEach((root) => {
+    root.__lifeosResponsiveCleanup?.();
+  });
 }

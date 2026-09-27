@@ -146,6 +146,8 @@ export class AgentToolRecipeService {
       family: "tooling",
       description: `${recipe.description}（由 ${recipe.steps.length} 个受控步骤组成）`,
       channels: [...recipe.channels],
+      toolCallCost: 1 + primitiveDescriptors.length,
+      modelCallCost: primitiveDescriptors.reduce((sum, descriptor) => sum + Math.max(0, descriptor.modelCallCost || 0), 0),
       input: { ...recipe.inputSchema },
       risk: hasWrite ? "local-write" : hasNetwork ? "network" : primitiveDescriptors.some((item) => item.risk === "local-read") ? "local-read" : "none",
       confirmation: requiresConfirmation ? "always" : "default"

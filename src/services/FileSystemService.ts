@@ -5,6 +5,7 @@ import { formatDate } from "../utils/dates";
 import { ensureFile, ensureFolder, joinPath, normalizePath } from "../utils/vault";
 import { LlmWikiPathService } from "./LlmWikiPathService";
 import { AiToolProtocolService } from "./AiToolProtocolService";
+import { withTaskWrite, migrateTaskDirectory } from "./task-write-coordinator";
 
 export const LIFEOS_MEMORY_CATEGORIES = ["学业", "项目", "备考", "人际", "健康", "偏好", "其他"];
 
@@ -69,6 +70,11 @@ const LIFEOS_LLM_WIKI_FOLDER_STRUCTURE = [
   ["Knowledge", "LLMWiki", "Trash", "Drafts"],
   ["Knowledge", "LLMWiki", "Trash", "Batches"]
 ];
+
+// Settings, startup and view recovery can initialize the same Vault concurrently.
+// Serialize the entire migration, not just individual renames: a captured source
+// folder is otherwise stale as soon as another initializer moves its parent.
+const initializationQueues = new WeakMap<object, Map<string, Promise<void>>>();
 
 export class FileSystemService {
   lastAiProtocolError: Error | null = null;
@@ -138,10 +144,26 @@ export class FileSystemService {
   }
 
   async migrateLocalizedFolders(): Promise<void> {
+    return this.serializeInitialization(() => this.migrateLocalizedFoldersUnlocked());
+  }
+
+  private async serializeInitialization(run: () => Promise<void>): Promise<void> {
+    let roots = initializationQueues.get(this.app.vault);
+    if (!roots) initializationQueues.set(this.app.vault, roots = new Map());
+    const result = (roots.get(this.root) ?? Promise.resolve()).then(run);
+    const settled = result.catch(() => {});
+    roots.set(this.root, settled);
+    try { await result; }
+    finally { if (roots.get(this.root) === settled) roots.delete(this.root); }
+  }
+
+  private async migrateLocalizedFoldersUnlocked(): Promise<void> {
     for (const pair of this.localizedFolderMovePairs()) {
       const source = this.app.vault.getAbstractFileByPath(pair.from);
       if (!(source instanceof TFolder)) continue;
-      await this.moveOrMergeFolder(source, pair.to);
+      if (/(?:^|\/)(?:Tasks|任务)$/u.test(pair.from)) {
+        await migrateTaskDirectory(this.app, pair.from, pair.to, () => this.moveOrMergeFolder(source, pair.to));
+      } else await this.moveOrMergeFolder(source, pair.to);
     }
   }
 
@@ -195,7 +217,11 @@ export class FileSystemService {
   }
 
   async ensureBaseStructure(): Promise<void> {
-    await this.migrateLocalizedFolders();
+    return this.serializeInitialization(() => this.ensureBaseStructureUnlocked());
+  }
+
+  private async ensureBaseStructureUnlocked(): Promise<void> {
+    await this.migrateLocalizedFoldersUnlocked();
 
     const folders = [
       this.root,
@@ -206,8 +232,10 @@ export class FileSystemService {
       await ensureFolder(this.app, folder);
     }
 
-    await ensureFile(this.app, this.path("Tasks", "open.md"), "# 未完成待办\n\n");
-    await ensureFile(this.app, this.path("Tasks", "done.md"), "# 已完成待办\n\n");
+    await withTaskWrite(this.app, this.path("Tasks"), "initialize-tasks", async draft => {
+      await draft.file(this.path("Tasks", "open.md"), "# 未完成待办\n\n");
+      await draft.file(this.path("Tasks", "done.md"), "# 已完成待办\n\n");
+    });
     await ensureFile(this.app, this.path("Knowledge", "index.md"), "# 知识库\n\n这里可以整理学习资料、读书笔记、错题知识点和长期参考材料。\n\n");
     await ensureFile(this.app, this.path("Projects", "index.md"), "# Projects\n\n");
     await ensureFile(

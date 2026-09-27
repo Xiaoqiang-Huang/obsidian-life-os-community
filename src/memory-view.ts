@@ -117,6 +117,7 @@ export class MemoryView extends ItemView {
       main.addClass("lifeos-memory-page");
 
     createHeroHeader(main, {
+        app: this.app,
       kicker: "记忆审核",
       title: "候选记忆",
       description: "AI 不会直接写入正式记忆。所有内容都会先进入候选池，只有你确认后才会保存到分类记忆。",

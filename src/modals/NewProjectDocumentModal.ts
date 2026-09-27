@@ -1,4 +1,5 @@
-import { App, Modal, Notice } from "obsidian";
+import { LifeOSModal as Modal } from "../components/LifeOSModal";
+import { App, Notice } from "obsidian";
 import { createButton } from "../components/Button";
 import { createModalShell } from "../components/ModalShell";
 import { requireProFeature } from "../licensing/entitlement";
@@ -7,6 +8,7 @@ import { ProjectDocumentService } from "../services/ProjectDocumentService";
 import type { LifeOSProject, LifeOSProjectDocument, LifeOSProjectDocumentKind } from "../types";
 
 export class NewProjectDocumentModal extends Modal {
+  private saving = false;
   constructor(
     app: App,
     private project: LifeOSProject,
@@ -45,11 +47,13 @@ export class NewProjectDocumentModal extends Modal {
     content.value = "在这里记录项目背景、资料、决策、会议纪要或后续复盘。";
 
     footer.addClass("lifeos-task-modal-footer");
+    const status = form.createDiv({ attr: { role: "status", "aria-live": "polite" } });
     createButton(footer, "取消", () => this.close(), { ghost: true });
     createButton(
       footer,
       "创建文档",
       async () => {
+        if (this.saving) return;
         const cleanTitle = title.value.trim();
         if (!cleanTitle) {
           new Notice("请先填写文档标题。");
@@ -58,17 +62,22 @@ export class NewProjectDocumentModal extends Modal {
         }
         try {
           if (!requireProFeature(this.plugin, "projectDocuments")) return;
+          this.saving = true;
+          status.textContent = "正在创建…";
           const document = await this.service.createDocument(this.project, {
             title: cleanTitle,
             kind: kind.value as LifeOSProjectDocumentKind,
-            content: content.value
+            content: content.value,
+            preserveInput: true
           });
           new Notice("项目文档已创建。");
           this.close();
           await this.onSaved?.(document);
         } catch (error) {
+          status.textContent = error instanceof Error ? error.message : "项目文档创建失败。";
+          status.setAttr("role", "alert");
           new Notice(error instanceof Error ? error.message : "项目文档创建失败。");
-        }
+        } finally { this.saving = false; }
       },
       { primary: true, icon: "file-plus" }
     );

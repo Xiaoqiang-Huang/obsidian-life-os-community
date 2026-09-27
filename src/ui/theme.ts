@@ -5,6 +5,36 @@ import {
   type ThemeStyle
 } from "../settings";
 import type { UiThemeDensity, UiThemeFamily, UiThemeGroup, UiThemeMaterial, UiThemeMeta, UiThemeTokens } from "./types";
+import type { PersonalLifeSystemSettings } from "../settings";
+
+type ExperienceThemeSettings = Pick<PersonalLifeSystemSettings, "themeStyle" | "uiAppearance" | "uiDensity">;
+let activeExperienceTheme: ExperienceThemeSettings = { themeStyle: "minimal-warm", uiAppearance: "theme", uiDensity: "standard" };
+/** Both approved appearances extend the existing semantic token registry, not another theme engine. */
+/** Change only differing tokens/classes: repeated refreshes must not invalidate the whole view. */
+export function syncThemeClassNames(element: HTMLElement, active: readonly string[], managed: readonly string[] = THEME_STYLES.map(style => `lifeos-theme-${style}`)): void {
+  const wanted = new Set(active);
+  for (const cls of managed) if (!wanted.has(cls) && element.classList.contains(cls)) element.classList.remove(cls);
+  for (const cls of wanted) if (!element.classList.contains(cls)) element.classList.add(cls);
+}
+export function applyExperienceTheme(element: HTMLElement, settings = activeExperienceTheme): void {
+  const meta = getUiThemeMeta(settings.themeStyle);
+  const paper = settings.uiAppearance === "warm-paper", slate = settings.uiAppearance === "cool-slate";
+  const values = { ...meta.tokens, ...(paper ? { canvas: "#f7f7f3", surface: "#fffefa", surfaceRaised: "#efefe8", text: "#272e2a", muted: "#62685f", border: "#dedfd6", accent: "#496653" }
+    : slate ? { canvas: "#f5f6f8", surface: "#ffffff", surfaceRaised: "#eceff3", text: "#26323d", muted: "#5b6876", border: "#dce1e7", accent: "#435d76" } : {}) };
+  for (const [name, value] of Object.entries(values)) {
+    if (typeof value !== "string") continue;
+    const property = `--v3-theme-${name}`;
+    if (element.style.getPropertyValue(property) !== value) element.style.setProperty(property, value);
+  }
+  const attributes = { appearance: settings.uiAppearance, density: settings.uiDensity,
+    themeDark: !paper && !slate && meta.family === "dark" ? "true" : "false",
+    themeMaterial: !paper && !slate ? meta.material : "solid" };
+  for (const [name, value] of Object.entries(attributes)) if (element.dataset[name] !== value) element.dataset[name] = value;
+}
+export function refreshExperienceTheme(settings: ExperienceThemeSettings): void {
+  activeExperienceTheme = { ...settings };
+  document.querySelectorAll<HTMLElement>(".lifeos-v3").forEach(element => applyExperienceTheme(element, settings));
+}
 
 interface ThemeMetaSeed {
   label: string;

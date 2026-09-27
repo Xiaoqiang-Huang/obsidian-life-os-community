@@ -821,3 +821,24 @@ function capText(text: string, maxChars: number | null): string {
   if (text.length <= maxChars) return text;
   return `${text.slice(0, Math.max(0, maxChars - 80)).trimEnd()}\n\n[Truncated: source text exceeded ${maxChars} characters]`;
 }
+
+/** Reads exactly one PDF page; empty pages explicitly require OCR, not invented text. */
+export async function readPdfPageText(bytes: Uint8Array, pageNumber: number, signal?: AbortSignal) {
+  if (!Number.isSafeInteger(pageNumber) || pageNumber < 1) throw new Error("PDF page must be a positive integer");
+  if (bytes.byteLength > 50 * 1024 * 1024) throw new Error("PDF exceeds the 50 MB reading limit");
+  if (signal?.aborted) throw new Error("Reading cancelled");
+  const loading = getDocument({ data: bytes, disableFontFace: true, useSystemFonts: true });
+  const abort = () => { void loading.destroy(); };
+  signal?.addEventListener("abort", abort, { once: true });
+  try {
+    const document = await loading.promise;
+    if (pageNumber > document.numPages) throw new Error("PDF page outside document range");
+    const page = await document.getPage(pageNumber);
+    try {
+      const content = await page.getTextContent();
+      if (signal?.aborted) throw new Error("Reading cancelled");
+      const text = reconstructPdfPageText(content.items as PdfTextItemLike[]);
+      return { text, page: pageNumber, totalPages: document.numPages, requiresOcr: !text.trim() };
+    } finally { page.cleanup(); }
+  } finally { signal?.removeEventListener("abort", abort); await loading.destroy(); }
+}

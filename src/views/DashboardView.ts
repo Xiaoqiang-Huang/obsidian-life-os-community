@@ -85,7 +85,21 @@ export class LifeOSDashboardView extends ItemView {
       while (this.renderQueued) {
         this.renderQueued = false;
         const revision = this.renderRequestRevision;
-        await this.renderPass(revision, this.preserveScrollOnNextRender);
+        try {
+          await this.renderPass(revision, this.preserveScrollOnNextRender);
+        } catch (error) {
+          if (revision !== this.renderRequestRevision) continue;
+          console.error("[Life OS] Dashboard initialization failed", error);
+          const container = this.contentEl;
+          container.querySelector(".lifeos-startup-error")?.remove();
+          const panel = container.createDiv({ cls: "lifeos-startup-error" });
+          panel.setAttribute("role", "alert");
+          panel.createEl("h2", { text: "Life OS 暂时无法加载" });
+          panel.createEl("p", { text: error instanceof Error ? error.message : String(error) });
+          panel.createEl("p", { text: "现有资料未清空。请保留恢复记录；索引就绪后可重试，或先打开设置。" });
+          createButton(panel, "重试加载", () => { void this.render(false); });
+          createButton(panel, "打开设置", () => { void this.plugin.activateSettings(); });
+        }
       }
     };
     this.renderPromise = run().finally(() => {
@@ -104,6 +118,10 @@ export class LifeOSDashboardView extends ItemView {
     const tasks = new TaskService(this.app, fs);
     const openTasks = await tasks.loadOpenTasks();
     const date = today();
+    const focusedTasks = openTasks.filter(task => {
+      const lane = task.line.match(/(?:^|\s)lane:(today|open)(?=\s|$)/u)?.[1];
+      return lane === "today" || (!lane && task.line.match(/📅\s*(20\d{2}-\d{2}-\d{2})/u)?.[1] === date);
+    });
     const todayFile = this.app.vault.getAbstractFileByPath(this.plugin.getTodayNotePath(date));
     const examEnabled = this.plugin.settings.enableExamModule === true;
     const checkinFile = examEnabled
@@ -115,10 +133,10 @@ export class LifeOSDashboardView extends ItemView {
       .filter((item) => item.window.start === date && item.window.end === date);
     const weeklySummaryCount = this.countThisWeekDailySummaries(fs);
     const hasTodayNote = todayFile instanceof TFile;
-    const hasCheckin = checkinFile instanceof TFile;
+    const hasCheckin = checkinFile instanceof TFile && Boolean((await this.app.vault.read(checkinFile)).trim());
     const hasReview = summaryFile instanceof TFile || periodReviews.some((item) => item.window.start === date && item.window.end === date);
     const recommendation = this.getTodayRecommendation(
-      openTasks.length,
+      focusedTasks.length,
       hasTodayNote,
       hasCheckin,
       hasReview,
@@ -138,6 +156,7 @@ export class LifeOSDashboardView extends ItemView {
     await renderStableView(container, async (staging) => {
       const main = createLifeOSShell(staging, this.plugin, "dashboard");
       createHeroHeader(main, {
+        app: this.app,
       kicker: "今日行动",
       title: "今天",
       description: "先完成一件重要的小事。",
@@ -164,7 +183,7 @@ export class LifeOSDashboardView extends ItemView {
 
     this.renderRecommendedAction(center, recommendation, hasCheckin, examEnabled);
     await this.renderLlmWikiReminder(center, fs);
-    this.renderTodayTasks(center, tasks, openTasks, hasTodayNote ? todayFile : null);
+    this.renderTodayTasks(center, tasks, focusedTasks, hasTodayNote ? todayFile : null);
 
     const statusGrid = center.createDiv({ cls: "lifeos-status-grid" });
     this.renderDailyCard(statusGrid, hasTodayNote);
@@ -173,7 +192,9 @@ export class LifeOSDashboardView extends ItemView {
 
     this.renderAssistant(right);
     this.renderQuickActions(right, hasTodayNote);
-      this.renderWorkflowGuide(right);
+      const help = right.createEl("details", { cls: "lifeos-dashboard-help" });
+      help.createEl("summary", { text: "如何使用 Life OS" });
+      this.renderWorkflowGuide(help);
     }, {
       preserveScroll,
       isCurrent: () => revision === this.renderRequestRevision
@@ -217,20 +238,28 @@ export class LifeOSDashboardView extends ItemView {
       if (shouldRecommendCheckin) void this.plugin.showCheckinModal();
       else new QuickCaptureModal(this.app, this.plugin).open();
     }, { primary: true, icon: shouldRecommendCheckin ? "graduation-cap" : "pencil-line" });
-    createButton(actions, "打开今日日记", () => void this.plugin.openTodayNote(false), { ghost: true, icon: "book-open" });
-    createButton(actions, "新建任务", () => new NewTaskModal(this.app, this.plugin, () => this.render()).open(), { ghost: true, icon: "plus" });
   }
 
   private async renderLlmWikiReminder(parent: HTMLElement, fs: FileSystemService): Promise<void> {
     if (this.plugin.settings.llmWikiDashboardReminder === false) return;
 
-    const count = await new LlmWikiQueueService(this.app, fs).countPending();
-    if (count <= 0) return;
+    try {
+      const count = await new LlmWikiQueueService(this.app, fs).countPending();
+      if (count <= 0) return;
 
-    const card = createCard(parent, "lifeos-panel lifeos-llmwiki-dashboard-reminder");
-    this.cardTitle(card, `知识库有 ${count} 条内容待整理`, "library");
-    card.createEl("p", { text: "这些是你主动保存到 LLM Wiki 的 Raw 资料或 Draft，详细处理请到 Knowledge 页面完成。" });
-    createButton(card, "打开 Knowledge", () => void this.plugin.activateKnowledge(), { primary: true, icon: "book-open" });
+      const card = createCard(parent, "lifeos-panel lifeos-llmwiki-dashboard-reminder");
+      this.cardTitle(card, `知识库有 ${count} 条内容待整理`, "library");
+      card.createEl("p", { text: "这些是你主动保存到 LLM Wiki 的 Raw 资料或 Draft，详细处理请到 Knowledge 页面完成。" });
+      createButton(card, "打开 Knowledge", () => void this.plugin.activateKnowledge(), { primary: true, icon: "book-open" });
+    } catch {
+      // Unknown is not zero. A queue read failure must not blank Today or
+      // manufacture a pending count from the host's stale metadata index.
+      const card = createCard(parent, "lifeos-panel lifeos-llmwiki-dashboard-reminder is-load-error");
+      card.setAttr("role", "alert");
+      this.cardTitle(card, "整理队列暂时无法读取", "alert-circle");
+      card.createEl("p", { text: "待整理数量暂不可确认，其他今日功能仍可使用。请重试或到知识库查看具体读取错误。" });
+      createButton(card, "重试", () => void this.render(true), { icon: "refresh-cw" });
+    }
   }
 
   private renderTodayTasks(parent: HTMLElement, service: TaskService, openTasks: Awaited<ReturnType<TaskService["loadOpenTasks"]>>, todayFile: TFile | null): void {

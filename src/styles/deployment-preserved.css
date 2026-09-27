@@ -1,0 +1,471 @@
+
+/* Life OS anchored desktop navigation: pane-local, not window-fixed.
+   Keep native narrow-pane/mobile navigation and settings' inner scroller. */
+@media (min-width: 861px) {
+  .workspace-leaf-content > .view-content:has(> .lifeos-workspace:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime)) {
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    padding: 0 !important;
+  }
+  .workspace-leaf-content > .view-content > .lifeos-root.lifeos-workspace:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime),
+  .workspace-leaf-content > .view-content > .lifeos-root.lifeos-workspace:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) > .lifeos-shell {
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+    overflow: hidden !important;
+  }
+  .workspace-leaf-content .lifeos-root.lifeos-workspace:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) > .lifeos-shell {
+    display: grid !important;
+    grid-template-columns: 196px minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 1fr) !important;
+    align-items: stretch !important;
+  }
+  .workspace-leaf-content .lifeos-root.lifeos-workspace:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) > .lifeos-shell > .lifeos-sidebar {
+    position: relative !important;
+    inset: auto !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+    align-self: stretch !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior-y: contain;
+    scrollbar-width: thin;
+    padding: 18px 12px !important;
+    box-sizing: border-box !important;
+  }
+  .workspace-leaf-content .lifeos-root.lifeos-workspace:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) > .lifeos-shell > .lifeos-main {
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+    overflow-y: auto !important;
+    overscroll-behavior-y: contain;
+    box-sizing: border-box !important;
+    scrollbar-gutter: stable;
+  }
+  /* Settings already owns a bounded inner scroll area. */
+  .workspace-leaf-content .lifeos-root.lifeos-workspace > .lifeos-shell > .lifeos-main.lifeos-settings-main {
+    overflow: hidden !important;
+  }
+  .workspace-leaf-content .lifeos-workspace:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-sidebar .lifeos-brand {
+    padding: 4px 8px 14px !important;
+    margin: 0 0 8px !important;
+    flex-shrink: 0;
+  }
+  .workspace-leaf-content .lifeos-workspace:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-sidebar .lifeos-nav-item {
+    min-height: 36px !important;
+    padding: 8px 10px !important;
+    font-size: 13px !important;
+    line-height: 20px !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+  }
+  .workspace-leaf-content .lifeos-workspace:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-sidebar :is(.lifeos-sidebar-main, .lifeos-sidebar-footer) {
+    flex: 0 0 auto !important;
+  }
+}
+
+/* Knowledge list: natural header flow and compact file rows. */
+.workspace-leaf-content .lifeos-root .lifeos-main.lifeos-knowledge-main {
+  display: block !important;
+}
+.workspace-leaf-content .lifeos-root .lifeos-knowledge-main > .lifeos-hero {
+  position: relative !important;
+  inset: auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  flex-shrink: 0 !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: flex-start !important;
+  gap: 12px 24px !important;
+  padding: 0 0 18px !important;
+  margin: 0 0 20px !important;
+  overflow: visible !important;
+}
+.workspace-leaf-content .lifeos-root .lifeos-knowledge-main > .lifeos-hero > .lifeos-hero-copy {
+  flex: 1 1 340px !important;
+  min-width: 0 !important;
+}
+.workspace-leaf-content .lifeos-root .lifeos-knowledge-main > .lifeos-hero :is(.lifeos-hero-side,.lifeos-hero-actions) {
+  position: static !important;
+  transform: none !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+  align-self: flex-start !important;
+  margin: 0 !important;
+  max-width: 100% !important;
+}
+.workspace-leaf-content .lifeos-root .lifeos-knowledge-main > .lifeos-knowledge-workspace {
+  position: relative !important;
+  margin-top: 0 !important;
+  height: auto !important;
+  min-height: 0 !important;
+  align-items: start !important;
+}
+.workspace-leaf-content .lifeos-root .lifeos-knowledge-main .lifeos-knowledge-doc-item {
+  display: grid !important;
+  grid-template-columns: minmax(0,1fr) auto !important;
+  align-items: center !important;
+  gap: 8px 16px !important;
+  padding: 10px 12px !important;
+  min-height: 52px !important;
+  height: auto !important;
+  max-height: none !important;
+  text-align: left !important;
+  border-radius: 0 !important;
+  box-sizing: border-box !important;
+}
+.workspace-leaf-content .lifeos-root .lifeos-knowledge-main .lifeos-knowledge-doc-copy { min-width: 0 !important; }
+.workspace-leaf-content .lifeos-root .lifeos-knowledge-main .lifeos-knowledge-doc-title {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  flex-wrap: nowrap !important;
+  gap: 8px !important;
+  min-width: 0 !important;
+  font-size: 14px !important;
+  line-height: 22px !important;
+}
+.workspace-leaf-content .lifeos-root .lifeos-knowledge-main .lifeos-knowledge-doc-title > span:first-child {
+  min-width: 0 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+.workspace-leaf-content .lifeos-root .lifeos-knowledge-main .lifeos-knowledge-doc-title > .lifeos-badge { flex-shrink: 0 !important; }
+.workspace-leaf-content .lifeos-root .lifeos-knowledge-main :is(.lifeos-knowledge-doc-excerpt,.lifeos-knowledge-doc-meta) { display: none !important; }
+.workspace-leaf-content .lifeos-root .lifeos-knowledge-main .lifeos-knowledge-doc-item-actions {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 6px !important;
+  width: auto !important;
+  margin: 0 !important;
+  justify-content: flex-end !important;
+}
+.workspace-leaf-content .lifeos-root .lifeos-knowledge-main .lifeos-knowledge-doc-item-actions button {
+  min-height: 30px !important;
+  height: auto !important;
+  padding: 4px 8px !important;
+  font-size: 12px !important;
+  line-height: 20px !important;
+}
+@media (max-width: 700px) {
+  .workspace-leaf-content .lifeos-root .lifeos-knowledge-main .lifeos-knowledge-doc-item {
+    grid-template-columns: minmax(0,1fr) !important;
+  }
+  .workspace-leaf-content .lifeos-root .lifeos-knowledge-main .lifeos-knowledge-doc-item-actions { justify-content: flex-start !important; }
+}
+@media (pointer: coarse) {
+  .workspace-leaf-content .lifeos-root .lifeos-knowledge-main .lifeos-knowledge-doc-item-actions button { min-height: 44px !important; }
+}
+
+/* Knowledge responsive density: use pane/list width, not screen width. */
+.workspace-leaf-content .lifeos-root .lifeos-main.lifeos-knowledge-main {
+  container-type: inline-size;
+  container-name: lifeos-knowledge-pane;
+}
+.workspace-leaf-content .lifeos-root .lifeos-knowledge-main .lifeos-knowledge-doc-manager {
+  container-type: inline-size;
+  container-name: lifeos-document-list;
+  min-width: 0;
+}
+@container lifeos-knowledge-pane (max-width: 1050px) {
+  .workspace-leaf-content .lifeos-root .lifeos-main.lifeos-knowledge-main .lifeos-knowledge-workspace {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .workspace-leaf-content .lifeos-root .lifeos-knowledge-main .lifeos-knowledge-workspace > * {
+    grid-column: 1 !important;
+    grid-row: auto !important;
+    min-width: 0 !important;
+  }
+  .workspace-leaf-content .lifeos-root .lifeos-knowledge-main .lifeos-knowledge-side-stack {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)) !important;
+  }
+}
+@container lifeos-document-list (max-width: 760px) {
+  .workspace-leaf-content .lifeos-root .lifeos-knowledge-main .lifeos-knowledge-doc-item {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 6px !important;
+    padding: 10px 12px !important;
+  }
+  .workspace-leaf-content .lifeos-root .lifeos-knowledge-main .lifeos-knowledge-doc-title {
+    display: block !important;
+  }
+  .workspace-leaf-content .lifeos-root .lifeos-knowledge-main .lifeos-knowledge-doc-title > span:first-child {
+    display: -webkit-box !important;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    line-height: 21px !important;
+    max-height: 42px;
+  }
+  .workspace-leaf-content .lifeos-root .lifeos-knowledge-main .lifeos-knowledge-doc-title > .lifeos-badge {
+    display: none !important;
+  }
+  .workspace-leaf-content .lifeos-root .lifeos-knowledge-main .lifeos-knowledge-doc-item-actions {
+    justify-content: flex-start !important;
+    gap: 8px !important;
+  }
+}
+
+/* Bounded workspace content must scroll, never compress content sections. */
+.workspace-leaf-content .lifeos-root .lifeos-main:not(.lifeos-chat-main-host):not(.lifeos-settings-main) > * {
+  flex-shrink: 0 !important;
+}
+.workspace-leaf-content .lifeos-root .lifeos-pro-compare-view :is(.lifeos-plan-card,.lifeos-pro-policy-note,.lifeos-module-compare-card) {
+  height: auto !important;
+  max-height: none !important;
+  min-height: min-content !important;
+}
+.workspace-leaf-content .lifeos-root .lifeos-pro-compare-view .lifeos-plan-card > * {
+  flex-shrink: 0 !important;
+}
+.workspace-leaf-content .lifeos-root .lifeos-pro-compare-view :is(.lifeos-module-compare-header,.lifeos-module-compare-row) {
+  height: auto !important;
+  min-height: min-content !important;
+  max-height: none !important;
+  flex-shrink: 0 !important;
+  align-items: start !important;
+}
+.workspace-leaf-content .lifeos-root .lifeos-pro-compare-view :is(.lifeos-module-compare-header,.lifeos-module-compare-row) > * {
+  height: auto !important;
+  min-height: 0 !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  line-height: 1.6 !important;
+}
+/* Installed settings builds may use outer scrolling rather than inner panels. */
+.workspace-leaf-content .lifeos-root .lifeos-main.lifeos-settings-main > .lifeos-settings-page {
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overscroll-behavior-y: contain;
+}
+
+/* Night theme: explicit control surfaces and scoped document palette. */
+body.lifeos-theme-codex-dark :is(.lifeos-root,.lifeos-settings,.lifeos-file-leaf) {
+  --lifeos-control-border: #647084;
+  --lifeos-primary: #285fc1;
+  --lifeos-primary-hover: #3473df;
+  --background-modifier-form-field: #1b2028;
+  --background-modifier-form-field-highlighted: #252e3b;
+  --text-normal: #e6eaf0;
+  --text-muted: #abb5c4;
+  --text-faint: #94a0b2;
+  --h1-color: #e6eaf0;
+  --h2-color: #e6eaf0;
+  --h3-color: #e6eaf0;
+  color-scheme: dark;
+}
+body.lifeos-theme-codex-dark :is(.lifeos-root,.lifeos-settings) :is(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]),textarea,select) {
+  background: #1b2028 !important;
+  color: #e6eaf0 !important;
+  border: 1px solid #647084 !important;
+}
+body.lifeos-theme-codex-dark :is(.lifeos-root,.lifeos-settings) :is(input,textarea)::placeholder { color: #a6b1c2 !important; }
+body.lifeos-theme-codex-dark :is(.lifeos-root,.lifeos-settings) :is(h1,h2,h3,h4,.setting-item-name) { color: #e6eaf0 !important; }
+body.lifeos-theme-codex-dark :is(.lifeos-root,.lifeos-settings) button:where(:not(.lifeos-nav-item):not(.lifeos-contrib-day):not(.lifeos-theme-swatch)) {
+  background: #202630 !important;
+  color: #e6eaf0 !important;
+  border: 1px solid #647084 !important;
+  box-shadow: none !important;
+}
+body.lifeos-theme-codex-dark :is(.lifeos-root,.lifeos-settings) button:is(.lifeos-button-primary,.mod-cta,.is-active,[aria-pressed=true],[aria-selected=true]) {
+  background: #285fc1 !important;
+  color: #ffffff !important;
+  border-color: #79a7ff !important;
+}
+body.lifeos-theme-codex-dark :is(.lifeos-root,.lifeos-settings) button:not(:disabled):hover { border-color: #a3bcdf !important; }
+body.lifeos-theme-codex-dark :is(.lifeos-root,.lifeos-settings) :is(button,input,textarea,select):focus-visible { outline: 2px solid #91b9ff !important; outline-offset: 2px; }
+body.lifeos-theme-codex-dark :is(.lifeos-root,.lifeos-settings) button:disabled { opacity: .5; }
+body.lifeos-theme-codex-dark .lifeos-file-leaf {
+  --background-primary: #171b22;
+  --background-primary-alt: #202630;
+  --background-secondary: #11151b;
+  --background-secondary-alt: #202630;
+  --background-modifier-border: #414b5c;
+  --code-background: #252d39;
+  --code-normal: #dce6f5;
+  --text-accent: #91b9ff;
+  --link-color: #91b9ff;
+  --link-color-hover: #b5ceff;
+  --metadata-label-text-color: #abb5c4;
+  --metadata-input-text-color: #e6eaf0;
+}
+body.lifeos-theme-codex-dark .lifeos-file-leaf .view-content { background: #11151b !important; color: #e6eaf0 !important; }
+body.lifeos-theme-codex-dark .lifeos-file-leaf .view-content::before,
+body.lifeos-theme-codex-dark .lifeos-file-leaf .view-content::after { display: none !important; }
+body.lifeos-theme-codex-dark .lifeos-file-leaf :is(.markdown-preview-view,.markdown-source-view.mod-cm6 .cm-scroller) {
+  background: #171b22 !important;
+  color: #e6eaf0 !important;
+  border-color: #414b5c !important;
+  box-shadow: 0 12px 32px rgba(0,0,0,.24) !important;
+}
+body.lifeos-theme-codex-dark .lifeos-file-leaf :is(.inline-title,h1,h2,h3,h4,h5,h6,.cm-header) { color: #e6eaf0 !important; }
+/* Reader layers otherwise inherit the host's light palette through legacy selectors. */
+body.lifeos-theme-codex-dark .workspace-leaf-content.lifeos-file-leaf.pls-life-file-leaf {
+  --lifeos-reader-paper: #171b22 !important;
+  --lifeos-reader-ink: #e6eaf0 !important;
+  --lifeos-reader-line: #414b5c !important;
+  --lifeos-native-dark-doc-text: #e6eaf0 !important;
+}
+body.lifeos-theme-codex-dark .workspace-leaf-content.lifeos-file-leaf.pls-life-file-leaf .view-content :is(.markdown-reading-view,.markdown-source-view,.markdown-preview-view,.markdown-preview-sizer,.markdown-rendered,.cm-editor,.cm-scroller,.cm-contentContainer,.cm-content,.cm-gutters) {
+  background: #171b22 !important;
+  color: #e6eaf0 !important;
+}
+body.lifeos-theme-codex-dark .workspace-leaf-content.lifeos-file-leaf.pls-life-file-leaf .view-content :is(.inline-title,h1,h2,h3,h4,h5,h6,.cm-header,.metadata-property-key,.metadata-property-value,.metadata-container) { color: #e6eaf0 !important; }
+
+/* Night affordances: selected controls must carry their children with them. */
+body.lifeos-theme-codex-dark :is(.lifeos-root,.lifeos-settings) button:is(.lifeos-button-primary,.mod-cta,.is-active,[aria-pressed=true],[aria-selected=true]) :is(span,small,strong,svg,.lifeos-tab-count) {
+  color: #ffffff !important;
+}
+body.lifeos-theme-codex-dark .lifeos-root :is(.lifeos-contrib-months,.lifeos-contrib-weekdays) {
+  color: #b8c5d6 !important;
+  font-size: 12px;
+  font-weight: 500;
+}
+body.lifeos-theme-codex-dark .lifeos-root button.lifeos-contrib-day:focus-visible {
+  outline: 2px solid #b5ceff !important;
+  outline-offset: 2px;
+}
+
+/* Night editor caret: cover native carets and CodeMirror's drawn cursor. */
+body.lifeos-theme-codex-dark .workspace-leaf-content.lifeos-file-leaf {
+  --caret-color: #b5ceff;
+}
+body.lifeos-theme-codex-dark .workspace-leaf-content.lifeos-file-leaf .view-content :is(.cm-content,.cm-line,[contenteditable=true],input,textarea),
+body.lifeos-theme-codex-dark :is(.lifeos-root,.lifeos-settings) :is(input,textarea,[contenteditable=true]) {
+  caret-color: #b5ceff !important;
+}
+body.lifeos-theme-codex-dark .workspace-leaf-content.lifeos-file-leaf .cm-cursor {
+  border-left-color: #b5ceff !important;
+  border-left-width: 2px !important;
+}
+
+/* Calendar has an intermediate host; apply the shared desktop viewport to it. */
+.workspace-leaf-content[data-type="personal-life-system-calendar"] > .view-content:has(.lifeos-workspace:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime)) {
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+.workspace-leaf-content[data-type="personal-life-system-calendar"] .lifeos-calendar-host:has(.lifeos-workspace:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime)),
+.workspace-leaf-content[data-type="personal-life-system-calendar"] .lifeos-calendar-host > .lifeos-workspace:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime),
+.workspace-leaf-content[data-type="personal-life-system-calendar"] .lifeos-calendar-host > .lifeos-workspace:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) > .lifeos-shell {
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+}
+
+/* Shared dark-family accessibility corrections; preserve each theme canvas. */
+/* Night theme: explicit control surfaces and scoped document palette. */
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) :is(.lifeos-root,.lifeos-settings,.lifeos-file-leaf) {
+  --lifeos-control-border: #647084;
+  --lifeos-primary: #285fc1;
+  --lifeos-primary-hover: #3473df;
+  --background-modifier-form-field: #1b2028;
+  --background-modifier-form-field-highlighted: #252e3b;
+  --text-normal: #e6eaf0;
+  --text-muted: #abb5c4;
+  --text-faint: #94a0b2;
+  --h1-color: #e6eaf0;
+  --h2-color: #e6eaf0;
+  --h3-color: #e6eaf0;
+  color-scheme: dark;
+}
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) :is(.lifeos-root,.lifeos-settings) :is(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]),textarea,select) {
+  background: #1b2028 !important;
+  color: #e6eaf0 !important;
+  border: 1px solid #647084 !important;
+}
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) :is(.lifeos-root,.lifeos-settings) :is(input,textarea)::placeholder { color: #a6b1c2 !important; }
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) :is(.lifeos-root,.lifeos-settings) :is(h1,h2,h3,h4,.setting-item-name) { color: #e6eaf0 !important; }
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) :is(.lifeos-root,.lifeos-settings) button:where(:not(.lifeos-nav-item):not(.lifeos-contrib-day):not(.lifeos-theme-swatch)) {
+  background: #202630 !important;
+  color: #e6eaf0 !important;
+  border: 1px solid #647084 !important;
+  box-shadow: none !important;
+}
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) :is(.lifeos-root,.lifeos-settings) button:is(.lifeos-button-primary,.mod-cta,.is-active,[aria-pressed=true],[aria-selected=true]) {
+  background: #285fc1 !important;
+  color: #ffffff !important;
+  border-color: #79a7ff !important;
+}
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) :is(.lifeos-root,.lifeos-settings) button:not(:disabled):hover { border-color: #a3bcdf !important; }
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) :is(.lifeos-root,.lifeos-settings) :is(button,input,textarea,select):focus-visible { outline: 2px solid #91b9ff !important; outline-offset: 2px; }
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) :is(.lifeos-root,.lifeos-settings) button:disabled { opacity: .5; }
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) .lifeos-file-leaf {
+  --background-primary: #171b22;
+  --background-primary-alt: #202630;
+  --background-secondary: #11151b;
+  --background-secondary-alt: #202630;
+  --background-modifier-border: #414b5c;
+  --code-background: #252d39;
+  --code-normal: #dce6f5;
+  --text-accent: #91b9ff;
+  --link-color: #91b9ff;
+  --link-color-hover: #b5ceff;
+  --metadata-label-text-color: #abb5c4;
+  --metadata-input-text-color: #e6eaf0;
+}
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) .lifeos-file-leaf .view-content { background: #11151b !important; color: #e6eaf0 !important; }
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) .lifeos-file-leaf .view-content::before,
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) .lifeos-file-leaf .view-content::after { display: none !important; }
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) .lifeos-file-leaf :is(.markdown-preview-view,.markdown-source-view.mod-cm6 .cm-scroller) {
+  background: #171b22 !important;
+  color: #e6eaf0 !important;
+  border-color: #414b5c !important;
+  box-shadow: 0 12px 32px rgba(0,0,0,.24) !important;
+}
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) .lifeos-file-leaf :is(.inline-title,h1,h2,h3,h4,h5,h6,.cm-header) { color: #e6eaf0 !important; }
+/* Reader layers otherwise inherit the host's light palette through legacy selectors. */
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) .workspace-leaf-content.lifeos-file-leaf.pls-life-file-leaf {
+  --lifeos-reader-paper: #171b22 !important;
+  --lifeos-reader-ink: #e6eaf0 !important;
+  --lifeos-reader-line: #414b5c !important;
+  --lifeos-native-dark-doc-text: #e6eaf0 !important;
+}
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) .workspace-leaf-content.lifeos-file-leaf.pls-life-file-leaf .view-content :is(.markdown-reading-view,.markdown-source-view,.markdown-preview-view,.markdown-preview-sizer,.markdown-rendered,.cm-editor,.cm-scroller,.cm-contentContainer,.cm-content,.cm-gutters) {
+  background: #171b22 !important;
+  color: #e6eaf0 !important;
+}
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) .workspace-leaf-content.lifeos-file-leaf.pls-life-file-leaf .view-content :is(.inline-title,h1,h2,h3,h4,h5,h6,.cm-header,.metadata-property-key,.metadata-property-value,.metadata-container) { color: #e6eaf0 !important; }
+
+/* Night affordances: selected controls must carry their children with them. */
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) :is(.lifeos-root,.lifeos-settings) button:is(.lifeos-button-primary,.mod-cta,.is-active,[aria-pressed=true],[aria-selected=true]) :is(span,small,strong,svg,.lifeos-tab-count) {
+  color: #ffffff !important;
+}
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) .lifeos-root :is(.lifeos-contrib-months,.lifeos-contrib-weekdays) {
+  color: #b8c5d6 !important;
+  font-size: 12px;
+  font-weight: 500;
+}
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) .lifeos-root button.lifeos-contrib-day:focus-visible {
+  outline: 2px solid #b5ceff !important;
+  outline-offset: 2px;
+}
+
+/* Night editor caret: cover native carets and CodeMirror's drawn cursor. */
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) .workspace-leaf-content.lifeos-file-leaf {
+  --caret-color: #b5ceff;
+}
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) .workspace-leaf-content.lifeos-file-leaf .view-content :is(.cm-content,.cm-line,[contenteditable=true],input,textarea),
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) :is(.lifeos-root,.lifeos-settings) :is(input,textarea,[contenteditable=true]) {
+  caret-color: #b5ceff !important;
+}
+body:is(.lifeos-theme-night-owl,.lifeos-theme-midnight-terminal,.lifeos-theme-anime-moonlit,.lifeos-theme-academic-ink) .workspace-leaf-content.lifeos-file-leaf .cm-cursor {
+  border-left-color: #b5ceff !important;
+  border-left-width: 2px !important;
+}
+/* Moonlit module names need a lighter violet than the filled accent. */
+body.lifeos-theme-anime-moonlit .lifeos-root .lifeos-module-cell:first-child {
+  color: #c4b5fd !important;
+}

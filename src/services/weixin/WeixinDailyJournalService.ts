@@ -2,6 +2,7 @@ import { App, TFile } from "obsidian";
 import { type AiClient } from "../../ai";
 import type { PersonalLifeSystemSettings } from "../../settings";
 import { formatDate } from "../../utils/dates";
+import { normalizeGeneratedNoteMarkdown } from "../../utils/generated-note-markdown";
 import { ensureFile, readFile } from "../../utils/vault";
 import { redactWorkspaceSecrets } from "../ai-workspace/logic";
 import { DailyNoteService } from "../DailyNoteService";
@@ -115,7 +116,7 @@ export function upsertWeixinDailyDigestBlock(
   digest: string,
   meta: { date: string; sourceHash: string; generatedAt: string }
 ): string {
-  const body = digest.trim().replace(/^##\s+/gmu, "### ");
+  const body = normalizeGeneratedNoteMarkdown(digest).trim();
   if (!body) return markdown;
   const block = [
     DIGEST_START,
@@ -229,7 +230,7 @@ export class WeixinDailyJournalService {
     if (day?.sourceHash === facts.sourceHash && day.digest.trim()) {
       return {
         date,
-        draft: day.digest,
+        draft: normalizeGeneratedNoteMarkdown(day.digest),
         sourceHash: day.sourceHash,
         generatedAt: day.generatedAt,
         savedPath: day.savedPath,
@@ -263,6 +264,7 @@ export class WeixinDailyJournalService {
   async saveDigest(digest: WeixinDailyDigest): Promise<string> {
     const currentHash = await this.currentSourceHash(digest.date);
     if (currentHash !== digest.sourceHash) throw new Error("日记来源在生成后发生变化，请重新生成日终整理。");
+    digest.draft = normalizeGeneratedNoteMarkdown(digest.draft);
     const daily = new DailyNoteService(this.app, this.fs, this.settings);
     const file = await daily.ensureTodayNote(digest.date);
     await this.processFile(file, (current) => upsertWeixinDailyDigestBlock(current, digest.draft, {

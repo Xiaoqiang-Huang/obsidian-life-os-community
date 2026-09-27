@@ -1,3 +1,6 @@
+import { consumeAgentRequest, agentBudgetAborted, combineAgentSignals, type AgentRequestBudget } from "./services/agent/AgentRequestBudget";
+import { extractNativeCalls, unsupportedNativeTools, type AgentNativeTool, type AgentNativeCall } from "./services/agent/AgentNativeTools";
+import { resolveVisionSettings } from "./settings";
 import { Notice, Platform, requestUrl } from "obsidian";
 import { PersonalLifeSystemSettings, getExamAssistantPrompt, getExamProfileLabel, normalizeAiApiKeyInput, validateAiProviderConfig, type AiReasoningEffort } from "./settings";
 import { stripCodeFences } from "./utils";
@@ -23,6 +26,8 @@ export interface AiImageUrlContentPart {
 export type AiMessageContent = string | Array<AiTextContentPart | AiImageUrlContentPart>;
 
 export interface AiRequest {
+  requestBudget?: AgentRequestBudget;
+  tools?: AgentNativeTool[];
   messages: AiMessage[];
   temperature?: number;
   responseFormat?: "text" | "json";
@@ -39,6 +44,8 @@ export interface AiUsage {
 }
 
 export interface AiResponse {
+  terminal?: boolean;
+  toolCalls?: AgentNativeCall[];
   ok: boolean;
   text?: string;
   error?: string;
@@ -641,6 +648,10 @@ function shouldRetryWithoutReasoningEffort(body: Record<string, unknown>, error:
 function getBodyAttempts(body: Record<string, unknown>, error?: string): Record<string, unknown>[] {
   if (!error) return [];
   const attempts: Record<string, unknown>[] = [];
+  if (body.tools && unsupportedNativeTools(error)) {
+    const { tools, tool_choice, ...fallback } = body;
+    attempts.push(fallback);
+  }
   const retryTemperature = shouldRetryWithoutTemperature(body, error);
   const retryReasoning = shouldRetryWithoutReasoningEffort(body, error);
   if (retryTemperature) attempts.push(withoutTemperature(body));
@@ -661,7 +672,8 @@ function buildOpenAiBaseBody(
 ): Record<string, unknown> {
   return applyReasoningEffort(applyTemperature({
     model: getRequestModel(settings, request),
-    messages: request.messages
+    messages: request.messages,
+    ...(request.tools?.length ? { tools: request.tools.map(tool => ({ type: "function", function: tool })), tool_choice: "auto" } : {})
   }, settings, request), settings, request);
 }
 
@@ -672,6 +684,7 @@ function buildAnthropicBaseBody(
   return applyTemperature({
     model: getRequestModel(settings, request),
     max_tokens: 1800,
+    ...(request.tools?.length ? { tools: request.tools.map(tool => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })) } : {}),
     system: extractTextFromMessageContent(request.messages.find((message) => message.role === "system")?.content),
     messages: request.messages
       .filter((message) => message.role !== "system")
@@ -695,7 +708,7 @@ export function buildOpenAiBodies(
 ): Record<string, unknown>[] {
   const baseBody = buildOpenAiBaseBody(settings, request);
 
-  if (request.responseFormat !== "json") {
+  if (request.responseFormat !== "json" || request.tools?.length) {
     return [baseBody];
   }
 
@@ -724,6 +737,7 @@ async function tryCandidates(
       for (let index = 0; index < attempts.length; index++) {
         const attemptBody = attempts[index];
       try {
+        consumeAgentRequest(request.requestBudget, attemptBody);
         const response = await requestUrl({
           url,
           method: "POST",
@@ -731,13 +745,19 @@ async function tryCandidates(
           body: JSON.stringify(attemptBody)
         });
 
+        if (agentBudgetAborted(request.requestBudget)) return { ok: false, error: "执行已取消" };
         const apiError = extractApiErrorMessage(response.json);
+        if ([401, 403, 429].includes(response.status) || /(?:unauthori[sz]ed|invalid.?api.?key|incorrect.?api.?key|rate.?limit|insufficient.?quota)/iu.test(apiError || "")) {
+          return { ok: false, error: apiError || `HTTP ${response.status}`, terminal: true };
+        }
         if (apiError) {
           lastError = apiError;
           attempts.push(...getBodyAttempts(attemptBody, apiError));
           continue;
         }
 
+        const toolCalls = request.tools?.length ? extractNativeCalls(response.json) : [];
+        if (toolCalls.length) return { ok: true, text: extractText(response.json).trim(), toolCalls, usage: extractAiUsage(response.json) };
         const text = extractText(response.json).trim();
         if (!text) {
           lastError = "模型响应为空。";
@@ -747,6 +767,8 @@ async function tryCandidates(
         return { ok: true, text: stripCodeFences(text), usage: extractAiUsage(response.json) };
       } catch (error) {
         lastError = extractRequestErrorMessage(error);
+        if (/(?:\b401\b|\b403\b|\b429\b|unauthori[sz]ed|invalid.?api.?key|incorrect.?api.?key|rate.?limit|insufficient.?quota)/iu.test(lastError)) return { ok: false, error: lastError, terminal: true };
+        if (request.requestBudget && (agentBudgetAborted(request.requestBudget) || request.requestBudget.used >= request.requestBudget.limit)) return { ok: false, error: lastError };
         attempts.push(...getBodyAttempts(attemptBody, lastError));
       }
       }
@@ -770,8 +792,17 @@ export class AiClient {
   }
 
   async complete(request: AiRequest): Promise<AiResponse> {
-    const settings = this.getSettings();
-    if (!this.isConfigured()) {
+    const baseSettings = this.getSettings();
+    const hasImages = request.messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === 'image_url'));
+    const settings = hasImages ? resolveVisionSettings(baseSettings) : baseSettings;
+    if (!settings) {
+      const error = '图片识别未就绪：请确认主模型支持图片，或配置独立视觉模型 API，并开启图片视觉分析。';
+
+      return { ok: false, error };
+    }
+    if (hasImages) request = { ...request, model: settings.aiModel };
+
+    if (validateAiProviderConfig(settings)) {
       return {
         ok: false,
         error: "AI 尚未配置。请在个人人生系统设置中填写 API 信息。"
@@ -779,7 +810,7 @@ export class AiClient {
     }
 
     try {
-      if (settings.checkModelBeforeRequest && !request.skipModelCheck) {
+      if (settings.checkModelBeforeRequest && !request.skipModelCheck && !request.requestBudget) {
         const modelWarning = await this.getModelWarning(settings);
         if (modelWarning) {
           new Notice(modelWarning);
@@ -787,7 +818,7 @@ export class AiClient {
       }
       if (settings.aiProvider === "auto") {
         const openai = await this.completeOpenAiCompatible(settings, request);
-        if (openai.ok) {
+        if (openai.ok || openai.terminal) {
           return finalizeTextResponse(request, openai);
         }
         const anthropic = await this.completeAnthropic(settings, request);
@@ -812,13 +843,39 @@ export class AiClient {
     }
   }
 
-  async completeStream(
+  async completeStream(request: AiRequest, callbacks: AiStreamCallbacks, signal?: AbortSignal): Promise<AiResponse> {
+    const combined = combineAgentSignals(request.requestBudget, signal);
+    let notified = false;
+    const onAbort = () => { if (!notified) { notified = true; callbacks.onAbort?.(); } };
+    try {
+      if (combined.signal.aborted) { onAbort(); return {ok:false,error:"已取消"}; }
+      const result = await this.completeStreamInternal(request, {
+        ...callbacks,
+        onToken: token => { if (!combined.signal.aborted) callbacks.onToken?.(token); },
+        onDone: text => { if (!combined.signal.aborted) callbacks.onDone?.(text); },
+        onAbort
+      }, combined.signal);
+      if (combined.signal.aborted) { onAbort(); return {ok:false,error:"已取消"}; }
+      return result;
+    } finally { combined.dispose(); }
+  }
+
+  private async completeStreamInternal(
     request: AiRequest,
     callbacks: AiStreamCallbacks,
     signal?: AbortSignal
   ): Promise<AiResponse> {
-    const settings = this.getSettings();
-    if (!this.isConfigured()) {
+    const baseSettings = this.getSettings();
+    const hasImages = request.messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === 'image_url'));
+    const settings = hasImages ? resolveVisionSettings(baseSettings) : baseSettings;
+    if (!settings) {
+      const error = '图片识别未就绪：请确认主模型支持图片，或配置独立视觉模型 API，并开启图片视觉分析。';
+      callbacks.onError?.(error);
+      return { ok: false, error };
+    }
+    if (hasImages) request = { ...request, model: settings.aiModel };
+
+    if (validateAiProviderConfig(settings)) {
       const err = "AI 尚未配置。请在个人人生系统设置中填写 API 信息。";
       callbacks.onError?.(err);
       return { ok: false, error: err };
@@ -829,7 +886,7 @@ export class AiClient {
     }
 
     try {
-      if (settings.checkModelBeforeRequest && !request.skipModelCheck) {
+      if (settings.checkModelBeforeRequest && !request.skipModelCheck && !request.requestBudget) {
         const modelWarning = await this.getModelWarning(settings);
         if (modelWarning) {
           new Notice(modelWarning);
@@ -841,6 +898,7 @@ export class AiClient {
       if (settings.aiProvider === "auto") {
         const openai = await this.streamWithMode(settings, request, callbacks, "openai", signal);
         if (openai.ok) return openai;
+        if (openai.terminal) { callbacks.onError?.(openai.error || "AI 请求失败"); return openai; }
         const anthropic = await this.streamWithMode(settings, request, callbacks, "anthropic", signal);
         if (anthropic.ok) return anthropic;
         const err = openai.error || anthropic.error || "AI 请求失败。";
@@ -951,6 +1009,7 @@ export class AiClient {
         for (let index = 0; index < attempts.length; index++) {
           const attemptBody = attempts[index];
       try {
+        consumeAgentRequest(request.requestBudget, attemptBody);
         const response = await fetch(url, {
           method: "POST",
           headers,
@@ -967,6 +1026,7 @@ export class AiClient {
             if (apiErr) errMsg = apiErr;
           } catch { /* ignore parse error */ }
           lastError = errMsg;
+          if ([401, 403, 429].includes(response.status)) return { ok: false, error: errMsg, terminal: true };
           attempts.push(...getBodyAttempts(attemptBody, errMsg));
           continue;
         }
@@ -1061,6 +1121,8 @@ export class AiClient {
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") throw error;
         lastError = extractRequestErrorMessage(error);
+        if (/(?:\b401\b|\b403\b|\b429\b|unauthori[sz]ed|invalid.?api.?key|incorrect.?api.?key|rate.?limit|insufficient.?quota)/iu.test(lastError)) return { ok: false, error: lastError, terminal: true };
+        if (request.requestBudget && (agentBudgetAborted(request.requestBudget) || request.requestBudget.used >= request.requestBudget.limit)) return { ok: false, error: lastError };
         attempts.push(...getBodyAttempts(attemptBody, lastError));
         continue;
       }

@@ -1,4 +1,5 @@
-import { Component, Modal, Notice, TFile, type App } from "obsidian";
+import { LifeOSModal as Modal } from "../components/LifeOSModal";
+import { Component, Notice, TFile, type App } from "obsidian";
 import type { IPlugin } from "../plugin-api";
 import { formatDate } from "../utils";
 import { listExamFiles, parseFrontmatter } from "./data";

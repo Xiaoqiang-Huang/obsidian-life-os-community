@@ -44,6 +44,7 @@ const GENERIC_ADVICE = /(?:继续努力|保持节奏|持续优化|加强学习|�
 export class ReviewQualityService {
   sectionsFor(kind: ReviewEvidenceKind, window: ReviewEvidenceWindow): string[] {
     const effective = kind === "custom" ? this.kindForWindow(window) : kind;
+    if (kind === "custom" && localDate(window.end).getTime() - localDate(window.start).getTime() > 6 * 86400000) return ["期间成果与事实", "问题与观察", "后续行动与验收"];
     if (effective === "daily") return [...DAILY_SECTIONS];
     if (effective === "weekly") return [...WEEKLY_SECTIONS];
     return [...MONTHLY_SECTIONS];
@@ -53,9 +54,10 @@ export class ReviewQualityService {
     markdown: string,
     kind: ReviewEvidenceKind,
     window: ReviewEvidenceWindow,
-    evidence: ReviewEvidenceItem[]
+    evidence: ReviewEvidenceItem[],
+    flexibleStructure = false
   ): ReviewQualityReport {
-    const expected = this.sectionsFor(kind, window);
+    const expected = flexibleStructure ? [] : this.sectionsFor(kind, window);
     const headingCounts = new Map<string, number>();
     for (const match of markdown.matchAll(/^##\s+(.+?)\s*$/gmu)) {
       const heading = match[1].trim();
@@ -65,6 +67,7 @@ export class ReviewQualityService {
     const duplicateSections = expected.filter((section) => (headingCounts.get(section) ?? 0) > 1);
     const errors: string[] = [];
     const warnings: string[] = [];
+    if (!markdown.trim()) errors.push("草稿为空，请重新生成。");
     if (missingSections.length > 0) errors.push(`缺少章节：${missingSections.join("、")}`);
     if (duplicateSections.length > 0) errors.push(`章节重复：${duplicateSections.join("、")}`);
 
@@ -75,8 +78,10 @@ export class ReviewQualityService {
     const uncitedFacts: string[] = [];
     const unknownCitations: string[] = [];
     let citedCount = 0;
-    for (const section of expected.slice(0, -1)) {
-      const block = sectionBlocks.get(section) ?? "";
+    const factBlocks = flexibleStructure
+      ? [markdown.split(/\r?\n/u).filter(line => !/^\s*#{1,6}\s/u.test(line) && !/^\s*-\s*\[[ xX]\]/u.test(line)).join("\n")]
+      : expected.slice(0, -1).map(section => sectionBlocks.get(section) ?? "");
+    for (const block of factBlocks) {
       for (const unit of factualLines(block)) {
         if (/资料不足/u.test(unit)) continue;
         factualUnits.push(unit);
@@ -94,7 +99,9 @@ export class ReviewQualityService {
     if (uncitedFacts.length > 0) errors.push(`事实性内容缺少来源：${uncitedFacts.slice(0, 3).join("；")}`);
     if (unknownCitations.length > 0) errors.push(`引用无法对应当前证据：${unique(unknownCitations).slice(0, 5).join("、")}`);
 
-    const actionIssues = this.validateActions(sectionBlocks.get(actionSection) ?? "");
+    const actionIssues = flexibleStructure
+      ? (/^\s*-\s*\[ \]/mu.test(markdown) ? this.validateActions(markdown) : [])
+      : this.validateActions(sectionBlocks.get(actionSection) ?? "");
     if (actionIssues.length > 0) errors.push(...actionIssues);
     if (GENERIC_ADVICE.test(markdown)) warnings.push("存在空泛建议，请改为具体动作、时间和验收条件。");
     if (/\b(?:完成|已完成)\s*\d+\s*(?:项|个)/u.test(markdown) && !/\[来源[：:]\s*统计快照\]/u.test(markdown)) {
@@ -136,7 +143,7 @@ export class ReviewQualityService {
   private kindForWindow(window: ReviewEvidenceWindow): Exclude<ReviewEvidenceKind, "custom"> {
     const days = Math.max(1, Math.round((localDate(window.end).getTime() - localDate(window.start).getTime()) / 86_400_000) + 1);
     if (days === 1) return "daily";
-    if (days <= 14) return "weekly";
+    if (days <= 7) return "weekly";
     return "monthly";
   }
 

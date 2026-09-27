@@ -55,6 +55,8 @@ export interface ContextSource {
   updatedAt?: number;
   score?: number;
   trust?: number;
+  /** Provenance, not a claim that the contents are independently established facts. */
+  evidenceOrigin?: "note" | "user-saved-conversation" | "context-only";
 }
 
 export interface ContextSection {

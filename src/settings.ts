@@ -247,6 +247,7 @@ export type DirectoryLanguage = "zh" | "en";
 export type ExamProfileType = "civil-service" | "postgraduate" | "law" | "teacher" | "custom";
 
 export const SIDEBAR_CONFIGURABLE_ITEMS: Array<{ key: Exclude<LifeOSNavKey, "settings">; label: string }> = [
+  { key: "calendar", label: "日历" },
   { key: "chat", label: "AI 助手" },
   { key: "dashboard", label: "今日行动" },
   { key: "tasks", label: "任务" },
@@ -516,6 +517,8 @@ export function getExamAssistantPrompt(
 export interface PersonalLifeSystemSettings {
   rootFolder: string;
   hasCompletedFirstRun: boolean;
+  firstRunState: { draft: string; id: string; preset: string; pending?: { id: string; snapshot: string }; receipt?: { id: string; path: string; hash: string; savedAt: string } };
+  checkinDraft: { date: string; root: string; original: string | null; duration: string; tasks: string; first: string; second: string; mood: string; summary: string } | null;
   useDailyNotesPlugin: boolean;
   systemName: string;
   assistantName: string;
@@ -534,6 +537,10 @@ export interface PersonalLifeSystemSettings {
   aiReasoningEffort: AiReasoningEffort;
   enableVisionFileAnalysis: boolean;
   visionAiModel: string;
+  aiModelSupportsVision?: boolean;
+  visionAiBaseUrl?: string;
+  visionAiApiKey?: string;
+  visionAiProvider?: "openai-compatible" | "anthropic-compatible";
   pdfOcrEngine: PdfOcrEngine;
   paddleOcrEndpoint: string;
   maxChatAttachmentBytes: number;
@@ -543,6 +550,10 @@ export interface PersonalLifeSystemSettings {
   theme: ThemePreset;
   themeStyle: ThemeStyle;
   uiFramework: UiFrameworkSettings;
+  uiAppearance: "theme" | "warm-paper" | "cool-slate";
+  uiDensity: "standard" | "compact";
+  sidebarPinnedItems: string[];
+  sidebarNavOrder?: string[];
   heatmapRange: HeatmapRange;
   language: DisplayLanguage;
   directoryLanguage: DirectoryLanguage;
@@ -600,6 +611,10 @@ export interface PersonalLifeSystemSettings {
   agentMemoryImportExternal: boolean;
   /** @deprecated use chatWritebackMode */
   autoApplyChatToDaily: boolean;
+  /** Automatic selection UI is opt-in; manual commands remain available. */
+  aiSelectionAutoOpen: boolean;
+  aiSelectionPresentation: "button" | "panel";
+  weeklyReviewEndsOn: 'saturday' | 'sunday';
   autoReviewEnabled: boolean;
   autoReviewTime: string;
   autoReviewCatchUp: boolean;
@@ -616,6 +631,8 @@ export interface PersonalLifeSystemSettings {
   aiTaskExtractionLimit: number;
   /** Maximum number of project-context/review tasks allowed into one automatic extraction or carryover batch. */
   projectContextTaskExtractionLimit: number;
+  taskSuggestionDailyLimit: number;
+  taskSuggestionsPaused: boolean;
   backgroundImagePath: string;
   browserCaptureEnabled: boolean;
   browserCaptureSetupVersion: number;
@@ -638,6 +655,10 @@ export interface PersonalLifeSystemSettings {
   weixinReminderRoutes: WeixinReminderRoute[];
   licenseApiBaseUrl: string;
   licenseInstallationId: string;
+  /** Non-secret reference only. Once selected, failed account auth must not fall back to legacy. */
+  licenseAccountSessionId: string;
+  licenseAccountPendingSessionId: string;
+  licenseAccountRegistrationId: string;
   licenseEmail: string;
   licenseKey: string;
   licenseEntitlementToken: string;
@@ -653,9 +674,9 @@ export function normalizeThemeStyle(value: string | undefined | null): ThemeStyl
   return THEME_STYLES.includes(value as ThemeStyle) ? (value as ThemeStyle) : "minimal-warm";
 }
 
-export const DEFAULT_AI_TASK_EXTRACTION_LIMIT = 8;
+export const DEFAULT_AI_TASK_EXTRACTION_LIMIT = 3;
 export const MAX_AI_TASK_EXTRACTION_LIMIT = 50;
-export const DEFAULT_PROJECT_CONTEXT_TASK_EXTRACTION_LIMIT = 5;
+export const DEFAULT_PROJECT_CONTEXT_TASK_EXTRACTION_LIMIT = 3;
 export const MAX_PROJECT_CONTEXT_TASK_EXTRACTION_LIMIT = 50;
 export const DEFAULT_AGENT_MEMORY_IDLE_HOURS = 72;
 export const DEFAULT_AGENT_MEMORY_MAX_SESSIONS_PER_RUN = 4;
@@ -1251,6 +1272,11 @@ export function analyzeAiConnectionTestModels(
 export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   rootFolder: "PersonalLifeSystem",
   hasCompletedFirstRun: false,
+  firstRunState: { draft: "", id: "", preset: "life" },
+  checkinDraft: null,
+  uiAppearance: "warm-paper",
+  uiDensity: "standard",
+  sidebarPinnedItems: [],
   useDailyNotesPlugin: false,
   systemName: "Life OS",
   assistantName: "Life OS",
@@ -1296,8 +1322,8 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   llmWikiIncludeDraftsInChat: true,
   llmWikiShowSourceReferences: true,
   llmWikiDashboardReminder: true,
-  examProfileType: "civil-service",
-  customExamProfileName: "",
+  examProfileType: "custom",
+  customExamProfileName: "学习成长",
   chatSaveMode: "summary",
   recentDaysForChat: 7,
   assistantStyle: "warm-companion",
@@ -1330,6 +1356,9 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   agentMemoryAutoSkillSuggestions: true,
   agentMemoryImportExternal: false,
   autoApplyChatToDaily: false,
+  aiSelectionAutoOpen: true,
+  aiSelectionPresentation: "button",
+  weeklyReviewEndsOn: 'sunday',
   autoReviewEnabled: false,
   autoReviewTime: "22:30",
   autoReviewCatchUp: true,
@@ -1342,6 +1371,8 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   taskManagerShowCompleted: true,
   aiTaskExtractionLimit: DEFAULT_AI_TASK_EXTRACTION_LIMIT,
   projectContextTaskExtractionLimit: DEFAULT_PROJECT_CONTEXT_TASK_EXTRACTION_LIMIT,
+  taskSuggestionDailyLimit: 5,
+  taskSuggestionsPaused: false,
   backgroundImagePath: "",
   browserCaptureEnabled: true,
   browserCaptureSetupVersion: 1,
@@ -1363,6 +1394,9 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   weixinReminderRoutes: [],
   licenseApiBaseUrl: "https://license.lifeoskit.com",
   licenseInstallationId: "",
+  licenseAccountSessionId: "",
+  licenseAccountPendingSessionId: "",
+  licenseAccountRegistrationId: "",
   licenseEmail: "",
   licenseKey: "",
   licenseEntitlementToken: "",
@@ -1391,3 +1425,19 @@ export const MEMORY_CATEGORIES = [
   "偏好",
   "其他"
 ];
+
+/** Capability is explicitly confirmed, never guessed from a model name. */
+export function resolveVisionSettings(settings: PersonalLifeSystemSettings): PersonalLifeSystemSettings | null {
+  if (!settings.enableVisionFileAnalysis) return null;
+  if (settings.aiModelSupportsVision === true) return validateAiProviderConfig(settings) ? null : settings;
+  const model = settings.visionAiModel?.trim();
+  if (!model) return null;
+  const separate = Boolean(settings.visionAiBaseUrl?.trim());
+  const provider = settings.visionAiProvider || 'openai-compatible';
+  const preset = getAiProviderPreset(provider)!;
+  const resolved = separate ? { ...settings, aiProvider: provider, aiModel: model,
+    aiBaseUrl: settings.visionAiBaseUrl!.trim(), aiApiKey: settings.visionAiApiKey?.trim() || '',
+    aiEndpointPath: preset.endpointPath, aiAuthHeader: preset.authHeader, aiAuthPrefix: preset.authPrefix,
+    aiExtraHeadersJson: '', aiApiKeys: {}, aiProviderConfigs: {} } : { ...settings, aiModel: model };
+  return validateAiProviderConfig(resolved) ? null : resolved;
+}

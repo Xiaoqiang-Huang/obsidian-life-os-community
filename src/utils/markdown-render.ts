@@ -38,6 +38,14 @@ export function renderMarkdownDisplay(
     return Promise.resolve();
   }
 
+  // Plain labels/snippets need neither Markdown parsing nor its child-component
+  // lifecycle. Keep the exact text; all Markdown, links and math use the host.
+  if (!/[\n\r*_`#\[\]<>|~$\\]|(?:https?:\/\/)|^\s*(?:[-+]|\d+[.)])\s|^\s*(?:-{3,}|={3,})\s*$/u.test(normalized)) {
+    el.setText(normalized);
+    el.removeAttribute("aria-busy");
+    return Promise.resolve();
+  }
+
   el.setAttribute("aria-busy", "true");
   const staging = el.ownerDocument.createElement("div");
   return MarkdownRenderer.renderMarkdown(normalized, staging, sourcePath, component)

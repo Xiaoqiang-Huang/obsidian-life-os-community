@@ -433,7 +433,7 @@ export class WeixinConversationStateService {
   }
 
   private statePath(request: WeixinInboundRequest): string {
-    const key = this.stableHash([request.accountId || "default", request.senderId, request.conversationId, request.threadId].join("\u001f"));
+    const key = this.stableHash([request.accountId || "default", request.senderId, request.conversationId, request.threadId, ...(request.agentSessionId && request.agentSessionId !== "legacy" ? [request.agentSessionId] : [])].join("\u001f"));
     return this.fs.path("Chat", "Weixin", "State", `${key}.json`);
   }
 

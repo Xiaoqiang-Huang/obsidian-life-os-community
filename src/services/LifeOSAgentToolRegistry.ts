@@ -18,6 +18,7 @@ export interface LifeOSAgentToolDescriptor {
   parallelSafe?: boolean;
   /** Number of model requests performed inside the tool executor. */
   modelCallCost?: number;
+  toolCallCost?: number;
   risk?: "none" | "local-read" | "local-write" | "network";
   /** Destructive writes stay behind a confirmation even in explicit-auto mode. */
   confirmation?: "default" | "always";
@@ -32,6 +33,8 @@ export interface LifeOSAgentToolDescriptor {
  * remote sender write access by itself.
  */
 export const LIFEOS_AGENT_TOOL_REGISTRY: readonly LifeOSAgentToolDescriptor[] = [
+  { id: "pdf-page-read", mode: "read", family: "vault", description: "读取指定 PDF 页的原文，空页返回 requires-ocr；使用 nextOffset 续读本页，nextPage 翻页，不将一页当全文", channels: ["desktop", "weixin"], parallelSafe: true, risk: "local-read", input: { path: { type: "string", description: "Life OS 内 PDF 文件路径", required: true }, page: { type: "number", description: "页码，默认 1" }, offset: { type: "number", description: "本页字符偏移" }, limit: { type: "number", description: "单段字符上限" } } },
+  { id: "web-page-read", mode: "read", family: "web", description: "读取公开网页正文快照并分段续读；续读必须提供返回的 snapshot，不能把搜索摘要当正文", channels: ["desktop", "weixin"], parallelSafe: true, risk: "network", input: { url: { type: "string", description: "公开网页 URL", required: true }, offset: { type: "number", description: "正文偏移" }, limit: { type: "number", description: "单段字符数" }, snapshot: { type: "string", description: "首次读取返回的快照编号" } } },
   { id: "web-search", mode: "read", family: "web", description: "搜索多个公开网页来源并读取正文，适合最新外部事实、官网、新闻和公开资料", channels: ["desktop", "weixin"], deferred: true, parallelSafe: true, risk: "network", input: { query: { type: "string", description: "独立、完整的检索问题", required: true }, officialOnly: { type: "boolean", description: "是否优先官方来源" } } },
   { id: "lifeos-search", mode: "read", family: "rag", description: "混合检索 Life OS 日记、任务、记忆、项目、知识库和 LLM Wiki", channels: ["desktop", "weixin"], deferred: true, parallelSafe: true, risk: "local-read", input: { query: { type: "string", description: "要在 Life OS 中查找的内容", required: true }, projectScopeId: { type: "string", description: "可选项目范围" } } },
   { id: "project-search", mode: "read", family: "project", description: "在项目上下文、会话交接、任务和项目文档中检索", channels: ["desktop", "weixin"], deferred: true, parallelSafe: true, risk: "local-read", input: { query: { type: "string", description: "项目问题", required: true }, projectScopeId: { type: "string", description: "项目标识" } } },
@@ -44,8 +47,8 @@ export const LIFEOS_AGENT_TOOL_REGISTRY: readonly LifeOSAgentToolDescriptor[] = 
   { id: "task-complete", mode: "write", family: "task", description: "完成待办", channels: ["desktop", "weixin"], risk: "local-write", input: { query: { type: "string", description: "待办序号或关键词", required: true } } },
   { id: "task-delete", mode: "write", family: "task", description: "删除待办", channels: ["desktop", "weixin"], risk: "local-write", input: { query: { type: "string", description: "待办序号或关键词", required: true } } },
   { id: "task-clear-all", mode: "write", family: "task", description: "先完整备份 open.md，再清空全部未完成待办；回复“确认”执行，回复“取消”放弃", channels: ["desktop", "weixin"], risk: "local-write", confirmation: "always", input: {} },
-  { id: "review-generate", mode: "write", family: "review", description: "生成日、周、月或自定义日期复盘", channels: ["desktop", "weixin"], deferred: true, modelCallCost: 2, risk: "local-write", input: { period: { type: "string", description: "daily、weekly、monthly 或 custom" }, start: { type: "string", description: "起始日期" }, end: { type: "string", description: "结束日期" } } },
-  { id: "summary-generate", mode: "read", family: "review", description: "汇总指定周期事实，不直接写入", channels: ["desktop", "weixin"], deferred: true, modelCallCost: 2, risk: "local-read", input: { period: { type: "string", description: "daily、weekly、monthly 或 custom" }, start: { type: "string", description: "起始日期" }, end: { type: "string", description: "结束日期" } } },
+  { id: "review-generate", mode: "write", family: "review", description: "生成日、周、月或自定义日期复盘待确认草稿，不自动发布正式复盘", channels: ["desktop", "weixin"], deferred: true, modelCallCost: 2, risk: "local-write", input: { instruction: { type: "string", description: "用户对报告重点、篇幅和表达的要求，不改变确认的日期范围" }, period: { type: "string", description: "daily、weekly、monthly 或 custom" }, start: { type: "string", description: "起始日期" }, end: { type: "string", description: "结束日期" } } },
+  { id: "summary-generate", mode: "read", family: "review", description: "汇总指定周期事实，不直接写入", channels: ["desktop", "weixin"], deferred: true, modelCallCost: 2, risk: "local-read", input: { instruction: { type: "string", description: "用户对报告重点、篇幅和表达的要求，不改变确认的日期范围" }, period: { type: "string", description: "daily、weekly、monthly 或 custom" }, start: { type: "string", description: "起始日期" }, end: { type: "string", description: "结束日期" } } },
   { id: "link-save", mode: "write", family: "knowledge", description: "读取链接正文并收藏到指定知识分类", channels: ["desktop", "weixin"], deferred: true, risk: "local-write", input: { url: { type: "string", description: "链接", required: true }, title: { type: "string", description: "标题" }, collection: { type: "string", description: "分类" } } },
   { id: "knowledge-save", mode: "write", family: "knowledge", description: "把文本保存到知识库", channels: ["desktop", "weixin"], risk: "local-write", input: { title: { type: "string", description: "知识标题", required: true }, content: { type: "string", description: "正文", required: true } } },
   { id: "memory-save", mode: "write", family: "memory", description: "把内容存为待确认的长期记忆候选", channels: ["desktop", "weixin"], risk: "local-write", input: { content: { type: "string", description: "记忆内容", required: true }, category: { type: "string", description: "记忆分类" }, importance: { type: "string", description: "low、normal 或 high" } } },
@@ -95,11 +98,15 @@ export const LIFEOS_AGENT_TOOL_REGISTRY: readonly LifeOSAgentToolDescriptor[] = 
     id: "vault-file-read",
     mode: "read",
     family: "vault",
-    description: "读取 Life OS 根目录内的文本文件",
+    description: "分段读取 Life OS 文本文件；hasMore 为 true 时用 nextOffset 继续读取，不把部分正文当全文",
     channels: ["desktop", "weixin"],
     parallelSafe: true,
     risk: "local-read",
-    input: { path: { type: "string", description: "Life OS 根目录内的相对文件路径", required: true } }
+    input: {
+      path: { type: "string", description: "Life OS 根目录内的相对文件路径", required: true },
+      offset: { type: "number", description: "UTF-16 字符偏移，首次为 0，续读使用 nextOffset" },
+      limit: { type: "number", description: "单段字符数，默认 12000，上限 24000" }
+    }
   },
   {
     id: "vault-file-create",
@@ -194,4 +201,9 @@ export const LIFEOS_AGENT_TOOL_REGISTRY: readonly LifeOSAgentToolDescriptor[] = 
 
 export function lifeOSAgentToolsForChannel(channel: "desktop" | "weixin"): readonly LifeOSAgentToolDescriptor[] {
   return LIFEOS_AGENT_TOOL_REGISTRY.filter((tool) => tool.channels.includes(channel));
+}
+
+// Stable operation IDs are optional for a fresh write and required when resuming that same mutation.
+for (const tool of LIFEOS_AGENT_TOOL_REGISTRY) {
+  if (tool.mode === "write") tool.input = { ...tool.input, operationId: { type: "string", description: "同一写入操作的稳定编号；跨轮恢复必须复用，真正的新写入使用新编号" } };
 }

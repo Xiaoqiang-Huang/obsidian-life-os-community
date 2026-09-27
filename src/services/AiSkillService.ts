@@ -1,3 +1,4 @@
+import { AGENT_TASK_SKILLS } from "./agent/AgentTaskSkills";
 import { BUILTIN_AI_SKILL_DATA } from "../generated/builtin-ai-skills";
 
 export type BuiltInAiSkillCategory =
@@ -1127,7 +1128,7 @@ function allAiSkills(
   overrides: AiSkillOverride[] | undefined = [],
   includeHidden = false
 ): AiSkill[] {
-  const all = [...AI_SKILLS];
+  const all = [...AI_SKILLS, ...AGENT_TASK_SKILLS];
   const known = new Set(all.map((item) => item.id));
   for (const skill of importedSkills) {
     if (!skill?.id || known.has(skill.id)) continue;

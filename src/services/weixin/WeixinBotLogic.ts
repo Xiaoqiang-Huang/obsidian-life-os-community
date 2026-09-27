@@ -8,6 +8,9 @@ export interface WeixinInboundRequest {
   accountId: string;
   conversationId: string;
   threadId: string;
+  /** Internal logical scope; transport conversationId is never changed. */
+  agentSessionId?: string;
+  agentSessionTitle?: string;
   senderId: string;
   senderName: string;
   isGroup: boolean;
@@ -200,8 +203,8 @@ export class WeixinPendingImageStore {
     }
   }
 
-  private key(request: Pick<WeixinInboundRequest, "accountId" | "senderId" | "conversationId" | "threadId">): string {
-    return [request.accountId || "default", request.senderId, request.conversationId, request.threadId].join("\u001f");
+  private key(request: Pick<WeixinInboundRequest, "accountId" | "senderId" | "conversationId" | "threadId" | "agentSessionId">): string {
+    return [request.accountId || "default", request.senderId, request.conversationId, request.threadId, request.agentSessionId || "legacy"].join("\u001f");
   }
 }
 
@@ -295,6 +298,12 @@ export function weixinConversationKey(
   return ["weixin", request.accountId || "default", request.conversationId, request.threadId]
     .filter(Boolean)
     .join(":");
+}
+
+export function weixinSessionKey(request: WeixinInboundRequest): string {
+  const base = weixinConversationKey(request);
+  if (!request.agentSessionId || request.agentSessionId === "legacy") return request.isGroup ? base + ":sender:" + request.senderId : base;
+  return base + ":session:" + JSON.stringify([request.senderId, request.agentSessionId]);
 }
 
 export function weixinReminderRouteRef(

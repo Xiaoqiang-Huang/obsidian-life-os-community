@@ -259,6 +259,7 @@ export class ProCompareView extends ItemView {
     main.addClass("lifeos-pro-compare-view");
 
     createHeroHeader(main, {
+        app: this.app,
       kicker: "免费版 / 完整体验 Pro / 短期 Pro 使用 / 长期 Pro 使用",
       title: "按模块和能力看版本差异",
       description: `免费版免费使用，定位为基础手动使用，支持 1 台本地使用；30 天试用免费一次，定位为完整体验 Pro，功能与 Pro 一致，设备数最多 3 台；${this.purchaseSummary()}。当前版本对比中的 Pro 能力继续属于 Pro，未单独列出的新增高级能力也归入 Pro。已购买月付或买断 Pro 的老用户继续保留原有权益，不需要重新购买。`,

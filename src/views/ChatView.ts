@@ -1,6 +1,11 @@
+import { parseSessionCommand } from "../services/AgentSessionService";
+import { isTaskResumeRequest } from "../services/agent/AgentResume";
+import { resolveVisionSettings } from "../settings";
+import { installHostPopoverScope } from "../utils/host-popover-scope";
+import { LifeOSModal as Modal } from "../components/LifeOSModal";
 ﻿import { ItemView, Notice, TFile, WorkspaceLeaf, requestUrl } from "obsidian";
 import { appendAiGeneratedFooter, buildSystemPrompt, type AiMessage, type AiMessageContent, type AiUsage } from "../ai";
-import { App, Modal } from "obsidian";
+import { App} from "obsidian";
 import { setIcon } from "obsidian";
 import { createButton } from "../components/Button";
 import { createCard } from "../components/Card";
@@ -11,6 +16,7 @@ import { CHAT_VIEW_TYPE } from "../constants";
 import type PersonalLifeSystemPlugin from "../main";
 import { ChatContextService, type ChatContextBundle, type ChatContextStatusCard } from "../services/ChatContextService";
 import type { ContextSource } from "../services/context-engine/types";
+import { markUserSavedConversation, USER_SAVED_CONVERSATION_SOURCE } from "../services/context-engine/ContextSourcePolicyService";
 import { ChatService, type ChatHistoryChannelFilter, type ChatHistoryItem } from "../services/ChatService";
 import { parseKnowledgeWritebackCandidate, parseMemoryWritebackCandidate, type KnowledgeWritebackCandidate, type MemoryWritebackCandidate } from "../services/ChatWritebackParser";
 import { FileSystemService } from "../services/FileSystemService";
@@ -188,6 +194,23 @@ const AI_GENERATED_FOOTER_PATTERN = /(?:^|\n)\s*(?:AI生成|AI鐢熸垚)\s*$/u;
 export class LifeOSChatView extends ItemView {
   private messages: ChatMessage[] = [];
   private renderedMessageEls = new WeakMap<ChatMessage, { bubble: HTMLElement; signature: string }>();
+  private renderedMessages = new Set<ChatMessage>();
+  private messagePageStart: number | null = null;
+  private messagePager: HTMLElement | null = null;
+  private followOutput = true;
+  private latestOutputButton: HTMLButtonElement | null = null;
+  private historyVisibleLimit = 50;
+  private historyRenderRevision = 0;
+  private historyRowState = new WeakMap<HTMLElement, { path: string; signature: string }>();
+  private selectionListenerDocument: Document | null = null;
+  private readonly onChatScroll = (): void => {
+    this.followOutput = this.logEl.scrollHeight - this.logEl.scrollTop - this.logEl.clientHeight <= 56;
+    if (this.latestOutputButton) this.latestOutputButton.hidden = this.followOutput;
+  };
+  private readonly onChatSelectionChange = (): void => {
+    const selection = this.logEl?.ownerDocument.getSelection();
+    if (!this.isStreaming && selection?.isCollapsed && this.logEl?.isConnected) this.renderMessages();
+  };
   private logEl!: HTMLElement;
   private inputEl!: HTMLTextAreaElement;
   private fileInputEl: HTMLInputElement | null = null;
@@ -202,6 +225,7 @@ export class LifeOSChatView extends ItemView {
   private contextDrawerEl: HTMLElement | null = null;
   private chatShellEl: HTMLElement | null = null;
   private sidePanelEl: HTMLElement | null = null;
+  private drawerReturnFocus: HTMLElement | null = null;
   private runtimeStatusEl: HTMLElement | null = null;
   private composerEl: HTMLElement | null = null;
   private composerControlsEl: HTMLElement | null = null;
@@ -223,6 +247,8 @@ export class LifeOSChatView extends ItemView {
   private isSkillPickerExpanded = false;
   private abortController: AbortController | null = null;
   private isStreaming = false;
+  private dispatchingMessage = false;
+  private managingSession = false;
   private stopNoticeShown = false;
   private streamTimedOut = false;
   private lastContextBundle: ChatContextBundle | null = null;
@@ -267,6 +293,7 @@ export class LifeOSChatView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
+    this.logEl?.removeEventListener("scroll", this.onChatScroll);
     await this.plugin.ensureBaseStructure();
     const draftInput = this.inputEl?.value ?? this.plugin.activeChatState.draftInput ?? "";
     const importedSnapshot = [...this.importedDocuments];
@@ -295,6 +322,7 @@ export class LifeOSChatView extends ItemView {
     this.selectedSkillIds = normalizeAiSkillIds(this.plugin.settings.defaultAiSkillIds, this.plugin.settings.defaultAiSkillId, this.importedAiSkills, this.plugin.settings.aiSkillOverrides);
     this.activeDrawerKind = null;
     this.restoreActiveChatState();
+    await this.plugin.agent.sessions.adopt("desktop", this.agentSessionId, "桌面对话");
     const main = createLifeOSShell(container as HTMLElement, this.plugin, "chat");
     main.addClass("lifeos-chat-main-host");
     main.parentElement?.addClass("lifeos-chat-main-parent");
@@ -317,6 +345,10 @@ export class LifeOSChatView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.historyRenderRevision++;
+    this.logEl?.removeEventListener("scroll", this.onChatScroll);
+    this.selectionListenerDocument?.removeEventListener("selectionchange", this.onChatSelectionChange);
+    this.selectionListenerDocument = null;
     this.persistActiveChatState();
     this.detachMobileViewportListener();
     this.detachComposerResizeDrag();
@@ -385,14 +417,39 @@ export class LifeOSChatView extends ItemView {
     createButton(utilityAnchor, "聊天历史", () => void this.toggleHistoryPanel(service), { ghost: true, icon: "messages-square" });
     createButton(utilityAnchor, "上下文来源", () => this.toggleContextPanel(), { ghost: true, icon: "panel-right" });
     createButton(actions, "新对话", () => this.startNewConversation(), { ghost: true, icon: "plus" });
-    const saveToLifeButton = createButton(actions, "保存整段对话", () => void this.saveCurrentChatToLifeOS(), { ghost: true, icon: "save" });
+    const more = actions.createEl("details", { cls: "lifeos-chat-more" });
+    more.createEl("summary", { text: "更多", attr: { "aria-label": "更多会话操作" } });
+    const moreMenu = more.createDiv({ cls: "lifeos-chat-more-menu" });
+    createButton(moreMenu, "记忆与偏好", () => void this.plugin.activateMemory(), { ghost: true, icon: "brain" });
+    createButton(moreMenu, "提示词模板", () => void this.plugin.activateAiWorkspace("prompts"), { ghost: true, icon: "notebook-pen" });
+    createButton(moreMenu, "Skill 管理", () => {
+      const options = panel.querySelector<HTMLDetailsElement>(".lifeos-chat-options");
+      if (options) options.open = true;
+      this.isSkillPickerExpanded = true; this.refreshComposerControls();
+      panel.querySelector<HTMLElement>(".lifeos-chat-skill-dropdown summary")?.focus();
+      more.open = false;
+    }, { ghost: true, icon: "sparkles" });
+    const saveToLifeButton = createButton(moreMenu, "保存整段对话", () => void this.saveCurrentChatToLifeOS(), { ghost: true, icon: "save" });
     saveToLifeButton.disabled = !this.isLlmWikiEnabled();
     if (!this.isLlmWikiEnabled()) saveToLifeButton.title = "LLM Wiki 已在设置中关闭";
-    createButton(actions, "清空当前会话", () => this.clearCurrentConversation(), { ghost: true, icon: "trash-2" });
+    createButton(moreMenu, "清空当前会话", () => this.clearCurrentConversation(), { ghost: true, icon: "trash-2" });
+    installHostPopoverScope(more, this.app);
 
     this.renderControlSummary(panel);
 
     this.logEl = panel.createDiv({ cls: "lifeos-chat-log" });
+    this.logEl.addEventListener("scroll", this.onChatScroll);
+    if (this.selectionListenerDocument !== this.logEl.ownerDocument) {
+      this.selectionListenerDocument?.removeEventListener("selectionchange", this.onChatSelectionChange);
+      this.selectionListenerDocument = this.logEl.ownerDocument;
+      this.selectionListenerDocument.addEventListener("selectionchange", this.onChatSelectionChange);
+    }
+    this.latestOutputButton = panel.createEl("button", { cls: "lifeos-chat-latest", text: "回到最新对话", attr: { type: "button" } });
+    this.latestOutputButton.hidden = true;
+    this.latestOutputButton.onclick = () => {
+      this.messagePageStart = null; this.followOutput = true;
+      this.renderMessages(); this.scrollLogToBottom();
+    };
     this.renderMessages();
     this.scrollLogToBottom();
     this.loadingEl = panel.createDiv({
@@ -415,7 +472,9 @@ export class LifeOSChatView extends ItemView {
     this.fileInputEl.onchange = () => void this.handleAttachmentFiles(this.fileInputEl?.files ?? null);
     const composerToolbar = composer.createDiv({ cls: "lifeos-chat-composer-toolbar" });
     composerToolbar.dataset.accept = CHAT_IMPORT_ACCEPT;
-    this.renderComposerControls(composerToolbar);
+    const options = composerToolbar.createEl("details", { cls: "lifeos-chat-options" });
+    options.createEl("summary", { text: "会话选项 · 模型、Skill、联网与记忆" });
+    this.renderComposerControls(options.createDiv({ cls: "lifeos-chat-options-body" }));
     this.attachmentListEl = composer.createDiv({ cls: "lifeos-chat-attachment-list" });
     this.renderAttachmentList();
     const resizeHandle = composer.createDiv({
@@ -495,6 +554,7 @@ export class LifeOSChatView extends ItemView {
     this.stopButtonEl.hide();
 
     this.runtimeStatusEl = panel.createDiv({ cls: "lifeos-chat-runtime-status", attr: { "aria-live": "polite" } });
+    panel.insertBefore(this.runtimeStatusEl, composer);
     this.renderRuntimeStatus(service);
   }
 
@@ -796,8 +856,7 @@ export class LifeOSChatView extends ItemView {
 
     if (command === "/clear") {
       this.inputEl.value = "";
-      this.startNewConversation();
-      new Notice("当前会话已清空。", 3000);
+      await this.startNewConversation(true);
       return true;
     }
 
@@ -1440,6 +1499,7 @@ export class LifeOSChatView extends ItemView {
       cls: "lifeos-chat-compact-control lifeos-chat-skill-dropdown",
       attr: { "aria-label": "名人 Skill（公开方法论）" }
     });
+    installHostPopoverScope(dropdown, this.app);
     dropdown.dataset.controlId = "skill";
     dropdown.open = this.isSkillPickerExpanded;
     dropdown.addEventListener("toggle", () => {
@@ -1508,7 +1568,7 @@ export class LifeOSChatView extends ItemView {
         const active = this.selectedSkillIds.includes(skill.id);
         const option = list.createDiv({
           cls: this.selectedSkillIds.includes(skill.id) ? "lifeos-chat-skill-option is-active" : "lifeos-chat-skill-option",
-          attr: { title: `${skill.name}｜${skill.description}` }
+          attr: { title: `${skill.name}｜${skill.description.split(/[。！？\n]/u)[0]}` }
         });
         option.dataset.skillId = skill.id;
         option.dataset.searchText = `${skill.name} ${skill.description} ${skill.lens} ${category.label}`.toLocaleLowerCase();
@@ -1911,7 +1971,7 @@ export class LifeOSChatView extends ItemView {
       { value: "all", label: "全部来源" },
       { value: "desktop", label: "内置助手" },
       { value: "weixin", label: "微信" }
-    ].forEach((option) => filter.createEl("option", option));
+    ].forEach((option) => filter.createEl("option", { value: option.value, text: option.label }));
     filter.value = this.historyChannelFilter;
     const list = drawer.createDiv({ cls: "lifeos-history-list" });
     const clearButton = createButton(toolbar, "清空", () => void this.clearHistory(service, list, clearButton), {
@@ -1921,6 +1981,7 @@ export class LifeOSChatView extends ItemView {
     });
     clearButton.title = "清空当前筛选结果";
     filter.onchange = () => {
+      this.historyVisibleLimit = 50;
       this.historyChannelFilter = filter.value as ChatHistoryChannelFilter;
       void this.renderHistoryList(list, service, clearButton);
     };
@@ -1928,17 +1989,88 @@ export class LifeOSChatView extends ItemView {
   }
 
   private async renderHistoryList(parent: HTMLElement, service: ChatService, clearButton?: HTMLButtonElement): Promise<void> {
-    parent.empty();
-    const items = await service.loadHistory(50, this.historyChannelFilter);
-    if (clearButton) clearButton.disabled = items.length === 0;
-    if (items.length === 0) {
-      createEmptyState(parent, { icon: "messages-square", title: "还没有历史对话", description: "开始提问后，这里会显示最近的本地对话。", actions: [], compact: true });
-      return;
+    if (!parent.isConnected || !this.historyDrawerEl?.contains(parent)) return;
+    const revision = ++this.historyRenderRevision;
+    const limit = this.historyVisibleLimit;
+    const channel = this.historyChannelFilter;
+    const current = () => revision === this.historyRenderRevision && parent.isConnected
+      && this.activeDrawerKind === "history" && !!this.historyDrawerEl?.contains(parent);
+    // Keep a focused retry button mounted while the next read is pending.
+    // Recreating the status here would drop keyboard focus to the host body.
+    const status = parent.querySelector<HTMLElement>(".lifeos-history-load-status")
+      ?? parent.createDiv({ cls: "lifeos-history-load-status", attr: { "aria-live": "polite" } });
+    status.setAttr("role", "status");
+    const statusMessage = status.querySelector<HTMLElement>(".lifeos-history-load-message")
+      ?? status.createSpan({ cls: "lifeos-history-load-message" });
+    statusMessage.setText("正在读取聊天历史…");
+    status.querySelector("button")?.setAttr("aria-disabled", "true");
+    const more = parent.querySelector<HTMLButtonElement>(".lifeos-history-load-more");
+    // Native disabled blurs the focused button. Keep it focusable and guard
+    // repeated activation while the async read is pending.
+    if (more) more.setAttr("aria-disabled", "true");
+    if (clearButton) clearButton.disabled = true;
+    parent.setAttr("aria-busy", "true");
+    try {
+      const items = await service.loadHistory(limit, channel);
+      if (!current()) return;
+      const rows = new Map<string, HTMLElement>();
+      for (const row of Array.from(parent.querySelectorAll<HTMLElement>(".lifeos-history-entry"))) {
+        const state = this.historyRowState.get(row);
+        if (state) rows.set(state.path, row);
+      }
+      const staging = parent.ownerDocument.createElement("div");
+      const next: HTMLElement[] = [];
+      for (const item of items) {
+        const signature = JSON.stringify(item);
+        let row = rows.get(item.path);
+        if (!row || this.historyRowState.get(row)?.signature !== signature) {
+          this.renderHistoryItem(staging, item, service, clearButton, parent);
+          row = staging.lastElementChild as HTMLElement;
+          this.historyRowState.set(row, { path: item.path, signature });
+        }
+        next.push(row);
+      }
+      if (!items.length) {
+        createEmptyState(staging, { icon: "messages-square", title: "还没有历史对话", description: "开始提问后，这里会显示最近的本地对话。", actions: [], compact: true });
+        next.push(staging.lastElementChild as HTMLElement);
+      }
+      if (items.length === limit) {
+        const loadMore = more ?? createButton(staging, "加载更早的会话", () => {
+          if (parent.getAttribute("aria-busy") === "true" || parent.querySelector(".lifeos-history-load-status[role=alert]")) return;
+          this.historyVisibleLimit += 50;
+          void this.renderHistoryList(parent, service, clearButton);
+        }, { ghost: true, className: "lifeos-history-load-more" });
+        loadMore.disabled = false;
+        loadMore.setAttr("aria-disabled", "false");
+        next.push(loadMore);
+      }
+      // Commit only after a successful read. Keep unchanged rows (and their
+      // focus/selection) in place, including when appending another page.
+      const focused = parent.ownerDocument.activeElement as HTMLElement | null;
+      const hadFocus = !!focused && parent.contains(focused);
+      const retained = new Set(next);
+      for (const child of Array.from(parent.children)) if (!retained.has(child as HTMLElement)) child.remove();
+      next.forEach((node, index) => { if (parent.children[index] !== node) parent.insertBefore(node, parent.children[index] ?? null); });
+      if (hadFocus && !focused?.isConnected) {
+        const nextFocus = next.find(node => node.querySelector("button"))?.querySelector<HTMLButtonElement>("button")
+          ?? this.historyDrawerEl?.querySelector<HTMLSelectElement>(".lifeos-history-channel-filter");
+        nextFocus?.focus({ preventScroll: true });
+      }
+      if (clearButton) clearButton.disabled = items.length === 0;
+    } catch {
+      if (!current()) return;
+      status.setAttr("role", "alert");
+      statusMessage.setText("聊天历史读取失败，已保留上次内容。");
+      const retry = status.querySelector<HTMLButtonElement>("button") ?? createButton(status, "重试", () => {
+        if (parent.getAttribute("aria-busy") !== "true") void this.renderHistoryList(parent, service, clearButton);
+      }, { ghost: true, icon: "refresh-cw" });
+      retry.setAttr("aria-disabled", "false");
+    } finally {
+      if (current()) parent.setAttr("aria-busy", "false");
     }
-    for (const item of items) this.renderHistoryItem(parent, item, service, clearButton);
   }
 
-  private renderHistoryItem(parent: HTMLElement, item: ChatHistoryItem, service: ChatService, clearButton?: HTMLButtonElement): void {
+  private renderHistoryItem(parent: HTMLElement, item: ChatHistoryItem, service: ChatService, clearButton?: HTMLButtonElement, list = parent): void {
     const row = parent.createDiv({ cls: "lifeos-history-entry" });
     const button = row.createEl("button", { cls: "lifeos-history-item", attr: { type: "button" } });
     const historyTitle = this.historyTitle(item);
@@ -1949,9 +2081,14 @@ export class LifeOSChatView extends ItemView {
     const scope = item.projectId ? ` · 项目 ${item.projectId}` : "";
     button.createSpan({ cls: "lifeos-history-subtitle", text: `${this.formatHistoryTime(item.updatedAt || item.title)}${scope}` });
     button.onclick = () => {
+      // Opening stored history is a new live scope, never reuse another chat's pending writes or images.
+      this.agentSessionId = randomId("lifeos-chat-session");
+      this.lastImportedDocuments = [];
+      this.importedDocuments = [];
       this.messages = item.messages.length > 0 ? item.messages : this.messages;
-      if (item.projectId && item.projectId !== this.selectedProjectScopeId) {
-        this.selectedProjectScopeId = item.projectId;
+      this.messagePageStart = null; this.followOutput = true;
+      if ((item.projectId || "") !== this.selectedProjectScopeId) {
+        this.selectedProjectScopeId = item.projectId || "";
         this.refreshComposerControls();
       }
       this.resetContextCompression();
@@ -1964,7 +2101,7 @@ export class LifeOSChatView extends ItemView {
       if (!window.confirm(`确认删除这条聊天历史吗？\n${this.historyTitle(item)}`)) return;
       const deleted = await service.deleteHistoryItem(item.path);
       new Notice(deleted ? "聊天历史已删除。" : "这条聊天历史已经不存在。");
-      await this.renderHistoryList(parent, service, clearButton);
+      await this.renderHistoryList(list, service, clearButton);
     }, { ghost: true, icon: "trash-2", className: "lifeos-button-danger lifeos-history-delete" });
     deleteButton.title = "删除这条对话";
   }
@@ -1997,6 +2134,7 @@ export class LifeOSChatView extends ItemView {
   }
 
   private openSideDrawer(kind: "history" | "context", drawerClass: string): HTMLElement {
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     this.closeSideDrawer();
     const host = this.sidePanelEl ?? this.chatShellEl?.createDiv({ cls: "lifeos-chat-side-panel", attr: { "aria-live": "polite" } });
     if (!host) {
@@ -2005,16 +2143,31 @@ export class LifeOSChatView extends ItemView {
     this.sidePanelEl = host;
     this.chatShellEl?.addClass("has-side-panel");
     this.activeDrawerKind = kind;
-    return host.createDiv({ cls: `lifeos-chat-drawer ${drawerClass}` });
+    this.drawerReturnFocus = trigger;
+    const drawer = host.createDiv({ cls: `lifeos-chat-drawer ${drawerClass}`, attr: { role: "dialog", "aria-label": kind === "history" ? "聊天历史" : "上下文来源", tabindex: "-1" } });
+    drawer.addEventListener("keydown", event => {
+      if (event.key === "Escape") { event.preventDefault(); this.closeSideDrawer(); return; }
+      if (event.key !== "Tab") return;
+      const controls = Array.from(drawer.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], summary, [tabindex="0"]')).filter(el => el.getClientRects().length > 0);
+      const first = controls[0], last = controls[controls.length - 1];
+      if (!first) { event.preventDefault(); drawer.focus(); }
+      else if (event.shiftKey && (document.activeElement === first || document.activeElement === drawer)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    });
+    requestAnimationFrame(() => { if (drawer.isConnected && this.activeDrawerKind === kind) drawer.focus({ preventScroll: true }); });
+    return drawer;
   }
 
   private closeSideDrawer(): void {
+    this.historyRenderRevision++;
     this.historyDrawerEl = null;
     this.contextDrawerEl = null;
     this.contextEl = null;
     this.activeDrawerKind = null;
     this.sidePanelEl?.empty();
     this.chatShellEl?.removeClass("has-side-panel");
+    if (this.drawerReturnFocus?.isConnected) this.drawerReturnFocus.focus({ preventScroll: true });
+    this.drawerReturnFocus = null;
   }
 
   private renderContextCards(): void {
@@ -2200,7 +2353,7 @@ export class LifeOSChatView extends ItemView {
   }
 
   private canUseVisionModel(): boolean {
-    return this.plugin.settings.enableVisionFileAnalysis === true && Boolean(this.plugin.settings.visionAiModel?.trim());
+    return Boolean(resolveVisionSettings(this.plugin.settings));
   }
 
   private chatAttachmentArchiveFolder(): string {
@@ -2214,7 +2367,7 @@ export class LifeOSChatView extends ItemView {
   private visionRequestModel(documents: ImportedDocument[]): string | undefined {
     const hasVisionImage = documents.some((document) => document.kind === "image" && document.dataUrl);
     if (!hasVisionImage || !this.canUseVisionModel()) return undefined;
-    return this.plugin.settings.visionAiModel.trim();
+    return resolveVisionSettings(this.plugin.settings)?.aiModel;
   }
 
   private buildUserMessageContent(content: string, documents: ImportedDocument[]): string {
@@ -2279,7 +2432,9 @@ export class LifeOSChatView extends ItemView {
   private renderMessages(): void {
     if (!this.logEl) return;
     const previousScrollTop = this.logEl.scrollTop;
-    const wasNearBottom = this.logEl.scrollHeight - this.logEl.scrollTop - this.logEl.clientHeight <= 56;
+    const selection = this.logEl.ownerDocument.getSelection();
+    const hasSelection = this.isContentSelected(this.logEl);
+    const wasNearBottom = this.followOutput && !hasSelection;
     if (this.messages.length === 0) {
       const assistantName = this.plugin.settings.assistantName || "Life OS";
       const staging = this.logEl.ownerDocument.createElement("div");
@@ -2302,9 +2457,31 @@ export class LifeOSChatView extends ItemView {
     }
 
     const nextBubbles: HTMLElement[] = [];
+    const pageStart = this.messagePageStart === null ? Math.max(0, this.messages.length - 60) : Math.min(this.messagePageStart, Math.max(0, this.messages.length - 1));
+    const pageMessages = this.messages.slice(pageStart, pageStart + 60);
+    for (const old of this.renderedMessages) if (!pageMessages.includes(old)) this.renderedMessageEls.delete(old);
+    this.renderedMessages = new Set(pageMessages);
+    if (this.messages.length > 60) {
+      if (!this.messagePager) {
+        this.messagePager = this.logEl.ownerDocument.createElement("div");
+        this.messagePager.className = "lifeos-chat-message-pager";
+      }
+      this.messagePager.replaceChildren();
+      createButton(this.messagePager, "更早消息", () => {
+        this.messagePageStart = Math.max(0, pageStart - 60); this.followOutput = false;
+        this.renderMessages(); this.logEl.scrollTop = 0;
+      }, { ghost: true }).disabled = pageStart === 0;
+      this.messagePager.createSpan({ text: `${pageStart + 1}–${Math.min(pageStart + 60, this.messages.length)} / ${this.messages.length}` });
+      createButton(this.messagePager, "较新消息", () => {
+        const next = pageStart + 60;
+        this.messagePageStart = next + 60 >= this.messages.length ? null : next;
+        this.followOutput = false; this.renderMessages(); this.logEl.scrollTop = 0;
+      }, { ghost: true }).disabled = pageStart + 60 >= this.messages.length;
+      nextBubbles.push(this.messagePager);
+    }
     const lastMessage = this.messages[this.messages.length - 1] ?? null;
     const lastAssistant = lastMessage?.role === "ai" ? lastMessage : null;
-    for (const message of this.messages) {
+    for (const message of pageMessages) {
       const signature = [
         message.role,
         message.content,
@@ -2312,7 +2489,7 @@ export class LifeOSChatView extends ItemView {
         message === lastAssistant ? String(this.lastContextBundle?.sources.length ?? 0) : "0"
       ].join("\u0000");
       const rendered = this.renderedMessageEls.get(message);
-      if (rendered?.signature === signature) {
+      if (rendered && (rendered.signature === signature || this.isContentSelected(rendered.bubble))) {
         nextBubbles.push(rendered.bubble);
         continue;
       }
@@ -2324,10 +2501,17 @@ export class LifeOSChatView extends ItemView {
       this.renderedMessageEls.set(message, { bubble, signature });
       nextBubbles.push(bubble);
     }
-    this.logEl.replaceChildren(...nextBubbles);
+    // Do not detach unchanged bubbles: that would clear browser text selection.
+    const wanted = new Set(nextBubbles);
+    for (const child of Array.from(this.logEl.children)) if (!wanted.has(child as HTMLElement)) child.remove();
+    let cursor = this.logEl.firstElementChild;
+    for (const bubble of nextBubbles) {
+      if (bubble === cursor) cursor = cursor.nextElementSibling;
+      else this.logEl.insertBefore(bubble, cursor);
+    }
     if (wasNearBottom) {
       window.requestAnimationFrame(() => {
-        if (this.logEl) this.logEl.scrollTop = this.logEl.scrollHeight;
+        if (this.logEl && this.followOutput && this.logEl.ownerDocument.getSelection()?.isCollapsed) this.logEl.scrollTop = this.logEl.scrollHeight;
       });
     } else {
       this.logEl.scrollTop = Math.min(previousScrollTop, Math.max(0, this.logEl.scrollHeight - this.logEl.clientHeight));
@@ -2745,9 +2929,51 @@ export class LifeOSChatView extends ItemView {
     actions.createSpan({ cls: "lifeos-muted", text: `下一步确认：${target}` });
   }
 
+  private async manageAgentSession(content: string): Promise<boolean> {
+    const command = parseSessionCommand(content);
+    const resume = isTaskResumeRequest(content);
+    if (!command && !resume) return false;
+    const sessions = this.plugin.agent.sessions;
+    await sessions.adopt("desktop", this.agentSessionId, this.messages.find(m => m.role === "user")?.content || "桌面对话", {
+      messages: this.messages.map(m => ({role:m.role,content:m.content})), projectScopeId: this.selectedProjectScopeId
+    });
+    if (resume) {
+      const owned = (await sessions.list("desktop")).map(s => s.id);
+      const found = await this.plugin.agent.findResumableTask(content, owned, "desktop", this.selectedProjectScopeId);
+      if (!found.state) { new Notice(found.message, 10000); return true; }
+      await sessions.command("desktop", randomId("resume"), {action:"switch", value:found.state.sessionId});
+    } else {
+      const reply = await sessions.command("desktop", randomId("session-command"), command!);
+      new Notice(reply, 10000);
+    }
+    const active = await sessions.current("desktop");
+    if (active.id !== this.agentSessionId) {
+      this.agentSessionId = active.id;
+      if (command?.action === "new") this.memoryMode = normalizeAgentMemoryMode(this.plugin.settings.agentMemoryDefaultMode);
+      this.messages = (Array.isArray(active.snapshot?.messages) ? active.snapshot.messages : []) as ChatMessage[];
+      this.selectedProjectScopeId = String(active.snapshot?.projectScopeId || "");
+      this.importedDocuments = []; this.lastImportedDocuments = [];
+      this.resetContextCompression(); this.renderedMessages.clear(); this.renderedMessageEls = new WeakMap();
+      this.messagePageStart = null; this.followOutput = true;
+      this.renderAttachmentList(); this.renderMessages(); this.refreshComposerControls();
+      this.persistActiveChatState();
+    }
+    if (!resume) { this.inputEl.value = ""; this.resizeComposer(); }
+    return !resume;
+  }
+
   private async send(service: ChatService): Promise<void> {
+    if (this.isStreaming || this.dispatchingMessage || this.managingSession) return;
+    this.dispatchingMessage = true;
+    try { await this.sendInternal(service); }
+    catch (error) { new Notice(error instanceof Error ? error.message : "发送失败，原有会话保留。"); }
+    finally { this.dispatchingMessage = false; }
+  }
+
+  private async sendInternal(service: ChatService): Promise<void> {
     if (this.isStreaming) return;
     const content = this.inputEl.value.trim();
+    if (await this.manageAgentSession(content)) return;
     const documents = [...this.importedDocuments];
     if (!content && documents.length === 0) {
       new Notice("先写下你想问 Life OS 的内容。");
@@ -2769,6 +2995,7 @@ export class LifeOSChatView extends ItemView {
     this.resizeComposer();
     const userDisplayContent = this.buildUserMessageContent(content, documents);
     const userMessage: ChatMessage = { role: "user", content: userDisplayContent };
+    this.messagePageStart = null; this.followOutput = true;
     this.messages.push(userMessage);
     this.renderMessages();
     this.scrollLogToBottom();
@@ -2805,7 +3032,7 @@ export class LifeOSChatView extends ItemView {
     this.renderMessages();
     this.scrollLogToBottom();
     this.persistActiveChatState();
-    let assistantContent = this.logEl.lastElementChild?.querySelector(".lifeos-chat-bubble-content") as HTMLElement | null;
+    let assistantContent = this.renderedMessageEls.get(assistant)?.bubble.querySelector(".lifeos-chat-bubble-content") as HTMLElement | null;
     this.abortController = new AbortController();
     this.isStreaming = true;
     this.stopNoticeShown = false;
@@ -2837,7 +3064,7 @@ export class LifeOSChatView extends ItemView {
         streamRenderFrame = null;
       }
       assistant.content = streamed || assistant.content;
-      if (assistantContent) assistantContent.setText(streamed || assistant.content || "正在生成...");
+      if (assistantContent && !this.isContentSelected(assistantContent)) assistantContent.setText(streamed || assistant.content || "正在生成...");
       this.scrollLogToBottom();
       if (persist) {
         this.persistActiveChatState();
@@ -2849,7 +3076,7 @@ export class LifeOSChatView extends ItemView {
       streamRenderFrame = window.requestAnimationFrame(() => {
         streamRenderFrame = null;
         assistant.content = streamed;
-        if (assistantContent) assistantContent.setText(streamed);
+        if (assistantContent && !this.isContentSelected(assistantContent)) assistantContent.setText(streamed);
         this.scrollLogToBottom();
         if (Date.now() - lastStreamPersistAt >= 1000) {
           this.persistActiveChatState();
@@ -3551,7 +3778,20 @@ export class LifeOSChatView extends ItemView {
 
   private scrollLogToBottom(): void {
     if (!this.logEl) return;
+    if (!this.followOutput || this.isContentSelected(this.logEl)) {
+      if (this.latestOutputButton) this.latestOutputButton.hidden = false;
+      return;
+    }
     this.logEl.scrollTop = this.logEl.scrollHeight;
+  }
+
+  private isContentSelected(element: HTMLElement): boolean {
+    const selection = element.ownerDocument.getSelection();
+    if (!selection || selection.isCollapsed) return false;
+    for (let index = 0; index < selection.rangeCount; index++) {
+      if (selection.getRangeAt(index).intersectsNode(element)) return true;
+    }
+    return false;
   }
 
   private buildDiaryConversationWritebackItem(userContent: string, aiContent: string): WritebackItem {
@@ -3562,7 +3802,7 @@ export class LifeOSChatView extends ItemView {
       id: `chat-diary-${Date.now()}`,
       kind: "append",
       title: "写入今日日记",
-      content: `\n## AI 对话记录\n\n${body.join("\n\n")}\n`,
+      content: `\n${markUserSavedConversation(`## AI 对话记录\n\n${body.join("\n\n")}\n`)}\n`,
       targetPath: this.plugin.getTodayNotePath(date),
       checked: true
     };
@@ -3573,7 +3813,7 @@ export class LifeOSChatView extends ItemView {
       id: `chat-diary-candidate-${Date.now()}`,
       kind: "append",
       title: candidate.title,
-      content: `\n${this.appendAttachmentReferences(candidate.content.trim(), documents)}\n`,
+      content: `\n${markUserSavedConversation(this.appendAttachmentReferences(candidate.content.trim(), documents))}\n`,
       targetPath: candidate.targetPath,
       checked: true
     };
@@ -3584,7 +3824,7 @@ export class LifeOSChatView extends ItemView {
       id: `chat-knowledge-${Date.now()}`,
       kind: "append",
       title: candidate.title,
-      content: `${this.appendAttachmentReferences(candidate.content.trimEnd(), documents)}\n`,
+      content: `${markUserSavedConversation(this.appendAttachmentReferences(candidate.content.trimEnd(), documents))}\n`,
       targetPath: candidate.targetPath,
       checked: true
     };
@@ -4126,14 +4366,23 @@ export class LifeOSChatView extends ItemView {
     return content.replace(AI_GENERATED_FOOTER_PATTERN, "").trimEnd();
   }
 
-  private startNewConversation(): void {
-    this.agentSessionId = randomId("lifeos-chat-session");
+  private async startNewConversation(fromCommand = false): Promise<void> {
+    if (this.isStreaming || this.managingSession || (this.dispatchingMessage && !fromCommand)) { new Notice("请先停止当前生成，再新建会话。"); return; }
+    this.managingSession = true;
+    const previousSession = this.agentSessionId;
+    try { await this.manageAgentSession("新建会话"); }
+    catch (error) { new Notice(error instanceof Error ? error.message : "新建失败，原有会话保留。"); return; }
+    finally { this.managingSession = false; }
+    if (previousSession === this.agentSessionId) return;
     this.memoryMode = normalizeAgentMemoryMode(this.plugin.settings.agentMemoryDefaultMode);
     this.messages = [];
+    this.messagePageStart = null; this.followOutput = true;
+    this.renderedMessages.clear(); this.renderedMessageEls = new WeakMap();
     this.importedDocuments = [];
     this.lastImportedDocuments = [];
     this.resetContextCompression();
     this.clearActiveChatState();
+    this.persistActiveChatState();
     this.renderAttachmentList();
     this.renderMessages();
     this.inputEl.value = "";
@@ -4144,8 +4393,7 @@ export class LifeOSChatView extends ItemView {
   private clearCurrentConversation(): void {
     if (this.messages.length === 0) return;
     if (!window.confirm("清空当前会话？不会删除已保存历史。")) return;
-    this.startNewConversation();
-    new Notice("当前会话已清空。", 3000);
+    void this.startNewConversation();
   }
 
   private async saveCurrentChatToLifeOS(): Promise<void> {
@@ -4158,7 +4406,9 @@ export class LifeOSChatView extends ItemView {
       new Notice("没有可保存的内容。");
       return;
     }
-    await this.previewLlmWikiSave(text);
+    // Pasted/imported original material is not a conversation merely because this button lives in Chat.
+    const conversationOrigin = !this.inputEl?.value?.trim() && this.importedDocuments.length === 0 && this.lastImportedDocuments.length === 0;
+    await this.previewLlmWikiSave(text, undefined, conversationOrigin);
   }
 
   private async confirmLlmWikiPersonalSave(text: string): Promise<void> {
@@ -4486,7 +4736,7 @@ export class LifeOSChatView extends ItemView {
     };
   }
 
-  private async previewLlmWikiSave(text: string, overrides?: Partial<LlmWikiSaveInput>): Promise<void> {
+  private async previewLlmWikiSave(text: string, overrides?: Partial<LlmWikiSaveInput>, conversationOrigin = true): Promise<void> {
     if (!requireProFeature(this.plugin, "aiWriteback")) return;
     if (!this.isLlmWikiEnabled()) {
       this.notifyLlmWikiDisabled();
@@ -4503,12 +4753,13 @@ export class LifeOSChatView extends ItemView {
     };
     const selected = await openWritebackPreview(this.app, {
       title: "保存到 Life OS 前确认",
-      description: "确认后会进入 LLM Wiki 的去重、敏感内容和整理流程。",
+      description: "确认后会进入 LLM Wiki 的去重、敏感内容和整理流程。" + (conversationOrigin ? "将标记为用户保存的对话内容，非独立原始事实。" : ""),
       confirmText: "确认保存到 Life OS",
       items: [item],
       onConfirm: async (items) => {
         const content = items[0]?.content.trim();
-        if (content) await this.saveLlmWikiText(content, overrides);
+        if (content) await this.saveLlmWikiText(conversationOrigin ? markUserSavedConversation(content) : content,
+          { ...overrides, ...(conversationOrigin ? { sourcePath: USER_SAVED_CONVERSATION_SOURCE } : {}) });
       }
     });
     if (selected.length === 0) new Notice("已取消保存到 Life OS。", 3000);

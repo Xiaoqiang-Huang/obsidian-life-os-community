@@ -14,6 +14,7 @@ import {
 } from "../licensing/payment-catalog";
 import { compareLicensePlans, resolveLicenseStatus } from "../licensing/entitlement";
 import { verifyLicenseEntitlementToken } from "../licensing/entitlement-token";
+import { accountRuntime } from '../licensing/account-runtime';
 import {
   isPendingOrderStale,
   parseStoredPendingOrder,
@@ -95,6 +96,7 @@ export class ProLicenseView extends ItemView {
 
     this.renderHero(main);
     this.renderStatus(main);
+    this.renderAccountLogin(main);
     this.renderRecoveryPanel(main);
     this.renderServerSettings(main);
     this.renderPurchase(main);
@@ -104,6 +106,50 @@ export class ProLicenseView extends ItemView {
 
   private get client(): LicenseClient {
     return new LicenseClient(this.plugin.settings.licenseApiBaseUrl);
+  }
+
+  private renderAccountLogin(parent:HTMLElement):void {
+    const section=parent.createDiv({cls:'lifeos-card'});
+    section.createEl('h2',{text:'邮箱账号与设备登录'});
+    section.createEl('p',{text:'同一系统用户的多个仓库共享设备名额，各自保留会话。新版登录需后台开通；未切换时继续使用原授权。',cls:'lifeos-muted'});
+    if(!Platform.isDesktopApp){section.createEl('p',{text:'此登录方式暂仅支持桌面端。'});return;}
+    const status=section.createEl('p',{text:this.plugin.settings.licenseAccountSessionId?'已选择账号授权。可检查状态或重新登录；不会自动退回旧授权。':'当前使用原授权方式。',attr:{role:'status','aria-live':'polite'}});
+    const emailLabel=section.createEl('label',{text:'购买邮箱'});
+    const email=emailLabel.createEl('input',{attr:{type:'email',autocomplete:'email',placeholder:'you@example.com'}});
+    email.value=this.plugin.settings.licenseEmail;
+    const codeLabel=section.createEl('label',{text:'邮箱验证码'});
+    const code=codeLabel.createEl('input',{attr:{type:'text',inputmode:'numeric',autocomplete:'one-time-code'}});
+    const deviceLabel=section.createEl('label',{text:'设备名称'});
+    const device=deviceLabel.createEl('input',{attr:{type:'text',maxlength:'80'}});device.value='我的电脑';
+    const actions=section.createDiv({cls:'lifeos-pro-required-actions'});
+    let busy=false,loginToken='';
+    const buttons:HTMLButtonElement[]=[];
+    const run=async(fn:()=>Promise<void>)=>{
+      if(busy)return;busy=true;buttons.forEach(b=>b.disabled=true);status.textContent='正在处理…';
+      try{await fn();}catch(e){const message=e instanceof Error?e.message:'请求失败';status.textContent=message==='not_found'?'后台尚未开启邮箱设备授权，原授权未受影响。':message;}
+      finally{busy=false;buttons.forEach(b=>b.disabled=false);}
+    };
+    const button=(text:string,fn:()=>Promise<void>)=>{const b=actions.createEl('button',{text,attr:{type:'button'}});buttons.push(b);b.onclick=()=>void run(fn);return b;};
+    button('发送验证码',async()=>{await (await accountRuntime(this.plugin)).client.requestCode(email.value.trim());status.textContent='验证码已发送，请查收邮箱。';});
+    const choices=section.createDiv();
+    button('验证邮箱',async()=>{
+      const runtime=await accountRuntime(this.plugin);loginToken=await runtime.client.login(email.value.trim(),code.value.trim());code.value='';
+      const licenses=await runtime.client.licenses(loginToken);choices.empty();
+      const usable=licenses.filter(l=>l.status==='active'&&(!l.expires_at||Date.parse(l.expires_at)>Date.now()));
+      for(const license of usable){
+        const row=choices.createDiv({cls:'lifeos-card'});
+        row.createEl('p',{text:`${license.sku} · 设备 ${license.used_seats} / ${license.max_activations}`});
+        const migrate=this.plugin.settings.licenseSnapshot?.license?.id===license.id&&Boolean(this.plugin.settings.licenseEntitlementToken);
+        const activate=row.createEl('button',{text:migrate?'迁移当前旧授权（复用名额）':'登录此授权',attr:{type:'button'}});buttons.push(activate);
+        activate.onclick=()=>void run(async()=>{await runtime.activate(loginToken,license.id,device.value.trim(),migrate);loginToken='';choices.empty();status.textContent='新版授权已验证并保存，账号模式已启用。';});
+        const reenroll=row.createEl('button',{text:'撤销后重新注册此设备',attr:{type:'button',title:'重新占用一个可用设备名额并创建新会话；不恢复旧会话或旧授权凭证。'}});buttons.push(reenroll);
+        reenroll.onclick=()=>void run(async()=>{await runtime.activate(loginToken,license.id,device.value.trim(),false,true);loginToken='';choices.empty();status.textContent='设备已重新注册，新授权已验证；旧会话仍保持撤销。';});
+      }
+      status.textContent=usable.length?'邮箱验证成功，请选择授权。':'该邮箱没有有效的 Life OS 授权；未改变当前授权。';
+    });
+    button('检查授权状态',async()=>{const payload=await (await accountRuntime(this.plugin)).restore(true);status.textContent=payload?`授权有效，离线凭证截至 ${new Date(payload.expiresAt*1000).toLocaleString()}`:'尚未切换到邮箱账号授权。';});
+    button('退出当前仓库（本地）',async()=>{await (await accountRuntime(this.plugin)).logoutLocal();status.textContent='本仓库已退出；服务端名额未释放。如需退出设备，请在账号中心操作。';});
+    button('管理登录设备',async()=>{window.open(buildAccountCenterUrl(this.plugin.settings.licenseApiBaseUrl),'_blank');status.textContent='已打开账号中心，请登录邮箱管理设备及会话。';});
   }
 
   private renderHero(parent: HTMLElement): void {

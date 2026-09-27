@@ -26,7 +26,7 @@ interface PublicKeyConfig {
 
 const LICENSE_AUDIENCE = "personal-life-system";
 const ENTITLEMENT_CLOCK_SKEW_LEEWAY_SECONDS = 300;
-const LIFEOS_LICENSE_PUBLIC_KEYS: PublicKeyConfig[] = [
+export const LIFEOS_LICENSE_PUBLIC_KEYS: PublicKeyConfig[] = [
   {
     version: "2026-05",
     alg: "ES256",

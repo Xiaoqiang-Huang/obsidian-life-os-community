@@ -1,4 +1,5 @@
-import { App, Modal, Notice, TFile, setIcon } from "obsidian";
+import { LifeOSModal as Modal } from "./LifeOSModal";
+import { App, Notice, TFile, setIcon } from "obsidian";
 import type PersonalLifeSystemPlugin from "../main";
 import type { DisplayLanguage, HeatmapRange } from "../settings";
 import type { DailyActivity } from "../services/ActivityService";

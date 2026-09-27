@@ -15,7 +15,7 @@ export interface ParsedTask {
 /** Parse a markdown task line like "- [ ] Do something #pls/task 📌 2026-05-14 📅 2026-05-15 ^abc123" */
 export function parseTaskLine(line: string): ParsedTask | null {
   const trimmed = line.trim();
-  const openMatch = trimmed.match(/^-\s*\[([ x])\]\s+(.+)$/);
+  const openMatch = trimmed.match(/^-\s*\[([ xX])\]\s+(.+)$/);
   if (!openMatch) return null;
 
   const isOpen = openMatch[1] === " ";

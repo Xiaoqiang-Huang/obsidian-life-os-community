@@ -1,4 +1,5 @@
-import { App, Modal, Notice, setIcon } from "obsidian";
+import { LifeOSModal as Modal } from "../components/LifeOSModal";
+import { App, Notice, setIcon } from "obsidian";
 import { createButton } from "../components/Button";
 import { createModalShell } from "../components/ModalShell";
 import type PersonalLifeSystemPlugin from "../main";
@@ -7,7 +8,7 @@ import { FileSystemService } from "../services/FileSystemService";
 import { MemoryService } from "../services/MemoryService";
 import type { QuickCaptureTarget } from "../types";
 import { formatTime, today } from "../utils/dates";
-import { randomId } from "../utils/ids";
+import { TaskService } from "../services/TaskService";
 import { ensureFile } from "../utils/vault";
 
 const TARGETS: Array<{ id: QuickCaptureTarget; label: string; icon: string; hint: string; success: string }> = [
@@ -19,6 +20,8 @@ const TARGETS: Array<{ id: QuickCaptureTarget; label: string; icon: string; hint
 
 export class QuickCaptureModal extends Modal {
   private selected: QuickCaptureTarget;
+  private isSaving = false;
+  private saveButton: HTMLButtonElement | null = null;
 
   constructor(
     app: App,
@@ -79,7 +82,7 @@ export class QuickCaptureModal extends Modal {
     sourceEl = footer.createDiv({ cls: "lifeos-capture-source", text: this.currentLocationText() });
     const actions = footer.createDiv({ cls: "lifeos-toolbar lifeos-glass-toolbar" });
     createButton(actions, "取消", () => this.close(), { ghost: true });
-    createButton(actions, "保存", () => void this.submit(textarea.value), { icon: "send", primary: true });
+    this.saveButton = createButton(actions, "保存", () => void this.submit(textarea.value), { icon: "send", primary: true });
 
     window.setTimeout(() => textarea.focus(), 20);
   }
@@ -92,16 +95,27 @@ export class QuickCaptureModal extends Modal {
   }
 
   private async submit(value: string): Promise<void> {
+    if (this.isSaving) return;
     const content = value.trim();
     if (!content) {
       new Notice("先写一点内容，再保存到 Life OS。");
       return;
     }
 
-    await this.capture(this.selected, content);
-    const target = TARGETS.find((item) => item.id === this.selected);
-    new Notice(target?.success ?? "已保存到 Life OS", 5000);
-    this.close();
+    const selected = this.selected;
+    this.isSaving = true;
+    if (this.saveButton) this.saveButton.disabled = true;
+    try {
+      await this.capture(selected, content);
+      const target = TARGETS.find((item) => item.id === selected);
+      new Notice(target?.success ?? "已保存到 Life OS", 5000);
+      this.close();
+    } catch (error) {
+      new Notice(`保存失败，输入内容仍保留：${error instanceof Error ? error.message : String(error)}`, 9000);
+    } finally {
+      this.isSaving = false;
+      if (this.saveButton) this.saveButton.disabled = false;
+    }
   }
 
   private async capture(target: QuickCaptureTarget, content: string): Promise<string> {
@@ -125,8 +139,7 @@ export class QuickCaptureModal extends Modal {
 
     if (target === "task") {
       const path = fs.path("Tasks", "open.md");
-      const file = await ensureFile(this.app, path, "# 未完成待办\n\n");
-      await this.app.vault.append(file, `- [ ] ${content} #pls/task ^${randomId("task")}\n`);
+      await new TaskService(this.app, fs).createTask({ title: content });
       return path;
     }
 

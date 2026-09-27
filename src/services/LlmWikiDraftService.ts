@@ -1,6 +1,7 @@
 import { App, TFile, normalizePath } from "obsidian";
 import type { DirectoryLanguage } from "../settings";
 import { LlmWikiPathService } from "./LlmWikiPathService";
+import { LlmWikiChangeService, type WikiChangeSet } from "./LlmWikiChangeService";
 import { appendFile, ensureFolder } from "../utils/vault";
 import { buildKeywordLinkedMarkdown } from "./KeywordLinkService";
 import {
@@ -49,8 +50,13 @@ interface LlmWikiDraftVault {
 export class LlmWikiDraftService {
   private paths: LlmWikiPathService;
 
-  constructor(private app: App, private rootFolder: string, directoryLanguage: DirectoryLanguage = "en") {
+  constructor(private app: App, private rootFolder: string, private directoryLanguage: DirectoryLanguage = "en") {
     this.paths = new LlmWikiPathService(app, rootFolder, directoryLanguage);
+  }
+
+  /** Explicit review entry point; the durable service owns CAS and restart reconciliation. */
+  async applyKnowledgeUpdate(receiptPath: string, approvedVersion: string): Promise<WikiChangeSet> {
+    return new LlmWikiChangeService(this.app, { rootFolder: this.rootFolder, directoryLanguage: this.directoryLanguage }).apply(receiptPath, approvedVersion);
   }
 
   async recommendAcceptance(draftPath: string): Promise<LlmWikiAcceptanceRecommendation> {
@@ -315,6 +321,7 @@ export class LlmWikiDraftService {
       "type: llm-wiki-formal",
       `privacy_level: ${privacyLevel}`,
       `ai_processing_allowed: ${aiProcessingAllowed}`,
+      ...(frontmatter.lifeos_evidence === "user-saved-conversation-v1" ? ["lifeos_evidence: user-saved-conversation-v1"] : []),
       "---",
       "",
       body,

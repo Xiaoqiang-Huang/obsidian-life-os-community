@@ -1,3 +1,5 @@
+import { extractWebArticle } from "./web-article";
+
 export interface WebContextRequestOptions {
   headers?: Record<string, string>;
   method?: "GET" | "POST";
@@ -27,6 +29,9 @@ export interface WebSearchGroundingItem extends WebSearchItem {
   query: string;
   content: string;
   fetched: boolean;
+  readStatus?: "body" | "snippet" | "failed";
+  bodyChars?: number;
+  readWarning?: string;
   evidenceTier?: WebEvidenceTier;
   relevanceScore?: number;
 }
@@ -145,7 +150,7 @@ const WEB_EVIDENCE_INTENT_GROUPS: Array<{ query: RegExp; evidence: RegExp }> = [
   },
   {
     query: /(版本|发布|更新|release|version|changelog)/i,
-    evidence: /(版本|发布|更新|发布日期|release|version|changelog)/i
+    evidence: /(版本|更新日志|发布说明|发布日期|release|version|changelog)/i
   },
   {
     query: /(天气|气温|降雨|预报|weather|temperature|forecast)/i,
@@ -707,6 +712,9 @@ export async function searchWebGrounding(
         ...item,
         content,
         fetched,
+        readStatus: fetched ? "body" : page?.warning ? "failed" : "snippet",
+        bodyChars: content.length,
+        readWarning: page?.warning || undefined,
         evidenceTier,
         relevanceScore: webEvidenceRelevanceScore(evidenceQuery, `${item.title}\n${item.url}\n${item.snippet}\n${content}`, fetched)
       };
@@ -1125,8 +1133,8 @@ async function discoverRelevantOfficialLinks<T extends WebSearchItem & { query: 
   maxResults: number
 ): Promise<T[]> {
   if (!AUTHORITATIVE_SEARCH_RE.test(query)) return [];
-  if (items.some((item) => matchesEvidenceIntent(query, `${item.title} ${item.url} ${item.snippet}`)
-    && isLikelyAuthoritativeResult(query, item))) return [];
+  // A relevant-looking title/snippet is not fetched evidence. In particular,
+  // "Publish" help pages must not prevent discovering actual release notes.
 
   const seeds = items.filter((item) => isOfficialSeedForQuery(query, item)).slice(0, 2);
   const crawl = async (seed: T, inheritedEndorsement = false): Promise<T[]> => {
@@ -1151,14 +1159,19 @@ async function discoverRelevantOfficialLinks<T extends WebSearchItem & { query: 
     }
   };
   const firstHop = dedupeGroundingItems((await Promise.all(seeds.map((seed) => crawl(seed)))).flat());
+  const relevantFirstHop = firstHop.filter(item => matchesEvidenceIntent(query, `${item.title} ${item.url}`));
   const navigationSeeds = firstHop
     .filter((item) => !matchesEvidenceIntent(query, `${item.title} ${item.url}`))
     .filter((item) => isDocumentationNavigation(item.title, item.url))
     .slice(0, 2);
-  const secondHop = navigationSeeds.length > 0
+  const secondHop = relevantFirstHop.length === 0 && navigationSeeds.length > 0
     ? dedupeGroundingItems((await Promise.all(navigationSeeds.map((seed) => crawl(seed, seed.endorsedByOfficial)))).flat())
     : [];
-  return dedupeGroundingItems([...secondHop, ...firstHop]).slice(0, maxResults);
+  // Navigation is a crawl frontier, not query evidence. Do not let localized
+  // pricing/docs navigation consume the result cap ahead of release links.
+  return dedupeGroundingItems([...relevantFirstHop, ...secondHop])
+    .filter(item => matchesEvidenceIntent(query, `${item.title} ${item.url}`))
+    .slice(0, maxResults);
 }
 
 function extractRelevantPageLinks(
@@ -1399,6 +1412,10 @@ function hasConcreteVersionFact(body: string): boolean {
   const releaseContext = /(?:latest|current|stable|public\s+release|general\s+availability|released?|release\s+notes?|changelog|最新版|最新版本|当前版本|稳定版|正式版|正式发布|公开发布|更新至)/iu;
   const versionContext = /(?:version|release|changelog|版本|发布|更新)/iu;
   const identifier = /\bv?\d{1,4}(?:\.\d{1,4}){1,3}(?:[-+][a-z0-9][a-z0-9.-]*)?\b/giu;
+  // Release indexes commonly render the date and version as separate headings.
+  // Accept that structured record, not an arbitrary number near navigation.
+  const datedHeading = /(?:\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+20\d{2}|\b20\d{2}[-/]\d{1,2}[-/]\d{1,2}|20\d{2}年\d{1,2}月\d{1,2}日)\s*\n\s*v?(?!20\d{2}\.\d{1,2}\.\d{1,2}\b)\d{1,4}(?:\.\d{1,4}){1,3}(?:[-+][a-z0-9][a-z0-9.-]*)?\s*(?:\n|$)/iu;
+  if (/(?:changelog|release\s+notes|更新日志|发布说明)/iu.test(body) && datedHeading.test(body)) return true;
   return String(body || "")
     .split(/\r?\n/u)
     .map((line) => line.replace(/\s+/gu, " ").trim())
@@ -1445,7 +1462,7 @@ async function fetchReadableUrlDirect(
     throw new Error(`Browser access challenge while reading ${summarizeUrl(safeUrl)}`);
   }
   const title = extractTitle(response.text);
-  const readable = htmlToReadableText(response.text);
+  const readable = htmlToReadableText(extractWebArticle(response.text) ?? response.text);
   const text = selectRelevantReadableText(readable, focusQuery, maxChars);
   const source = `Source: ${safeUrl}`;
   const direct = !text
@@ -1536,6 +1553,8 @@ async function fetchReadableUrlViaReader(
     URL_TIMEOUT_MS + 8_000,
     `URL reader fallback timed out: ${safeUrl}`
   );
+  if ((response.status ?? 200) >= 400 || isWebAccessChallenge(response.text)) throw new Error("正文备用读取失败：HTTP 错误或访问验证页。");
+  if (response.text.length > 2_000_000) throw new Error("正文备用读取超过大小限制。");
   const text = selectRelevantReadableText(htmlToReadableText(response.text), focusQuery, maxChars);
   if (!text) {
     throw new Error("reader fallback returned no readable text");

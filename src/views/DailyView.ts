@@ -115,9 +115,16 @@ export class DailyView extends ItemView {
 
     await renderStableView(container, async (staging) => {
       const main = createLifeOSShell(staging, this.plugin, "diary");
+      const tabs = main.createDiv({ cls: "lifeos-contextual-tabs", attr: { "aria-label": "日记与回顾" } });
+      createButton(tabs, "日记", () => {}, { icon: "book-open" }).setAttr("aria-current", "page");
+      createButton(tabs, "日历", () => void this.plugin.activateCalendar(), { icon: "calendar-days" });
+      if (this.plugin.settings.enableExamModule) createButton(tabs, "打卡", () => void this.plugin.activateCheckins(), { icon: "graduation-cap" });
+      createButton(tabs, "回顾", () => void this.plugin.activateReview(), { icon: "bar-chart-3" });
+      createButton(tabs, "搜索日记", () => void this.plugin.showDiarySearch(), { icon: "search" });
       createHeroHeader(main, {
+        app: this.app,
       kicker: "\u65e5\u8bb0",
-      title: exists ? "\u4eca\u5929\u7684\u8bb0\u5f55\u5df2\u7ecf\u5f00\u59cb" : "\u5148\u4e3a\u4eca\u5929\u5f00\u4e00\u4e2a\u8bb0\u5f55\u5165\u53e3",
+      title: "日记与回顾",
       description: "\u65e5\u8bb0\u4e0d\u7528\u5b8c\u6574\u3002\u5148\u7559\u4e0b\u51e0\u53e5\u8bdd\uff0c\u4efb\u52a1\u3001\u8bb0\u5fc6\u548c\u590d\u76d8\u624d\u6709\u4e0a\u4e0b\u6587\u3002",
       icon: "book-open",
       actions: [

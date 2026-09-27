@@ -1,6 +1,8 @@
 export interface KeywordLinkOptions {
   title?: string;
   maxKeywords?: number;
+  /** When provided, source-wrapper metadata and filenames are not keyword evidence. */
+  evidence?: string;
 }
 
 export const KEYWORD_LINKS_SECTION_START = "<!-- lifeos-keyword-links:start -->";
@@ -58,7 +60,7 @@ interface KeywordCandidate {
 
 export function buildKeywordLinkedMarkdown(markdown: string, options: KeywordLinkOptions = {}): string {
   const source = String(markdown || "");
-  const keywords = extractKeywordLinks(source, options);
+  const keywords = extractKeywordLinks(options.evidence ?? source, options.evidence !== undefined ? { maxKeywords: options.maxKeywords } : options);
   if (keywords.length === 0) return stripKeywordLinksSection(source).trimEnd() + "\n";
   const withFrontmatter = upsertKeywordFrontmatter(source, keywords);
   return upsertKeywordLinksSection(withFrontmatter, keywords).trimEnd() + "\n";

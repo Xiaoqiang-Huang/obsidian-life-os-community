@@ -2,6 +2,7 @@ export type LifeOSNavKey =
   | "dashboard"
   | "tasks"
   | "diary"
+  | "calendar"
   | "knowledge"
   | "memory"
   | "checkins"

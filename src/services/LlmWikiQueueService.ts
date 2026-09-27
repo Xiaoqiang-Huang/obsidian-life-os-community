@@ -1,5 +1,6 @@
 import { App, TFile } from "obsidian";
 import { FileSystemService } from "./FileSystemService";
+import { readVaultSnapshot, throwIfReadAborted } from "../utils/vault-read-cache";
 
 export interface LlmWikiPendingInventory {
   rawFiles: TFile[];
@@ -16,14 +17,16 @@ export interface LlmWikiPendingInventory {
 export class LlmWikiQueueService {
   constructor(private app: App, private fs: FileSystemService) {}
 
-  async inventory(options: { rawLimit?: number; draftLimit?: number } = {}): Promise<LlmWikiPendingInventory> {
+  async inventory(options: { rawLimit?: number; draftLimit?: number; signal?: AbortSignal } = {}): Promise<LlmWikiPendingInventory> {
+    throwIfReadAborted(options.signal);
     const rawFiles = this.filesUnder(this.fs.path("Knowledge", "LLMWiki", "Raw", "Inbox"));
     const draftCandidates = this.filesUnder(this.fs.path("Knowledge", "LLMWiki", "Wiki", "Drafts"));
     const draftFiles: TFile[] = [];
     for (const file of draftCandidates) {
-      if (await this.isPendingDraft(file)) draftFiles.push(file);
+      if (await this.isPendingDraft(file, options.signal)) draftFiles.push(file);
       if (typeof options.draftLimit === "number" && draftFiles.length >= options.draftLimit) break;
     }
+    throwIfReadAborted(options.signal);
     const limitedRaw = typeof options.rawLimit === "number" ? rawFiles.slice(0, options.rawLimit) : rawFiles;
     return {
       rawFiles: limitedRaw,
@@ -36,13 +39,17 @@ export class LlmWikiQueueService {
     return (await this.inventory()).total;
   }
 
-  async listPendingDrafts(limit?: number): Promise<TFile[]> {
-    return (await this.inventory({ rawLimit: 0, draftLimit: limit })).draftFiles;
+  async listPendingDrafts(limit?: number, signal?: AbortSignal): Promise<TFile[]> {
+    return (await this.inventory({ rawLimit: 0, draftLimit: limit, signal })).draftFiles;
   }
 
-  async isPendingDraft(file: TFile): Promise<boolean> {
-    const cached = this.app.metadataCache?.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
-    const frontmatter = cached ?? this.parseFrontmatter(await this.app.vault.read(file));
+  async isPendingDraft(file: TFile, signal?: AbortSignal): Promise<boolean> {
+    throwIfReadAborted(signal);
+    // Both Today and Knowledge use this inventory. The host metadata index
+    // may lag behind an accepted/skipped draft's file change; count the fresh
+    // read-only snapshot, not its stale indexed status.
+    const frontmatter = this.parseFrontmatter(await readVaultSnapshot(this.app, file.path, signal));
+    throwIfReadAborted(signal);
     return this.scalar(frontmatter.type) === "llm-wiki-draft"
       && this.scalar(frontmatter.status || "draft") === "draft";
   }

@@ -93,7 +93,7 @@ export function appendQuickRecordToMarkdown(markdown: string, recordLine: string
   if (!match) return `${markdown.trimEnd()}\n\n## 快速记录\n${normalizedLine}\n`;
 
   const contentStart = match.index + match[0].length;
-  const nextHeadingOffset = markdown.slice(contentStart).search(/^##\s+/mu);
+  const nextHeadingOffset = markdown.slice(contentStart).search(/^#{1,6}\s+/mu);
   const contentEnd = nextHeadingOffset < 0 ? markdown.length : contentStart + nextHeadingOffset;
   const before = markdown.slice(0, contentStart);
   const section = markdown.slice(contentStart, contentEnd).replace(/^\s*\n/u, "").replace(/\s+$/u, "");

@@ -1,4 +1,14 @@
+import { ResourceBatchModal } from "../modals/ResourceBatchModal";
 import { ItemView, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
+import { readPageSession, savePageSession, savePageScroll, restorePageScroll } from "../utils/page-session-state";
+import { TaskService } from "../services/TaskService";
+import { createSharedProjectDocumentService } from "../services/project-document-factory";
+import { NewProjectDocumentModal } from "../modals/NewProjectDocumentModal";
+import { ProjectDocumentActionModal } from "../modals/ProjectDocumentActionModal";
+import { projectDocumentFileName } from "../services/ProjectDocumentService";
+import { ImportProjectDocumentsModal } from "../modals/ImportProjectDocumentsModal";
+import { NewTaskModal } from "../modals/NewTaskModal";
+import { EditTaskModal, TaskDeleteConfirmModal } from "./TaskManagerView";
 import { createButton } from "../components/Button";
 import { createCard } from "../components/Card";
 import { createEmptyState } from "../components/EmptyState";
@@ -17,6 +27,7 @@ import {
   AiWorkspacePromptModal
 } from "../modals/AiWorkspaceModals";
 import { AiWorkspacePromptStudioModal } from "../modals/AiWorkspacePromptStudioModal";
+import { ProjectGoalModal } from "../modals/ProjectGoalModal";
 import { NewProjectModal } from "../modals/NewProjectModal";
 import { AiWorkspaceService } from "../services/AiWorkspaceService";
 import {
@@ -45,12 +56,12 @@ import {
   AiWorkspaceSessionSummary,
   AiWorkspaceState
 } from "../services/ai-workspace/types";
-import type { LifeOSProject } from "../types";
+import type { LifeOSProject, LifeOSProjectDocument } from "../types";
 import { formatDate } from "../utils/dates";
 import { renderMarkdownDisplay } from "../utils/markdown-render";
 import { renderStableView } from "../utils/stable-view-refresh";
 
-type AiWorkspaceTab = "overview" | "sessions" | "tree" | "versions" | "prompts";
+type AiWorkspaceTab = "overview" | "tasks" | "documents" | "sessions" | "tree" | "versions" | "prompts";
 type ReaderFilter = "all" | "user" | "assistant" | "important";
 type ReaderOrder = "newest" | "oldest";
 
@@ -76,6 +87,8 @@ export class AiWorkspaceView extends ItemView {
   private renderRequestRevision = 0;
   private preserveScrollOnNextRender = true;
   private disposed = false;
+  private resourceQuery = "";
+  private promptQuery = "";
 
   constructor(leaf: WorkspaceLeaf, private plugin: PersonalLifeSystemPlugin) {
     super(leaf);
@@ -86,7 +99,7 @@ export class AiWorkspaceView extends ItemView {
   }
 
   getDisplayText(): string {
-    return "项目上下文";
+    return this.activeTab === "prompts" ? "能力与模板" : "项目";
   }
 
   getIcon(): string {
@@ -94,11 +107,17 @@ export class AiWorkspaceView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
+    const saved = readPageSession<{ project: string; session: string; tab: AiWorkspaceTab; query: string; prompt: string; reader: string; offset: number; filter: ReaderFilter; order: ReaderOrder }>(this.app.vault, this.plugin.getRoot(), "projects");
+    if (saved) { this.selectedProjectId = saved.project; this.selectedSessionId = saved.session; this.activeTab = saved.tab; this.resourceQuery = saved.query; this.promptQuery = saved.prompt; this.readerSearch = saved.reader; this.readerOffset = saved.offset; this.readerFilter = saved.filter; this.readerOrder = saved.order; }
     this.disposed = false;
     await this.render(false);
+    restorePageScroll(this.app.vault, this.plugin.getRoot(), "projects", this.contentEl, () => !this.disposed);
+    if (!this.disposed) this.registerDomEvent(this.contentEl, "scroll", () => savePageScroll(this.app.vault, this.plugin.getRoot(), "projects", this.contentEl));
   }
 
   async onClose(): Promise<void> {
+    savePageScroll(this.app.vault, this.plugin.getRoot(), "projects", this.contentEl);
+    savePageSession(this.app.vault, this.plugin.getRoot(), "projects", { project: this.selectedProjectId, session: this.selectedSessionId, tab: this.activeTab, query: this.resourceQuery, prompt: this.promptQuery, reader: this.readerSearch, offset: this.readerOffset, filter: this.readerFilter, order: this.readerOrder });
     this.disposed = true;
     this.renderQueued = false;
     this.renderRequestRevision += 1;
@@ -108,6 +127,7 @@ export class AiWorkspaceView extends ItemView {
   async refreshFromAutoSync(): Promise<void> {
     await this.render();
   }
+  async openTab(tab: "prompts"): Promise<void> { this.activeTab = tab; await this.render(false); }
 
   private service(): AiWorkspaceService {
     return new AiWorkspaceService(
@@ -155,14 +175,15 @@ export class AiWorkspaceView extends ItemView {
         const main = createLifeOSShell(staging, this.plugin, "workspace");
         main.addClass("lifeos-ai-workspace");
         this.renderHero(main, projects, state, service);
-        if (projects.length === 0) {
+        if (projects.length === 0 && this.activeTab !== "prompts") {
           this.renderNoProjects(main);
           return;
         }
-        this.renderProjectBar(main, projects, state);
+        if (projects.length) this.renderProjectBar(main, projects, state);
         this.renderTabs(main);
         const body = main.createDiv({ cls: `lifeos-ai-workspace-body is-${this.activeTab}` });
         if (this.activeTab === "overview") await this.renderOverview(body, projects, state, service);
+        if (this.activeTab === "tasks" || this.activeTab === "documents") await this.renderProjectResources(body, projects);
         if (this.activeTab === "sessions") await this.renderSessions(body, projects, state, service);
         if (this.activeTab === "tree") await this.renderTree(body, projects, state, service);
         if (this.activeTab === "versions") await this.renderVersions(body, projects, state, service);
@@ -180,6 +201,14 @@ export class AiWorkspaceView extends ItemView {
   private async renderFailure(error: unknown, revision: number, preserveScroll: boolean): Promise<void> {
     const container = this.containerEl.children[1] as HTMLElement | undefined;
     if (!container) return;
+    const current = container.querySelector<HTMLElement>(".lifeos-main");
+    if (current && !this.disposed && revision === this.renderRequestRevision) {
+      current.querySelector(".lifeos-project-refresh-error")?.remove();
+      const errorBar = current.createDiv({ cls: "lifeos-project-refresh-error", attr: { role: "alert" } });
+      errorBar.createSpan({ text: `更新失败，保留上次内容：${error instanceof Error ? error.message : String(error)}` });
+      createButton(errorBar, "重试", () => void this.render(), { icon: "refresh-cw" });
+      current.prepend(errorBar); return;
+    }
     await renderStableView(container, (staging) => {
       const main = staging.createDiv({ cls: "lifeos-ai-workspace-failure" });
       setIcon(main.createSpan(), "triangle-alert");
@@ -206,13 +235,16 @@ export class AiWorkspaceView extends ItemView {
     const selected = projects.find((project) => project.id === this.selectedProjectId);
     const projectSessions = state.sessions.filter((session) => session.projectId === selected?.id);
     createHeroHeader(main, {
-      kicker: "项目上下文",
-      title: selected ? `${selected.name} 的 AI 协作历史` : "把 AI 协作变成可继续的项目资产",
+        app: this.app,
+      kicker: this.activeTab === "prompts" ? "AI 助手" : "项目工作台",
+      title: this.activeTab === "prompts" ? "能力与模板" : selected?.name || "项目",
       description: selected
-        ? `${projectSessions.length} 个会话按来源工具分开管理；每条可见对话都是可追溯节点。`
-        : "绑定工作目录，主动导入会话，再把确认后的结论、任务、提示词和项目事实接回 Life OS。",
+        ? selected.goal || "从任务推进项目，资料和 AI 会话保留来源。"
+        : "任务、资料与 AI 会话共用同一个项目，不复制文件。",
       icon: "git-branch",
       actions: selected ? [
+        { label: "新建任务", icon: "plus", primary: true, onClick: () => new NewTaskModal(this.app, this.plugin, () => this.render(), selected.id).open() },
+        { label: "项目资料", icon: "files", onClick: () => { this.activeTab = "documents"; void this.render(false); } },
         {
           label: "绑定目录",
           icon: "folder-cog",
@@ -306,23 +338,145 @@ export class AiWorkspaceView extends ItemView {
   private renderTabs(main: HTMLElement): void {
     const tabs: Array<{ id: AiWorkspaceTab; label: string; icon: string }> = [
       { id: "overview", label: "项目总览", icon: "layout-dashboard" },
-      { id: "sessions", label: "会话阅读器", icon: "messages-square" },
+      { id: "tasks", label: "任务", icon: "check-square" },
+      { id: "documents", label: "资料", icon: "files" },
+      { id: "sessions", label: "AI 会话", icon: "messages-square" },
       { id: "tree", label: "会话过程树", icon: "git-fork" },
       { id: "versions", label: "会话交接", icon: "clipboard-copy" },
       { id: "prompts", label: "提示词库", icon: "braces" }
     ];
-    const tabbar = main.createDiv({ cls: "lifeos-ai-workspace-tabs", attr: { role: "tablist" } });
+    const tabbar = main.createDiv({ cls: "lifeos-ai-workspace-tabs", attr: { role: "tablist", "aria-label": "项目功能" } });
     for (const tab of tabs) {
       const button = tabbar.createEl("button", {
         cls: tab.id === this.activeTab ? "lifeos-ai-workspace-tab is-active" : "lifeos-ai-workspace-tab",
         attr: { type: "button", role: "tab", "aria-selected": tab.id === this.activeTab ? "true" : "false" }
       });
+      button.setAttr("data-lifeos-focus-key", `project-tab-${tab.id}`);
       setIcon(button.createSpan(), tab.icon);
       button.createSpan({ text: tab.label });
       button.addEventListener("click", () => {
         this.activeTab = tab.id;
         void this.render();
       });
+    }
+  }
+
+  private async renderProjectResources(parent: HTMLElement, projects: LifeOSProject[]): Promise<void> {
+    const project = this.currentProject(projects);
+    if (!project) return;
+    const resources = parent.createDiv({ cls: "lifeos-project-resources" });
+    const fs = new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage);
+    const tasks = new TaskService(this.app, fs), documents = createSharedProjectDocumentService(this.plugin, fs);
+    const actions = resources.createDiv({ cls: "lifeos-actions" });
+    const search = resources.createEl("input", { attr: { type: "search", "aria-label": "搜索项目内容", placeholder: this.activeTab === "tasks" ? "搜索当前项目的任务…" : "搜索当前项目的资料…", "data-lifeos-focus-key": "project-resource-search" } });
+    search.value = this.resourceQuery;
+    const status = resources.createDiv({ cls: "lifeos-muted", attr: { role: "status" } });
+    const list = resources.createDiv();
+    const execute = async (fn: () => Promise<unknown>) => { try { await fn(); await this.render(true); } catch (error) { status.textContent = error instanceof Error ? error.message : String(error); } };
+    if (this.activeTab === "tasks") {
+      createButton(actions, "新建任务", () => new NewTaskModal(this.app, this.plugin, () => this.render(), project.id).open(), { primary: true, icon: "plus" });
+      createButton(actions, "看板与批量操作", () => void this.plugin.activateTasks(project.id), { icon: "columns-3" });
+      const records = (await tasks.loadAllTasks()).filter(task => task.projectId === project.id);
+      let limit = 30;
+      const render = () => {
+        list.empty(); const filtered = records.filter(task => task.text.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase()));
+        status.textContent = `显示 ${Math.min(limit, filtered.length)} / ${filtered.length} 项；项目共 ${records.length} 项`;
+        for (const task of filtered.slice(0, limit)) {
+          const row = list.createDiv({ cls: "lifeos-resource-row" });
+          row.createSpan({ text: task.text });
+          const done = task.isDone || task.source === "done";
+          createButton(row, "", () => void execute(() => tasks.moveTaskToLane(task, done ? "open" : "done")), { icon: done ? "rotate-ccw" : "check" }).setAttr("aria-label", done ? "恢复任务" : "完成任务");
+          createButton(row, "", () => new EditTaskModal(this.app, task, async data => { await tasks.updateTask(task, data); await this.render(true); }).open(), { icon: "pencil" }).setAttr("aria-label", "修改任务");
+          createButton(row, "", () => new TaskDeleteConfirmModal(this.app, 1, async () => { await tasks.deleteTask(task); await this.render(); }).open(), { icon: "trash-2" }).setAttr("aria-label", "删除任务");
+        }
+        if (limit < filtered.length) createButton(list, "显示更多", () => { limit += 30; render(); });
+      };
+      search.oninput = () => { this.resourceQuery = search.value; limit = 30; render(); }; render();
+    } else {
+      list.addClass("lifeos-project-document-list");
+      list.setAttr("data-lifeos-scroll-key", `project-documents-${project.id}`);
+      const revision = this.renderRequestRevision;
+      const isCurrent = () => !this.disposed && revision === this.renderRequestRevision && this.selectedProjectId === project.id && this.activeTab === "documents";
+      const inScope = () => isCurrent() && resources.isConnected;
+      let records: LifeOSProjectDocument[] = [], limit = 30;
+      const opening = new Set<string>();
+      const displayRecords = (latest: LifeOSProjectDocument[]) => {
+        records = latest;
+        const scroll = list.scrollTop;
+        render();
+        list.scrollTop = scroll;
+      };
+      const reload = async () => {
+        const latest = await documents.listDocuments(project);
+        if (inScope()) displayRecords(latest);
+      };
+      createButton(actions, "导入资料", () => { if (inScope() && requireProFeature(this.plugin, "projectDocuments")) new ImportProjectDocumentsModal(this.app, project, documents, this.plugin, reload).open(); }, { primary: true, icon: "upload" });
+      createButton(actions, "新建文档", () => { if (inScope() && requireProFeature(this.plugin, "projectDocuments")) new NewProjectDocumentModal(this.app, project, documents, this.plugin, reload).open(); }, { icon: "file-plus" });
+      createButton(actions, "批量管理", () => {
+        if (!inScope() || !requireProFeature(this.plugin, "projectDocuments")) return;
+        const files = records.map(doc => this.app.vault.getAbstractFileByPath(doc.path)).filter((file): file is TFile => file instanceof TFile);
+        const folder = documents.documentsPath(project);
+        new ResourceBatchModal(this.app, files, folder, reload, path => path.startsWith(folder + "/") && !path.includes("/AI Workspace/")).open();
+      }, { icon: "list-checks" });
+      const render = () => {
+        list.empty();
+        const query = search.value.trim().toLocaleLowerCase();
+        const filtered = records.filter(doc => `${projectDocumentFileName(doc)} ${doc.path} ${doc.title} ${doc.sourceName || ""} ${doc.excerpt || ""}`.toLocaleLowerCase().includes(query));
+        status.setAttr("role", "status");
+        status.textContent = `显示 ${Math.min(limit, filtered.length)} / ${filtered.length} 篇；项目共 ${records.length} 篇`;
+        if (!filtered.length) list.createEl("p", { text: records.length ? "没有匹配的资料，请尝试文档名、路径或正文关键词。" : "暂无项目文档，可以新建文档或导入资料。", cls: "lifeos-muted" });
+        for (const doc of filtered.slice(0, limit)) {
+          const name = projectDocumentFileName(doc);
+          const row = list.createDiv({ cls: "lifeos-project-document-row", attr: { "data-project-document-path": doc.path } });
+          const openSource = async () => {
+            if (!inScope()) return;
+            try {
+              const path = await documents.sourceFilePath(project, doc);
+              if (!inScope()) return;
+              const file = this.app.vault.getAbstractFileByPath(path);
+              if (!(file instanceof TFile)) throw new Error("原文件已移动或删除。");
+              if (!/^(pdf|md|markdown|png|jpg|jpeg|gif|webp|svg|bmp)$/i.test(file.extension)) throw new Error("此格式暂不支持插件内原文件预览。请使用提取正文模式阅读；原文件仍保留在附件目录。");
+              await this.app.workspace.getLeaf("tab").openFile(file, { active: true });
+            } catch (e) { status.textContent = e instanceof Error ? e.message : "原文件打开失败。"; status.setAttr("role", "alert"); new Notice(status.textContent); }
+          };
+          const open = createButton(row, name, async () => {
+            if (doc.textImportMode === "attachment-only") { await openSource(); return; }
+            if (!inScope() || opening.has(doc.path)) return;
+            opening.add(doc.path);
+            try {
+              await documents.readDocument(project, doc);
+              if (!inScope()) return;
+              const file = this.app.vault.getAbstractFileByPath(doc.path);
+              if (!(file instanceof TFile)) throw new Error("文档已移动或删除，请刷新项目资料。");
+              await this.app.workspace.getLeaf("tab").openFile(file, { active: true, state: { mode: "preview" } });
+            } catch (error) {
+              status.textContent = error instanceof Error ? error.message : "文档打开失败。";
+              status.setAttr("role", "alert");
+              new Notice(status.textContent);
+            } finally { opening.delete(doc.path); }
+          }, { icon: "file-text", className: "lifeos-project-document-open" });
+          open.title = doc.path;
+          const rowActions = row.createDiv({ cls: "lifeos-project-document-actions" });
+          if (doc.sourceName) createButton(rowActions, "查看原文件", openSource, { icon: "file", ghost: true });
+          for (const [action, label, icon] of [["edit", "编辑", "file-pen"], ["rename", "重命名", "pencil"], ["trash", "移入回收站", "trash-2"]] as const) {
+            createButton(rowActions, label, () => {
+              if (inScope() && requireProFeature(this.plugin, "projectDocuments")) new ProjectDocumentActionModal(this.app, project, doc, action, documents, this.plugin, reload).open();
+            }, { icon, ghost: true }).setAttr("aria-label", `${label} ${name}`);
+          }
+        }
+        if (limit < filtered.length) createButton(list, "显示更多", () => { limit += 30; render(); });
+      };
+      search.oninput = () => { if (!inScope()) return; this.resourceQuery = search.value; limit = 30; render(); };
+      try {
+        // renderStableView builds off-DOM before committing. Initial data must
+        // populate that staging tree; subsequent user actions still require a
+        // connected, current page and cannot mutate a replaced project view.
+        const latest = await documents.listDocuments(project);
+        if (isCurrent()) displayRecords(latest);
+      } catch (error) {
+        status.textContent = error instanceof Error ? error.message : "项目资料读取失败，请重新打开资料页。";
+        status.setAttr("role", "alert");
+      }
     }
   }
 
@@ -347,7 +501,12 @@ export class AiWorkspaceView extends ItemView {
     const brief = parent.createDiv({ cls: "lifeos-ai-workspace-overview-brief" });
     const briefCopy = brief.createDiv();
     briefCopy.createSpan({ cls: "lifeos-ai-workspace-overview-eyebrow", text: "当前项目" });
-    briefCopy.createEl("strong", { text: project.goal || "尚未填写项目目标" });
+    briefCopy.createEl("strong", { text: project.goal || "添加项目目标", cls: "lifeos-project-goal-text" });
+    createButton(briefCopy, project.goal ? "编辑目标" : "添加目标", () => {
+      if (!requireProFeature(this.plugin, "projectManagement")) return;
+      const fs = new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage);
+      new ProjectGoalModal(this.app, this.plugin, project, new ProjectService(this.app, fs), async () => { await this.render(); }).open();
+    }, { icon: "pencil", ghost: true });
     briefCopy.createEl("p", {
       text: latestSession
         ? this.analysisPreview(
@@ -364,15 +523,18 @@ export class AiWorkspaceView extends ItemView {
     });
     briefMeta.createSpan({ text: latestSession ? `最近活动 ${this.formatTime(latestSession.updatedAt)}` : "暂无活动" });
     const stats = parent.createDiv({ cls: "lifeos-ai-workspace-stats" });
+    const fs = new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage);
+    const projectTasks = (await new TaskService(this.app, fs).loadAllTasks()).filter(task => task.projectId === project.id);
+    const projectDocuments = await createSharedProjectDocumentService(this.plugin, fs).listDocuments(project);
+    this.stat(stats, String(projectTasks.filter(task => !task.isDone && task.source === "open").length), "待办任务", "与任务页面同步");
+    this.stat(stats, String(projectDocuments.length), "项目资料", "同一原文，不复制文档");
     this.stat(stats, String(projectSessions.length), "已导入会话", "按工具分开管理");
-    this.stat(stats, String(projectSessions.reduce((sum, session) => sum + session.messageCount, 0)), "可追溯节点", "每条可见对话一个节点");
     this.stat(
       stats,
       String(facts.length),
       "今日日报摘要",
       confirmedFacts.length > 0 ? `${confirmedFacts.length} 条已由 AI 写入保护区` : `${pendingFacts.length} 条待确认`
     );
-    this.stat(stats, String(state.prompts.filter((prompt) => prompt.status === "active" && (!prompt.projectId || prompt.projectId === project.id)).length), "可用提示词", "全局与项目专属");
 
     const layout = parent.createDiv({ cls: "lifeos-ai-workspace-overview-grid" });
     const mainColumn = layout.createDiv({ cls: "lifeos-ai-workspace-overview-main" });
@@ -430,7 +592,7 @@ export class AiWorkspaceView extends ItemView {
     this.renderDailyFacts(daily, facts, service);
 
     const tools = createCard(sideColumn, "lifeos-panel lifeos-ai-workspace-panel");
-    this.panelHeading(tools, "工具与目录", binding ? "已绑定" : "待绑定", "folder-cog");
+    this.panelHeading(tools, "工具与目录", binding?.workDirectories.length ? "已绑定" : "待绑定", "folder-cog");
     if (!binding?.workDirectories.length) {
       tools.createEl("p", { cls: "lifeos-ai-workspace-muted", text: "尚未绑定项目工作目录。" });
     } else {
@@ -1592,7 +1754,6 @@ export class AiWorkspaceView extends ItemView {
     service: AiWorkspaceService
   ): Promise<void> {
     const project = this.currentProject(projects);
-    if (!project) return;
     const header = parent.createDiv({ cls: "lifeos-ai-workspace-prompt-head" });
     const copy = header.createDiv();
     copy.createEl("h2", { text: "提示词库" });
@@ -1605,15 +1766,15 @@ export class AiWorkspaceView extends ItemView {
         this.plugin,
         service,
         projects,
-        { mode: "generate", projectId: project.id },
+        { mode: "generate", projectId: project?.id },
         () => this.render()
       ).open();
     }, { icon: "wand-sparkles", primary: true });
     createButton(headerActions, "手动新建", () => {
       if (!requireProFeature(this.plugin, "projectDocuments")) return;
       new AiWorkspacePromptModal(this.app, service, this.plugin, projects, {
-        scope: "project",
-        projectId: project.id,
+        scope: project ? "project" : "global",
+        projectId: project?.id,
         tool: "any"
       }, () => this.render()).open();
     }, { icon: "plus", ghost: true });
@@ -1621,13 +1782,14 @@ export class AiWorkspaceView extends ItemView {
       cls: "lifeos-input lifeos-glass-input lifeos-ai-workspace-prompt-search",
       attr: { type: "search", placeholder: "搜索标题或标签" }
     });
+    search.value = this.promptQuery;
     const list = parent.createDiv({ cls: "lifeos-ai-workspace-prompt-list" });
     const renderList = (): void => {
       list.empty();
       const query = search.value.trim().toLowerCase();
       const prompts = state.prompts
         .filter((prompt) => prompt.status === "active")
-        .filter((prompt) => prompt.scope === "global" || prompt.projectId === project.id)
+        .filter((prompt) => prompt.scope === "global" || prompt.projectId === project?.id)
         .filter((prompt) => !query || `${prompt.title} ${prompt.tags.join(" ")}`.toLowerCase().includes(query))
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       if (prompts.length === 0) {
@@ -1636,7 +1798,7 @@ export class AiWorkspaceView extends ItemView {
       }
       for (const prompt of prompts) void this.renderPromptAsset(list, prompt, projects, service);
     };
-    search.addEventListener("input", renderList);
+    search.addEventListener("input", () => { this.promptQuery = search.value; renderList(); });
     renderList();
   }
 

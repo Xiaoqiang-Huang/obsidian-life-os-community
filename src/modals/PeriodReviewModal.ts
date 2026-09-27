@@ -1,11 +1,12 @@
-import { App, Component, Modal, Notice, TFile } from "obsidian";
+import { LifeOSModal as Modal } from "../components/LifeOSModal";
+import { App, Component, Notice, TFile } from "obsidian";
 import { createButton } from "../components/Button";
 import { createModalShell } from "../components/ModalShell";
-import { hasProAccess, requireProFeature } from "../licensing/entitlement";
+import { hasSettingsProAccess, requireProFeature } from "../licensing/entitlement";
 import type { IPlugin } from "../plugin-api";
 import { DailyNoteService } from "../services/DailyNoteService";
 import { FileSystemService } from "../services/FileSystemService";
-import { AutoReviewService } from "../services/AutoReviewService";
+import { AutoReviewService, DraftPromotionPartialError } from "../services/AutoReviewService";
 import {
   PeriodReviewService,
   type PeriodReviewFacts,
@@ -14,6 +15,7 @@ import {
   type PeriodReviewGenerationResult
 } from "../services/PeriodReviewService";
 import type { ReviewQualityReport } from "../services/ReviewQualityService";
+import type { ReviewTagResult } from "../services/ReviewTagService";
 import { formatDate } from "../utils/dates";
 import { renderMarkdownDisplay } from "../utils/markdown-render";
 
@@ -32,11 +34,19 @@ export class PeriodReviewModal extends Modal {
   private quality: ReviewQualityReport | null = null;
   private draftMode: "preview" | "edit" = "preview";
   private instruction = "";
+  private generationStatus = "";
   private refreshToken = 0;
   private readonly markdownComponent = new Component();
   private draftPath = "";
   private draftSourceHash = "";
   private draftStatus: "pending" | "stale" | "saved" | "dismissed" = "pending";
+  private busy = false;
+  private closed = false;
+  private readonly busyControls = new Set<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>();
+  private savedReviewPath = "";
+  private pendingPromotion = false;
+  private savedTagFacts: PeriodReviewFacts | null = null;
+  private tagResults: ReviewTagResult[] = [];
 
   constructor(
     app: App,
@@ -57,19 +67,16 @@ export class PeriodReviewModal extends Modal {
       plugin.settings,
       plugin.ai,
       {
-        hasEntitlement: () => hasProAccess(
-          plugin.settings.licenseSnapshot,
-          new Date(),
-          plugin.settings.licenseEntitlementToken
-        )
+        hasEntitlement: () => hasSettingsProAccess(plugin.settings)
       }
     );
     this.window = initialKind === "custom"
-      ? this.service.windowFor("weekly")
-      : this.service.windowFor(initialKind);
+      ? this.service.defaultWindow("weekly")
+      : this.service.defaultWindow(initialKind);
   }
 
   onOpen(): void {
+    this.closed = false;
     this.markdownComponent.load();
     this.modalEl.addClass("lifeos-modal-host", "lifeos-period-review-modal-host");
     void this.initialize();
@@ -90,11 +97,13 @@ export class PeriodReviewModal extends Modal {
       this.window = draft.window;
       this.draft = draft.draft;
       this.userNotes = draft.userNotes;
+      this.instruction = draft.instruction || "";
     }
     await this.refreshFacts(true);
   }
 
   private async refreshFacts(resetSelection = false): Promise<void> {
+    if (this.busy || this.closed) return;
     const token = ++this.refreshToken;
     const error = this.service.validateWindow(this.window);
     if (error) {
@@ -114,7 +123,7 @@ export class PeriodReviewModal extends Modal {
       this.facts = await this.service.collectFacts(this.kind, this.window, this.selectedPaths);
       if (token !== this.refreshToken) return;
       this.sourceState = this.service.sourceStates(this.facts);
-      if (this.draft.trim()) this.quality = this.service.validateDraft(this.draft, this.facts);
+      if (this.draft.trim()) this.quality = this.service.validateDraft(this.draft, this.facts, this.instruction);
       this.render();
     } catch (error) {
       if (token !== this.refreshToken) return;
@@ -130,7 +139,25 @@ export class PeriodReviewModal extends Modal {
 
   private render(): void {
     const facts = this.facts;
-    if (!facts) return;
+    if (!facts || this.closed) return;
+    if (this.savedReviewPath) {
+      const { body, footer } = createModalShell(this.contentEl, {
+        title: "复盘已保存 · 日记标签凭证", subtitle: this.savedReviewPath, icon: "badge-check"
+      });
+      body.createEl("p", { text: "正式复盘已保存，不会因标签失败再创建一份复盘。标签写入仍核对原文快照；来源有改动时请关闭并重新复盘。" });
+      for (const result of this.tagResults) body.createEl("p", { text: `${result.path}：${result.status === "failed" ? "标签未更新" : result.status === "updated" ? "已更新" : "未改动"}${result.message ? ` · ${result.message}` : ""}` });
+      if (this.pendingPromotion) {
+        body.createEl("p", { text: "正式文件已经保存，草稿收尾尚未完成。关闭会保留当前结果；重试不会创建第二份。" });
+        createButton(footer, "重试完成草稿保存", () => void this.retryPromotion(), { primary: true });
+      } else if (this.tagResults.some(result => result.status === "failed")) createButton(footer, "仅重试失败的日记标签", () => void this.retryDailyTags(), { primary: true });
+      createButton(footer, "打开已保存复盘", async () => {
+        const file = this.app.vault.getAbstractFileByPath(this.savedReviewPath);
+        if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
+      }, { ghost: true });
+      createButton(footer, "关闭", () => this.close(), { ghost: true });
+      if (this.busy) this.setBusy(true);
+      return;
+    }
     const { body, footer } = createModalShell(this.contentEl, {
       title: this.draftPath ? "待确认复盘草稿" : "周期复盘工作台",
       subtitle: this.draftPath
@@ -161,6 +188,7 @@ export class PeriodReviewModal extends Modal {
         className: "lifeos-period-review-primary-action"
       });
     }
+    if (this.busy) this.setBusy(true);
   }
 
   private renderRange(parent: HTMLElement): void {
@@ -169,6 +197,7 @@ export class PeriodReviewModal extends Modal {
     const presets = section.createDiv({ cls: "lifeos-period-review-presets" });
     const addPreset = (label: string, kind: Exclude<PeriodReviewKind, "custom">, reference?: Date) => {
       createButton(presets, label, () => {
+        if (this.busy) return;
         this.kind = kind;
         this.window = this.service.windowFor(kind, reference ? formatDate(reference) : formatDate());
         this.archiveAndResetDraft();
@@ -189,6 +218,7 @@ export class PeriodReviewModal extends Modal {
     const start = this.dateField(fields, "开始日期", this.window.start);
     const end = this.dateField(fields, "结束日期", this.window.end);
     const apply = () => {
+      if (this.busy) return;
       start.value = this.normalizeDateInput(start.value);
       end.value = this.normalizeDateInput(end.value);
       this.kind = "custom";
@@ -292,6 +322,7 @@ export class PeriodReviewModal extends Modal {
       const checkbox = row.createEl("input", { attr: { type: "checkbox", "aria-label": `纳入 ${source.path}` } }) as HTMLInputElement;
       checkbox.checked = this.selectedPaths.has(source.path);
       checkbox.onchange = () => {
+        if (this.busy) return;
         if (checkbox.checked) {
           for (const candidate of facts.allCandidates.filter((item) => item.date === source.date)) this.selectedPaths.delete(candidate.path);
           this.selectedPaths.add(source.path);
@@ -317,14 +348,16 @@ export class PeriodReviewModal extends Modal {
   private renderDraft(parent: HTMLElement): void {
     const section = parent.createDiv({ cls: "lifeos-period-review-section lifeos-period-review-draft" });
     section.createEl("h3", { text: "AI 复盘草稿（待确认）" });
+    if (this.generationStatus) section.createEl("p", { text: this.generationStatus, attr: { role: "status", "aria-live": "polite" } });
     section.createEl("p", { cls: "lifeos-muted", text: "AI 区、用户补充和事实快照彼此隔离。重新生成只更新 AI 区；保存时总会新建正式版本。" });
+    section.createEl("p", { cls: "lifeos-muted", text: "确认保存正式复盘后，将按各篇日记的有效用户内容填充顶部 tags：最多五个有依据的主题，不足不凑数；保留人工标签、日记原文和来源标注。草稿或取消不会写标签。" });
     const userNotes = section.createEl("textarea", {
       cls: "lifeos-input lifeos-period-review-user-notes",
       attr: { placeholder: "用户补充（可选）：写下只属于这份复盘的判断、背景或提醒。AI 重新生成不会覆盖这里。" }
     }) as HTMLTextAreaElement;
     userNotes.value = this.userNotes;
     userNotes.rows = 3;
-    userNotes.oninput = () => { this.userNotes = userNotes.value; };
+    userNotes.oninput = () => { if (!this.busy) this.userNotes = userNotes.value; };
     if (this.draftPath && (this.draftStatus === "stale" || (this.facts && this.draftSourceHash !== this.facts.sourceHash))) {
       section.createDiv({
         cls: "lifeos-period-review-warning",
@@ -337,7 +370,7 @@ export class PeriodReviewModal extends Modal {
     }) as HTMLTextAreaElement;
     instruction.value = this.instruction;
     instruction.rows = 2;
-    instruction.oninput = () => { this.instruction = instruction.value; };
+    instruction.oninput = () => { if (!this.busy) this.instruction = instruction.value; };
 
     const actions = section.createDiv({ cls: "lifeos-period-review-draft-actions" });
     if (this.draft.trim()) {
@@ -360,7 +393,7 @@ export class PeriodReviewModal extends Modal {
           if (!previous) return;
           this.draft = previous;
           this.draftEdited = true;
-          this.quality = this.facts ? this.service.validateDraft(this.draft, this.facts) : null;
+          this.quality = this.facts ? this.service.validateDraft(this.draft, this.facts, this.instruction) : null;
           this.render();
         }, { ghost: true, icon: "history" });
       }
@@ -382,62 +415,82 @@ export class PeriodReviewModal extends Modal {
     draft.value = this.draft;
     draft.rows = 20;
     draft.oninput = () => {
+      if (this.busy) return;
       this.draft = draft.value;
       this.draftEdited = true;
-      this.quality = this.facts ? this.service.validateDraft(this.draft, this.facts) : null;
+      this.quality = this.facts ? this.service.validateDraft(this.draft, this.facts, this.instruction) : null;
     };
   }
 
   onClose(): void {
+    this.closed = true;
+    this.refreshToken += 1;
+    this.busyControls.clear();
     this.markdownComponent.unload();
     this.contentEl.empty();
   }
 
   private async generate(section?: string): Promise<void> {
+    if (this.busy || this.closed) return;
     if (!requireProFeature(this.plugin, "aiReviewGenerate")) return;
     const facts = this.facts;
     if (!facts) return;
-    const changed = await this.service.factsSourceChanges(facts);
-    if (changed.length > 0) {
-      new Notice(`来源已变化，请先刷新来源：${changed.slice(0, 2).join("、")}`, 7000);
-      return;
-    }
-    if (this.draftEdited && this.draft.trim()) {
-      const confirmed = window.confirm("当前 AI 草稿包含手动编辑。继续重新生成会替换 AI 区，但会保留为上一版，用户补充和事实快照不受影响。确认继续吗？");
-      if (!confirmed) return;
-      this.previousDrafts.push(this.draft);
-    } else if (this.draft.trim()) {
-      this.previousDrafts.push(this.draft);
-    }
+    const instruction = this.instruction, previous = this.draft;
+    this.setBusy(true);
     try {
+      const changed = await this.service.factsSourceChanges(facts);
+      if (this.closed) return;
+      if (changed.length > 0) {
+        new Notice(`来源已变化，请先刷新来源：${changed.slice(0, 2).join("、")}`, 7000);
+        return;
+      }
+      if (this.draftEdited && previous.trim()) {
+        const confirmed = window.confirm("当前 AI 草稿包含手动编辑。继续重新生成会替换 AI 区，但会保留为上一版，用户补充和事实快照不受影响。确认继续吗？");
+        if (!confirmed) return;
+      }
+      this.generationStatus = "正在按已确认的日期范围生成草稿；超时会提示，原文不变。";
+      this.render();
       new Notice(section ? `正在重生成${section}…` : "正在生成周期复盘草稿…", 5000);
-      const generated: PeriodReviewGenerationResult = await this.service.generateDraftWithQuality(this.plugin.ai, facts, this.instruction, section);
-      this.draft = section && this.draft.trim()
-        ? this.service.replaceDraftSection(this.draft, section, generated.draft)
+      const generated: PeriodReviewGenerationResult = await this.service.generateDraftWithQuality(this.plugin.ai, facts, instruction, section);
+      if (this.closed) return;
+      if (previous.trim()) this.previousDrafts.push(previous);
+      this.draft = section && previous.trim()
+        ? this.service.replaceDraftSection(previous, section, generated.draft)
         : generated.draft;
-      this.quality = section ? this.service.validateDraft(this.draft, facts) : generated.quality;
+      this.quality = section ? this.service.validateDraft(this.draft, facts, this.instruction) : generated.quality;
+      this.generationStatus = generated.quality.ok ? "草稿已生成，请核对后保存。" : "草稿已保留，但仍有质量问题；请查看检查结果，可编辑或重试。";
       this.draftSourceHash = facts.sourceHash;
       this.draftStatus = "pending";
       this.draftEdited = false;
       this.draftMode = "preview";
       this.render();
     } catch (error) {
-      new Notice(error instanceof Error ? error.message : "AI 生成失败。", 7000);
+      this.generationStatus = error instanceof Error ? error.message : "AI 生成失败，原草稿已保留。";
+      if (!this.closed) this.render();
+      new Notice(this.generationStatus, 7000);
+    } finally {
+      this.setBusy(false);
     }
   }
 
   private async save(): Promise<void> {
+    if (this.busy || this.closed) return;
+    if (this.savedReviewPath) return this.pendingPromotion ? this.retryPromotion() : this.retryDailyTags();
     const facts = this.facts;
     if (!facts || !this.draft.trim()) {
       new Notice("请先生成或填写 AI 复盘草稿。", 5000);
       return;
     }
+    const draft = this.draft, instruction = this.instruction, userNotes = this.userNotes;
+    this.setBusy(true);
+    try {
     const changed = await this.service.factsSourceChanges(facts);
+    if (this.closed) return;
     if (changed.length > 0) {
       new Notice(`来源已变化，请先刷新来源再保存：${changed.slice(0, 2).join("、")}`, 7000);
       return;
     }
-    const quality = this.service.validateDraft(this.draft, facts);
+    const quality = this.service.validateDraft(draft, facts, instruction);
     this.quality = quality;
     if (!quality.ok) {
       this.draftMode = "edit";
@@ -451,20 +504,58 @@ export class PeriodReviewModal extends Modal {
         new Notice("来源已变化，请先重新生成草稿，再保存为正式复盘。", 8000);
         return;
       }
-      await this.autoReviews.refreshDraft(this.draftPath, facts, this.draft, this.userNotes, quality, this.instruction);
-      file = await this.autoReviews.promoteDraft(this.draftPath, this.draft, this.userNotes, this.instruction, facts);
+      if (!this.autoReviews.hasPromotionReceipt(this.draftPath)) await this.autoReviews.refreshDraft(this.draftPath, facts, draft, userNotes, quality, instruction);
+      if (this.closed) return;
+      file = await this.autoReviews.promoteDraft(this.draftPath, draft, userNotes, instruction, facts);
     } else {
-      file = await this.service.saveReview(facts, this.draft, this.instruction, this.userNotes);
+      file = await this.service.saveReview(facts, draft, instruction, userNotes);
     }
-    await this.app.workspace.getLeaf(false).openFile(file);
-    new Notice(`复盘已保存：${file.basename}`, 6000);
-    this.close();
+    this.savedReviewPath = file.path;
+    this.savedTagFacts = facts;
+    const tagResults = await this.service.applyDailyReviewTags(this.plugin.ai, facts, file.path);
+    this.tagResults = tagResults;
+    const failures = tagResults.filter(result => result.status === "failed");
+    const updated = tagResults.filter(result => result.status === "updated").length;
+    new Notice(`复盘已保存：${file.basename}；${updated} 篇日记已更新顶部标签。${failures.length ? ` ${failures.length} 篇标签未更新：${failures.map(result => `${result.path}：${result.message}`).join("；")}` : "资料不足的日记不补造标签。"}`, failures.length ? 12_000 : 6000);
+    if (failures.length) this.render();
+    else {
+      if (!this.closed) await this.app.workspace.getLeaf(false).openFile(file);
+      this.close();
+    }
+    } catch (error) {
+      if (error instanceof DraftPromotionPartialError) {
+        this.savedReviewPath = error.file.path;
+        this.savedTagFacts = facts;
+        this.pendingPromotion = true;
+        this.render();
+      }
+      new Notice(error instanceof Error ? error.message : "复盘保存失败，草稿已保留。", 8000);
+    } finally {
+      this.setBusy(false);
+    }
+  }
+
+  private async retryPromotion(): Promise<void> {
+    if (this.busy || this.closed || !this.pendingPromotion || !this.savedTagFacts) return;
+    this.setBusy(true);
+    try {
+      const file = await this.autoReviews.promoteDraft(this.draftPath, this.draft, this.userNotes, this.instruction, this.savedTagFacts);
+      this.pendingPromotion = false;
+      this.savedReviewPath = file.path;
+      this.tagResults = await this.service.applyDailyReviewTags(this.plugin.ai, this.savedTagFacts, file.path);
+      this.render();
+      new Notice("复盘草稿收尾已完成，未创建重复正式文件。", 6000);
+    } catch (error) { new Notice(error instanceof Error ? error.message : "草稿收尾失败，可保留当前结果后重试。", 8000); }
+    finally { this.setBusy(false); }
   }
 
   private async savePendingDraft(): Promise<void> {
+    if (this.busy || this.closed) return;
     const facts = this.facts;
     if (!facts || !this.draftPath || !this.draft.trim()) return;
-    const quality = this.service.validateDraft(this.draft, facts);
+    this.setBusy(true);
+    try {
+    const quality = this.service.validateDraft(this.draft, facts, this.instruction);
     if (this.draftSourceHash === facts.sourceHash) {
       await this.autoReviews.refreshDraft(this.draftPath, facts, this.draft, this.userNotes, quality, this.instruction);
       this.draftStatus = "pending";
@@ -476,6 +567,42 @@ export class PeriodReviewModal extends Modal {
     this.draftEdited = false;
     new Notice(this.draftStatus === "stale" ? "编辑已保存，但草稿来源仍已过期。" : "待确认草稿已保存。", 5000);
     this.render();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : "草稿保存失败，内容仍保留。", 8000);
+    } finally {
+      this.setBusy(false);
+    }
+  }
+
+  private setBusy(busy: boolean): void {
+    this.busy = busy;
+    this.contentEl.setAttribute("aria-busy", String(busy));
+    if (busy) {
+      for (const control of Array.from(this.contentEl.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("button,input,textarea,select"))) {
+        if (!control.disabled) { this.busyControls.add(control); control.disabled = true; }
+      }
+    } else {
+      for (const control of this.busyControls) control.disabled = false;
+      this.busyControls.clear();
+    }
+  }
+
+  private async retryDailyTags(): Promise<void> {
+    if (this.busy || this.closed || !this.savedTagFacts || !this.savedReviewPath) return;
+    const failed = new Set(this.tagResults.filter(result => result.status === "failed").map(result => result.path));
+    if (!failed.size) return;
+    this.setBusy(true);
+    try {
+      const results = await this.service.applyDailyReviewTags(this.plugin.ai, {
+        ...this.savedTagFacts, sources: this.savedTagFacts.sources.filter(source => failed.has(source.path))
+      }, this.savedReviewPath);
+      this.tagResults = this.tagResults.map(result => results.find(next => next.path === result.path) ?? result);
+      this.render();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : "日记标签重试失败。", 8000);
+    } finally {
+      this.setBusy(false);
+    }
   }
 
   private async createDailyNote(): Promise<void> {

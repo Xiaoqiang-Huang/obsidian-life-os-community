@@ -1,3 +1,12 @@
+import { persistThemeSelection } from "./ui/theme-selection";
+import { resolveVisionSettings } from "./settings";
+import { normalizeTaskSuggestionDailyLimit } from "./services/TaskSuggestionService";
+import { readPageSession, savePageSession } from "./utils/page-session-state";
+import { refreshSidebars } from "./components/Sidebar";
+import { renderSkillPicker } from "./components/SkillPicker";
+import { SkillDetailsModal } from "./modals/SkillDetailsModal";
+import { DocumentBackgroundModal } from "./modals/DocumentBackgroundModal";
+import { importDocumentBackground } from "./ui/document-appearance";
 ﻿import { App, Notice, PluginSettingTab, setIcon } from "obsidian";
 import type PersonalLifeSystemPlugin from "./main";
 import { Setting } from "obsidian";
@@ -50,6 +59,7 @@ interface SettingsSectionDefinition {
 }
 
 const SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
+  { id: "pro", title: "Pro 授权", shortTitle: "Pro 授权", description: "授权状态、服务与管理入口", icon: "badge-check", group: "core" },
   { id: "theme", title: "主题风格", shortTitle: "主题外观", description: "颜色、材质、密度与主题画廊", icon: "palette", group: "core" },
   { id: "ai", title: "AI 模型", shortTitle: "AI 模型", description: "供应商、模型与接口配置", icon: "bot", group: "core" },
   { id: "chat", title: "Chat / AI 助手", shortTitle: "AI 助手", description: "Skill、上下文、回复与写入偏好", icon: "message-circle", group: "core" },
@@ -61,7 +71,7 @@ const SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
   { id: "wiki", title: "LLM Wiki", shortTitle: "LLM Wiki", description: "资料整理、引用与 Chat 上下文", icon: "library", group: "more" },
   { id: "experience", title: "产品体验", shortTitle: "产品体验", description: "自动分析、备考与使用偏好", icon: "sparkles", group: "more" },
   { id: "heatmap", title: "成长热力图", shortTitle: "成长热力图", description: "统计范围、语言与数据来源", icon: "calendar-range", group: "more" },
-  { id: "pro", title: "Pro 授权", shortTitle: "Pro 授权", description: "授权状态、服务与管理入口", icon: "badge-check", group: "more" }
+
 ];
 
 const SETTINGS_SECTION_CLASSES: Record<string, string> = Object.fromEntries(
@@ -95,6 +105,7 @@ interface SettingsDraft {
 export class PersonalLifeSystemSettingTab extends PluginSettingTab {
   private draft!: SettingsDraft;
   private dirty = false;
+  private savingAll = false;
   private aiProviderStatusEl: HTMLElement | null = null;
   private weixinStatusUnsubscribe: (() => void) | null = null;
   private activeSettingsSection: SettingsSectionId = "overview";
@@ -111,6 +122,13 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
   ) {
     super(app, plugin);
     this.resetDraft();
+    if (mode === "full") {
+      const saved = readPageSession<{ section: SettingsSectionId; draft?: SettingsDraft; at: number }>(app.vault, plugin.getRoot(), "settings");
+      if (saved) {
+        this.activeSettingsSection = saved.section;
+        if (saved.draft && Date.now() - saved.at < 30 * 60_000) { this.draft = saved.draft; this.dirty = true; }
+      }
+    }
   }
 
   display(): void {
@@ -207,11 +225,38 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
   }
 
   hide(): void {
+    if (this.mode === "full") savePageSession(this.app.vault, this.plugin.getRoot(), "settings", {
+      section: this.activeSettingsSection, draft: this.dirty ? this.draft : undefined, at: Date.now()
+    });
     this.weixinStatusUnsubscribe?.();
     this.weixinStatusUnsubscribe = null;
   }
 
   private renderSettingsNavigation(parent: HTMLElement): void {
+    const search = parent.createDiv({ cls: "lifeos-settings-search" });
+    const input = search.createEl("input", { cls: "lifeos-input", attr: { type: "search", placeholder: "搜索设置，例如任务提取", "aria-label": "搜索设置" } });
+    const results = search.createDiv({ cls: "lifeos-settings-search-results", attr: { "aria-live": "polite" } });
+    input.oninput = () => {
+      results.empty();
+      const query = input.value.trim().toLocaleLowerCase();
+      if (!query) return;
+      const found = SETTINGS_SECTIONS.filter(section => {
+        const panel = this.containerEl.querySelector<HTMLElement>(`[data-settings-section="${section.id}"]`);
+        // Search label text, never input values or stored secrets.
+        return `${section.title} ${section.description} ${panel?.textContent ?? ""}`.toLocaleLowerCase().includes(query);
+      });
+      for (const section of found) {
+        const button = results.createEl("button", { text: section.shortTitle, attr: { type: "button" } });
+        button.onclick = () => { this.activateSettingsSection(section.id, true); results.empty(); input.value = ""; };
+      }
+      if (!found.length) results.createEl("p", { text: "未找到，试试功能名称或使用下方分类。" });
+    };
+    const mobileLabel = parent.createEl("label", { cls: "lifeos-settings-mobile-picker", text: "设置分类" });
+    const picker = mobileLabel.createEl("select", { attr: { "aria-label": "设置分类" } });
+    picker.createEl("option", { value: "overview", text: "常用配置" });
+    for (const section of SETTINGS_SECTIONS) picker.createEl("option", { value: section.id, text: section.shortTitle });
+    picker.value = this.activeSettingsSection;
+    picker.onchange = () => this.activateSettingsSection(picker.value as SettingsSectionId, true);
     const overview = parent.createDiv({ cls: "lifeos-settings-nav-overview" });
     this.settingsNavButton(overview, "overview", "常用配置", "一页完成高频设置", "layout-dashboard");
 
@@ -247,12 +292,8 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       "主题",
       this.plugin.settings.themeStyle ?? "minimal-warm",
       THEME_STYLES.map((value): [ThemeStyle, string] => [value, this.themeStyleLabel(value)]),
-      async (value) => {
-        this.plugin.settings.themeStyle = value;
-        await this.saveImmediate(this.themeStyleNotice(value));
-        this.display();
-      }
-    );
+      async (value) => { await this.selectTheme(value); }
+    ).addClass("lifeos-theme-style-select");
     this.settingsOverviewInput(appearance, "系统名称", this.draft.systemName, "Life OS", (value) => this.setDraft("systemName", value || "Life OS"));
 
     const ai = this.settingsOverviewCard(grid, "AI 模型", "供应商、模型与连接状态", "bot", "ai");
@@ -429,6 +470,8 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
   private activateSettingsSection(id: SettingsSectionId, moveFocus: boolean): void {
     const target = id === "overview" || SETTINGS_SECTIONS.some((section) => section.id === id) ? id : "overview";
     this.activeSettingsSection = target;
+    const picker = this.settingsNavEl?.querySelector<HTMLSelectElement>(".lifeos-settings-mobile-picker select");
+    if (picker) picker.value = target;
     this.settingsNavEl?.querySelectorAll<HTMLButtonElement>(".lifeos-settings-nav-button").forEach((button) => {
       const active = button.dataset.settingsTarget === target;
       button.toggleClass("is-active", active);
@@ -465,6 +508,14 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
   private renderThemePreferences(parent: HTMLElement): void {
     const card = this.section(parent, "主题风格", "优先放在设置顶部，方便随时切换 Life OS 的颜色、材质和密度。", "palette");
     card.addClass("lifeos-settings-theme-card");
+    this.select(card, "工作台外观", "选择暖白或冷灰使用固定配色；选择下方主题风格时会自动切换为跟随已有主题。", this.plugin.settings.uiAppearance,
+      [["theme", "跟随已有主题"], ["warm-paper", "暖白书写"], ["cool-slate", "冷灰效率"]], async value => {
+        this.plugin.settings.uiAppearance = value; await this.saveImmediate("工作台外观已更新");
+      }, "lifeos-appearance-select");
+    this.select(card, "组件密度", "只调整间距，不缩小系统字体；手机保持可点击范围。", this.plugin.settings.uiDensity,
+      [["standard", "标准"], ["compact", "紧凑"]], async value => {
+        this.plugin.settings.uiDensity = value; await this.saveImmediate("组件密度已更新");
+      });
     const themeDescription = (value: ThemeStyle) => `当前：${this.themeStyleLabel(value)}。切换后立即生效。`;
     this.select<ThemeStyle>(
       card,
@@ -473,17 +524,43 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       this.plugin.settings.themeStyle ?? "minimal-warm",
       THEME_STYLES.map((value): [ThemeStyle, string] => [value, this.themeStyleLabel(value)]),
       async (value) => {
-        const scrollSnapshot = this.captureScrollPositions();
-        this.plugin.settings.themeStyle = value;
-        await this.saveImmediate(this.themeStyleNotice(value));
-        this.refreshThemeSelectionControls(value);
-        this.restoreScrollPositions(scrollSnapshot);
-        this.keepElementVisible(this.containerEl.querySelector<HTMLElement>(".lifeos-theme-style-row") ?? card);
+        await this.selectTheme(value);
       },
       "lifeos-theme-style-select"
     );
     this.renderThemeQuickSwitch(card);
     this.renderThemeGallery(card);
+    this.renderDocumentBackground(card);
+  }
+
+  private renderDocumentBackground(parent: HTMLElement): void {
+    const row = parent.createDiv({ cls: "lifeos-setting-row lifeos-setting-row-vertical lifeos-reader-setting" });
+    row.createDiv({ cls: "lifeos-setting-label", text: "文档阅读背景" });
+    row.createDiv({ cls: "lifeos-setting-description", text: "日记和项目文档跟随当前主题。可选择 Vault 内图片或导入 8 MB 以内的 PNG、JPEG、WebP；图片只保存在本地，正文保持清晰纸面。" });
+    const value = row.createEl("input", { attr: { type: "text", readonly: "true", "aria-label": "当前文档背景", placeholder: "跟随主题（未选择图片）" } });
+    value.value = this.plugin.settings.backgroundImagePath || "";
+    const status = row.createDiv({ attr: { role: "status" } }), actions = row.createDiv({ cls: "lifeos-reader-setting-actions" });
+    let busy = false;
+    const save = async (next: string) => {
+      const before = this.plugin.settings.backgroundImagePath;
+      this.plugin.settings.backgroundImagePath = next;
+      try { await this.plugin.saveSettings(); this.plugin.applyTheme(); value.value = next; status.setText(next ? "背景图片已保存。" : "已恢复主题背景，未删除任何图片。"); }
+      catch (error) { this.plugin.settings.backgroundImagePath = before; status.setText(`背景未保存：${String(error)}`); }
+    };
+    const run = async (action: () => Promise<void>) => {
+      if (busy) return; busy = true; actions.querySelectorAll("button").forEach(b => b.disabled = true);
+      try { await action(); } catch (error) { status.setText(String(error)); }
+      finally { busy = false; actions.querySelectorAll("button").forEach(b => b.disabled = false); }
+    };
+    actions.createEl("button", { text: "选择库内图片", attr: { type: "button" } }).onclick = () => new DocumentBackgroundModal(this.app, file => void run(() => save(file.path))).open();
+    const upload = row.createEl("input", { attr: { type: "file", accept: "image/png,image/jpeg,image/webp", "aria-label": "导入背景图片" } }); upload.hidden = true;
+    actions.createEl("button", { text: "导入图片", attr: { type: "button" } }).onclick = () => upload.click();
+    upload.onchange = () => { const file = upload.files?.[0]; upload.value = ""; if (file) void run(async () => {
+      if (file.size > 8 * 1024 * 1024) throw new Error("图片超过 8 MB，未读取或导入。");
+      const asset = await importDocumentBackground(this.app, this.plugin.getRoot(), file.name, await file.arrayBuffer());
+      await save(asset.path);
+    }); };
+    actions.createEl("button", { text: "恢复主题背景", attr: { type: "button" } }).onclick = () => void run(() => save(""));
   }
 
   private renderThemeQuickSwitch(parent: HTMLElement): void {
@@ -503,12 +580,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       button.createSpan({ cls: "lifeos-theme-quick-title", text: this.themeStyleLabel(value).split(" / ")[0] });
       button.createSpan({ cls: "lifeos-theme-quick-subtitle", text: this.themePreviewDescription(value) });
       button.onclick = async () => {
-        const scrollSnapshot = this.captureScrollPositions();
-        this.plugin.settings.themeStyle = value;
-        await this.saveImmediate(this.themeStyleNotice(value));
-        this.refreshThemeSelectionControls(value);
-        this.restoreScrollPositions(scrollSnapshot);
-        this.keepElementVisible(parent);
+        await this.selectTheme(value);
       };
     }
   }
@@ -534,6 +606,24 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     this.text(card, "助手名称", "AI 助手在聊天页使用的名字。", this.draft.assistantName, (value) => this.setDraft("assistantName", value || "Life OS"));
   }
 
+  private renderVisionSettings(card: HTMLElement): void {
+    this.toggle(card, "启用图片视觉分析", "开启后，AI 助手可把图片附件发送给支持视觉的模型；未开启时图片只作为附件记录，不做识别。", this.plugin.settings.enableVisionFileAnalysis === true, async (value) => {
+      this.plugin.settings.enableVisionFileAnalysis = value;
+      await this.saveImmediate("图片视觉分析设置已保存。");
+    });
+    const visionInput = this.text(card, "视觉模型", "用于图片识别的模型名。主模型不支持图片时填写；独立 Base URL 留空则复用主 API。", this.draft.visionAiModel, (value) => this.setDraft("visionAiModel", value));
+    visionInput.onblur = async () => {
+      this.plugin.settings.visionAiModel = visionInput.value.trim();
+      await this.saveImmediate("视觉模型设置已保存。");
+    };
+
+    this.toggle(card, '主模型支持图片', '按服务商提供的能力确认。开启后图片优先使用上方主模型和 API；不能仅凭 Vision/VL 名称判断。', this.plugin.settings.aiModelSupportsVision === true, async value => { this.plugin.settings.aiModelSupportsVision = value; await this.saveImmediate('主模型图片能力已保存。'); });
+    this.select<'openai-compatible' | 'anthropic-compatible'>(card, '独立视觉 API 协议', '仅在主模型不支持图片时使用。', this.plugin.settings.visionAiProvider || 'openai-compatible', [['openai-compatible','OpenAI Compatible'],['anthropic-compatible','Anthropic Compatible']], async value => { this.plugin.settings.visionAiProvider = value; await this.saveImmediate('视觉协议已保存。'); });
+    const visualBase = this.text(card, '独立视觉 Base URL', '留空复用主 API；填写独立地址时必须同时填写独立密钥，绝不把主密钥发往另一地址。', this.plugin.settings.visionAiBaseUrl || '', value => { this.plugin.settings.visionAiBaseUrl = value.trim(); });
+    visualBase.onblur = () => this.saveImmediate('视觉地址已保存。');
+    this.passwordText(card, '独立视觉 API Key', '仅用于独立视觉服务。点击保存设置保存。', this.plugin.settings.visionAiApiKey || '', value => { this.plugin.settings.visionAiApiKey = value; });
+  }
+
   private renderAi(parent: HTMLElement): void {
     const card = this.section(parent, "AI 模型", "新手只需要选择供应商并填写 API Key，其余高级设置可以保持默认。", "bot");
     this.aiProviderStatusEl = card.createDiv({ cls: "lifeos-provider-status" });
@@ -554,6 +644,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     const current = getAiProviderPreset(this.draft.aiProvider);
     if (current?.note) card.createDiv({ cls: "lifeos-settings-help", text: current.note });
 
+    this.renderVisionSettings(card);
     const advanced = card.createEl("details", { cls: "lifeos-settings-advanced" });
     advanced.createEl("summary", { text: "高级设置" });
     this.text(advanced, "Base URL", "兼容 OpenAI 风格接口的服务地址。", this.draft.aiBaseUrl, (value) => this.setDraft("aiBaseUrl", value));
@@ -585,38 +676,32 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     this.plugin.settings.defaultAiSkillIds = selectedIds;
     this.plugin.settings.defaultAiSkillId = selectedIds[0] ?? "lifeos-general";
 
+    this.toggle(card, "选中文字显示 AI 工具栏", "默认关闭，避免干扰编辑；关闭后仍可通过右键菜单和命令调用 AI。", this.plugin.settings.aiSelectionAutoOpen === true, async value => {
+      this.plugin.settings.aiSelectionAutoOpen = value;
+      this.plugin.clearAutomaticSelectionUi();
+      await this.saveImmediate(value ? "选段自动打开已开启。" : "选段自动打开已关闭，手动入口保留。");
+    });
+    this.select(card,"选段 AI 展示方式","仅在自动打开开启时生效。小工具栏不会抢焦点或自动发送内容。",
+      this.plugin.settings.aiSelectionPresentation === "panel" ? "panel" : "button",
+      [["button","显示选区小工具栏"],["panel","自动打开侧边栏"]],async value=>{
+        this.plugin.settings.aiSelectionPresentation=value;this.plugin.clearAutomaticSelectionUi();
+        await this.saveImmediate("选段 AI 展示方式已保存。");
+      });
     const skillBlock = card.createDiv({ cls: "lifeos-setting-row lifeos-setting-row-vertical" });
     skillBlock.createDiv({ cls: "lifeos-setting-label", text: "默认名人 Skill（可多选）" });
     skillBlock.createDiv({ cls: "lifeos-setting-description", text: `当前组合：${getAiSkills(selectedIds, importedSkills, this.plugin.settings.aiSkillOverrides).map((skill) => skill.name).join(" + ")}。重命名、分类和删除请在 AI 助手的 Skill 管理中完成。` });
-    const skillDetails = skillBlock.createEl("details", { cls: "lifeos-settings-skill-details" });
-    skillDetails.createEl("summary", { text: "展开选择名人 Skill" });
-    for (const category of getAiSkillCategories(this.plugin.settings.customAiSkillCategories)) {
-      const skills = getAiSkillsByCategory(category.id, importedSkills, this.plugin.settings.aiSkillOverrides);
-      if (skills.length === 0) continue;
-      const categoryBlock = skillDetails.createEl("details", { cls: "lifeos-settings-skill-category" });
-      if (category.id === "system" || selectedIds.some((id) => skills.some((skill) => skill.id === id))) categoryBlock.open = true;
-      const summary = categoryBlock.createEl("summary");
-      summary.createSpan({ text: category.label });
-      summary.createSpan({ cls: "lifeos-skill-category-count", text: `${skills.length}` });
-      categoryBlock.createDiv({ cls: "lifeos-settings-skill-category-desc", text: category.description });
-      const skillList = categoryBlock.createDiv({ cls: "lifeos-settings-skill-list" });
-      for (const item of skills) {
-        const label = skillList.createEl("label", { cls: selectedIds.includes(item.id) ? "lifeos-settings-skill-option is-active" : "lifeos-settings-skill-option" });
-        const checkbox = label.createEl("input", { type: "checkbox" });
-        checkbox.checked = selectedIds.includes(item.id);
-        label.createSpan({ cls: "lifeos-settings-skill-name", text: item.name });
-        label.createSpan({ cls: "lifeos-settings-skill-desc", text: item.description });
-        checkbox.onchange = async () => {
-          const next = new Set(normalizeAiSkillIds(this.plugin.settings.defaultAiSkillIds, this.plugin.settings.defaultAiSkillId, importedSkills, this.plugin.settings.aiSkillOverrides));
-          if (checkbox.checked) next.add(item.id);
-          else next.delete(item.id);
-          this.plugin.settings.defaultAiSkillIds = normalizeAiSkillIds(Array.from(next), undefined, importedSkills, this.plugin.settings.aiSkillOverrides);
-          this.plugin.settings.defaultAiSkillId = this.plugin.settings.defaultAiSkillIds[0] ?? "lifeos-general";
-          await this.saveImmediate("默认名人 Skill 组合已保存。");
-          this.display();
-        };
+    renderSkillPicker(skillBlock, {
+      groups: getAiSkillCategories(this.plugin.settings.customAiSkillCategories).map(category => ({ ...category, skills: getAiSkillsByCategory(category.id, importedSkills, this.plugin.settings.aiSkillOverrides) })),
+      selected: selectedIds,
+      inspect: skill => new SkillDetailsModal(this.app, skill).open(),
+      save: async ids => {
+        const previous = this.plugin.settings.defaultAiSkillIds, previousId = this.plugin.settings.defaultAiSkillId;
+        const next = normalizeAiSkillIds(ids, undefined, importedSkills, this.plugin.settings.aiSkillOverrides);
+        this.plugin.settings.defaultAiSkillIds = next; this.plugin.settings.defaultAiSkillId = next[0] ?? "lifeos-general";
+        try { await this.plugin.saveSettings(); return next; }
+        catch (error) { this.plugin.settings.defaultAiSkillIds = previous; this.plugin.settings.defaultAiSkillId = previousId; throw error; }
       }
-    }
+    });
 
     this.select<ChatMode>(card, "默认 Chat 模式", "打开 AI 助手时默认使用的对话模式。", this.plugin.settings.defaultChatMode, [["chat", "日常对话"], ["exam", getExamChatModeLabel(this.plugin.settings)], ["diary", "日记复盘"], ["review", "复盘总结"]], async (value) => {
       this.plugin.settings.defaultChatMode = value;
@@ -705,15 +790,6 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       }
     );
     this.renderAgentMemorySettings(card);
-    this.toggle(card, "启用图片视觉分析", "开启后，AI 助手可把图片附件发送给支持视觉的模型；未开启时图片只作为附件记录，不做识别。", this.plugin.settings.enableVisionFileAnalysis === true, async (value) => {
-      this.plugin.settings.enableVisionFileAnalysis = value;
-      await this.saveImmediate("图片视觉分析设置已保存。");
-    });
-    const visionInput = this.text(card, "视觉模型", "用于图片识别的模型名。未填写时图片识别不可用；请确认你的 API 和模型支持视觉输入。", this.draft.visionAiModel, (value) => this.setDraft("visionAiModel", value));
-    visionInput.onblur = async () => {
-      this.plugin.settings.visionAiModel = visionInput.value.trim();
-      await this.saveImmediate("视觉模型设置已保存。");
-    };
     this.select<PdfOcrEngine>(
       card,
       "PDF OCR 引擎",
@@ -855,6 +931,12 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
 
   private renderAutoReview(parent: HTMLElement): void {
     const card = this.section(parent, "自动复盘草稿", "到点后只生成待确认草稿，不修改日记正文，也不会自动保存为正式复盘。", "calendar-clock");
+    this.select(card, "周报统计周期", "默认总结上一周；本周和手动起止日期可在复盘窗口选择。缺少日志不会扩展日期范围。",
+      this.plugin.settings.weeklyReviewEndsOn === "saturday" ? "saturday" : "sunday",
+      [["sunday", "周一至周日"], ["saturday", "周一至周六"]], async value => {
+        this.plugin.settings.weeklyReviewEndsOn = value;
+        await this.saveImmediate("周报统计周期已保存。");
+      });
     this.toggle(card, "启用自动复盘", "默认关闭。开启后仅在 AI 已配置且当前授权可用时运行。", this.plugin.settings.autoReviewEnabled === true, async (value) => {
       this.plugin.settings.autoReviewEnabled = value;
       await this.saveImmediate(value ? "自动复盘已开启，只会生成待确认草稿。" : "自动复盘已关闭。");
@@ -996,20 +1078,19 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       }
     );
 
-    const visionReady = this.plugin.settings.enableVisionFileAnalysis === true
-      && Boolean(this.plugin.settings.visionAiModel?.trim());
+    const visionReady = Boolean(resolveVisionSettings(this.plugin.settings));
     const visionHint = card.createDiv({ cls: `lifeos-weixin-vision-hint${visionReady ? " is-ready" : " is-warning"}` });
     setIcon(visionHint.createSpan({ cls: "lifeos-weixin-vision-icon" }), visionReady ? "scan-eye" : "image-off");
     visionHint.createSpan({
       text: visionReady
-        ? `图片识别已启用：${this.plugin.settings.visionAiModel.trim()}`
-        : "图片识别尚未启用：请先在“AI 模型”中开启图片视觉分析并填写视觉模型。"
+        ? `图片识别已启用：${resolveVisionSettings(this.plugin.settings)?.aiModel}`
+        : "图片识别尚未启用：请在“AI 模型”中开启图片视觉分析，确认主模型支持图片或配置独立视觉 API。"
     });
 
     const textModelInput = this.text(
       card,
       "微信文字模型（可选）",
-      "普通文字消息优先使用这个稳定的文本模型；留空时通常使用默认模型。若默认模型名称含 Vision/VL，Life OS 会优先从服务模型列表匹配同名文本模型。图片消息仍使用视觉模型。",
+      "留空时使用“AI 模型”中配置的主模型，不再按名称自动切换模型；填写后仅覆盖微信文字消息。",
       this.plugin.settings.weixinTextAiModel,
       (value) => {
         this.plugin.settings.weixinTextAiModel = value;
@@ -1130,7 +1211,16 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       }
     };
     renderConnection(this.plugin.getWeixinConnectionStatus());
-    this.weixinStatusUnsubscribe = this.plugin.subscribeWeixinConnectionStatus(renderConnection);
+    const accessHost = card.createDiv({ cls: 'lifeos-weixin-access-host' });
+    let accessSignature = '';
+    const refreshAccess = () => {
+      const signature = JSON.stringify([this.plugin.settings.weixinPendingPairings, this.plugin.settings.weixinApprovedSenders]);
+      if (signature === accessSignature) return;
+      accessSignature = signature; accessHost.empty();
+      this.renderWeixinPairings(accessHost); this.renderWeixinApprovedSenders(accessHost);
+    };
+    refreshAccess();
+    this.weixinStatusUnsubscribe = this.plugin.subscribeWeixinConnectionStatus(status => { renderConnection(status); refreshAccess(); });
 
     this.select<WeixinSenderPolicy>(
       card,
@@ -1203,8 +1293,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       projectSelect.value = this.plugin.settings.weixinDefaultProjectId;
     }).catch((error) => console.warn("[Life OS] Failed to load Weixin projects", error));
 
-    this.renderWeixinPairings(card);
-    this.renderWeixinApprovedSenders(card);
+
 
     const advanced = card.createEl("details", { cls: "lifeos-weixin-advanced" });
     advanced.createEl("summary", { text: "高级访问控制与使用说明" });
@@ -1440,7 +1529,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     const taskLimitRow = this.row(
       card,
       "单次任务提取上限",
-      "从日记、会话或笔记提取任务时，只保留优先级最高的指定数量，避免一次生成大量低价值任务。可设置 1–50 条，默认 8 条。"
+      "从日记、会话或笔记提取任务时，只保留优先级最高的指定数量，避免一次生成大量低价值任务。可设置 1–50 条，默认 3 条。"
     );
     const taskLimitInput = taskLimitRow.createEl("input", {
       cls: "lifeos-input lifeos-setting-number-input",
@@ -1465,7 +1554,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     const projectTaskLimitRow = this.row(
       card,
       "项目上下文任务上限",
-      "限制项目上下文、会话复盘和自动复盘进入任务池的数量，同时约束次日自动延续。每轮只保留优先级最高的 1–50 条，默认 5 条。"
+      "限制项目上下文、会话复盘和自动复盘进入任务池的数量，后台延续只进入候选建议，不会直接添加任务。每轮只保留优先级最高的 1–50 条，默认 3 条。"
     );
     const projectTaskLimitInput = projectTaskLimitRow.createEl("input", {
       cls: "lifeos-input lifeos-setting-number-input",
@@ -1489,7 +1578,26 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       this.plugin.settings.projectContextTaskExtractionLimit = next;
       await this.saveImmediate(`项目上下文任务上限已设为 ${next} 条。`);
     })();
+    const budgetRow = this.row(card, "每日自动建议上限", "日记、项目与会话等后台来源共用额度，默认每天 5 条，0 表示暂停。忽略或确认不会退还当天额度；主动新建和手动确认提取不占此额度。");
+    const budgetInput = budgetRow.createEl("input", { cls: "lifeos-input", attr: { type: "number", min: "0", max: "50", "aria-label": "每日自动建议上限" } });
+    budgetInput.value = String(normalizeTaskSuggestionDailyLimit(this.plugin.settings.taskSuggestionDailyLimit));
+    budgetInput.onchange = () => void (async () => {
+      this.plugin.settings.taskSuggestionDailyLimit = normalizeTaskSuggestionDailyLimit(budgetInput.value);
+      budgetInput.value = String(this.plugin.settings.taskSuggestionDailyLimit);
+      await this.saveImmediate("自动建议预算已保存。");
+    })();
+    this.toggle(card, "暂停自动任务建议", "保留已有候选和任务，只暂停后台新增；在任务页的候选建议中处理已有内容。", this.plugin.settings.taskSuggestionsPaused === true, async value => {
+      this.plugin.settings.taskSuggestionsPaused = value;
+      await this.saveImmediate("自动任务建议偏好已保存。");
+    });
     this.renderSidebarVisibility(card);
+    this.renderNavigationPins(card);
+  }
+
+  private renderNavigationPins(parent: HTMLElement): void {
+    const section = parent.createDiv({ cls: 'lifeos-navigation-order' });
+    new Setting(section).setName('导航排序').setHeading();
+    section.createEl('p', { text: '直接拖动左侧功能调整顺序，松开后自动保存。也可聚焦导航按钮，按 Alt + 上下方向键移动。前三项作为手机快捷入口；授权与订阅保留在设置上方。' });
   }
 
   private renderSidebarVisibility(parent: HTMLElement): void {
@@ -1537,6 +1645,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
   }
 
   private applySidebarVisibilityToCurrentPage(): void {
+    refreshSidebars(this.plugin);
     const hidden = new Set(this.plugin.settings.hiddenSidebarItems || []);
     for (const item of Array.from(document.querySelectorAll<HTMLElement>(".lifeos-sidebar .lifeos-nav-item[data-nav-key]"))) {
       const key = item.dataset.navKey || "";
@@ -1634,12 +1743,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
         }
 
         button.onclick = async () => {
-          const scrollSnapshot = this.captureScrollPositions();
-          this.plugin.settings.themeStyle = meta.id;
-          await this.saveImmediate(this.themeStyleNotice(meta.id));
-          this.refreshThemeSelectionControls(meta.id);
-          this.restoreScrollPositions(scrollSnapshot);
-          this.keepElementVisible(parent);
+          await this.selectTheme(meta.id);
         };
       }
     }
@@ -1647,16 +1751,27 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     this.applyThemeFamilyFilter(currentFamily);
   }
 
+  private async selectTheme(value: ThemeStyle): Promise<void> {
+    const save = persistThemeSelection(this.plugin, value);
+    this.refreshThemeSelectionControls(this.plugin.settings.themeStyle);
+    const result = await save;
+    if (!result.current) return;
+    this.refreshThemeSelectionControls(this.plugin.settings.themeStyle);
+    if (result.error) new Notice("主题未保存，已恢复到上次保存的外观。请重试。", 7000);
+    else new Notice(this.themeStyleNotice(this.plugin.settings.themeStyle));
+  }
+
   private refreshThemeSelectionControls(value: ThemeStyle): void {
+    const appearanceSelect = this.containerEl.querySelector<HTMLSelectElement>("select.lifeos-appearance-select");
+    if (appearanceSelect) appearanceSelect.value = this.plugin.settings.uiAppearance;
     const currentMeta = getUiThemeMeta(value);
-    this.applyThemeFamilyFilter(currentMeta.family);
+    // Keep the browsed gallery/category in place while the user compares themes.
     this.containerEl.querySelectorAll<HTMLButtonElement>(".lifeos-theme-swatch, .lifeos-theme-preview-card, .lifeos-theme-quick-button").forEach((button) => {
       const isActive = button.dataset.themeStyle === value;
       button.toggleClass("is-active", isActive);
       button.setAttribute("aria-pressed", isActive ? "true" : "false");
     });
-    const themeSelect = this.containerEl.querySelector<HTMLSelectElement>("select.lifeos-theme-style-select");
-    if (themeSelect) themeSelect.value = value;
+    this.containerEl.querySelectorAll<HTMLSelectElement>("select.lifeos-theme-style-select").forEach(select => { select.value = value; });
     const themeDescription = this.containerEl.querySelector<HTMLElement>("[data-lifeos-setting-description='themeStyle']");
     if (themeDescription) themeDescription.setText(`当前：${this.themeStyleLabel(value)}。切换后立即生效。`);
     const themeCurrent = this.containerEl.querySelector<HTMLElement>("[data-lifeos-theme-current='true']");
@@ -1893,6 +2008,14 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
   }
 
   private async saveAll(): Promise<void> {
+    if (this.savingAll) return;
+    this.savingAll = true;
+    const controls = Array.from(this.containerEl.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>("input, button, select, textarea"));
+    const disabled = controls.map(control => control.disabled);
+    controls.forEach(control => control.disabled = true);
+    let persisted = false;
+    const previous = structuredClone(this.plugin.settings);
+    try {
     const draft = this.normalizedAiDraft();
     setStoredAiApiKey(this.plugin.settings, draft.aiProvider, draft.aiApiKey);
     setStoredAiProviderConfig(this.plugin.settings, draft.aiProvider, {
@@ -1904,17 +2027,36 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     });
     Object.assign(this.plugin.settings, draft);
     await this.plugin.saveSettings();
+    persisted = true;
+    this.dirty = false;
+    this.plugin.applyTheme();
     // The Weixin assistant owns a FileSystemService created from the configured
     // Life OS root. Recreate it so root/language changes take effect now.
     await this.plugin.refreshWeixinConnection();
-    this.dirty = false;
-    this.plugin.applyTheme();
     new Notice("Life OS 设置已保存。");
     this.display();
+    } catch (error) {
+      if (!persisted) this.plugin.settings = previous;
+      this.dirty = !persisted;
+      savePageSession(this.app.vault, this.plugin.getRoot(), "settings", { section: this.activeSettingsSection, draft: this.dirty ? this.draft : undefined, at: Date.now() });
+      new Notice(persisted ? `设置已保存，但微信连接重载失败：${String(error)}。可在微信连接中重试。`
+        : `设置未保存到磁盘，输入仍保留在当前页面，请重试保存：${String(error)}`, 7000);
+    } finally {
+      this.savingAll = false;
+      controls.forEach((control, index) => control.disabled = disabled[index]);
+    }
   }
 
   private async restoreDefaults(): Promise<void> {
+    if (this.savingAll) return;
     if (!window.confirm("确认恢复默认设置吗？当前 API Key 和目录配置会被重置，授权码和安装 ID 会保留。")) return;
+    this.savingAll = true;
+    const previous = this.plugin.settings;
+    const controls = Array.from(this.containerEl.querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement | HTMLTextAreaElement>("input, button, select, textarea"));
+    const disabled = controls.map(control => control.disabled);
+    controls.forEach(control => control.disabled = true);
+    let persisted = false;
+    try {
     const preservedLicense = {
       licenseApiBaseUrl: this.plugin.settings.licenseApiBaseUrl,
       licenseInstallationId: this.plugin.settings.licenseInstallationId,
@@ -1944,12 +2086,21 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       weixinReminderRoutes: []
     };
     await this.plugin.saveSettings();
+    persisted = true;
     this.resetDraft();
     this.plugin.applyTheme();
     await this.plugin.refreshBrowserCaptureBridge();
     await this.plugin.refreshWeixinConnection();
     new Notice("已恢复默认设置。");
     this.display();
+    } catch (error) {
+      if (!persisted) this.plugin.settings = previous;
+      new Notice(persisted ? `默认设置已保存，但连接重载失败，请在设置中重试：${String(error)}`
+        : `恢复默认失败，原设置和当前输入已保留：${String(error)}`, 7000);
+    } finally {
+      this.savingAll = false;
+      controls.forEach((control, index) => control.disabled = disabled[index]);
+    }
   }
 
   private resetDraft(): void {
@@ -2005,9 +2156,11 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
   }
 
   private async saveImmediate(message: string): Promise<void> {
+    try {
     await this.plugin.saveSettings();
     this.plugin.applyTheme();
     new Notice(message);
+    } catch (error) { new Notice(`更改仅在本次运行中生效，未保存到磁盘。请点击保存设置重试：${String(error)}`, 7000); }
   }
 
   private section(parent: HTMLElement, title: string, description: string, icon: string): HTMLElement {

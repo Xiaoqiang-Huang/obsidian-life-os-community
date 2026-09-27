@@ -1,4 +1,5 @@
-import { Modal, Notice, TFile, type App } from "obsidian";
+import { LifeOSModal as Modal } from "../components/LifeOSModal";
+import { Notice, TFile, type App } from "obsidian";
 import { createModalShell } from "../components/ModalShell";
 import type { IPlugin } from "../plugin-api";
 import { getExamMetricProfiles, getExamProfileLabel } from "../settings";

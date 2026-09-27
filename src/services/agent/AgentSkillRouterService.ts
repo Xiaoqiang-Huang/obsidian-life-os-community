@@ -1,3 +1,4 @@
+import { taskSkillForQuery } from "./AgentTaskSkills";
 import {
   createImportedAiSkills,
   getAvailableAiSkills,
@@ -49,6 +50,8 @@ export class AgentSkillRouterService {
       };
     }
 
+    const taskId = taskSkillForQuery(query);
+    if (taskId && known.has(taskId)) return { selectedIds: [taskId], matchedIds: [taskId], confidence: 0.9, reason: "semantic", indexSummary: this.summary(index, [taskId]) };
     const queryTokens = this.tokens(query);
     const scored = index
       .filter((item) => !GENERIC_SKILL_IDS.has(item.skill.id))

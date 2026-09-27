@@ -1,3 +1,6 @@
+import { AgentWriteJournal, stableAgentIdentity } from "./AgentWriteJournal";
+import { classifyAgentFailure } from "./AgentFailure";
+import { mayAutoApplyAgentWrite } from "./AgentPermissionPolicy";
 import type { LifeOSAgentToolDescriptor } from "../LifeOSAgentToolRegistry";
 import type {
   LifeOSAgentToolCall,
@@ -16,10 +19,13 @@ export interface LifeOSAgentWriteConfirmation {
 }
 
 export interface AgentToolRuntimeOptions {
+  writeJournal?: AgentWriteJournal;
+  onToolStart?: (call: LifeOSAgentToolCall) => void | Promise<void>;
   confirmWrite?: (descriptor: LifeOSAgentToolDescriptor, call: LifeOSAgentToolCall, context: LifeOSAgentToolExecutionContext) => Promise<LifeOSAgentWriteConfirmation>;
 }
 
 export interface LifeOSAgentPendingWrite {
+  remainingCalls?: LifeOSAgentToolCall[];
   descriptorId: string;
   call: LifeOSAgentToolCall;
   createdAt: number;
@@ -109,21 +115,28 @@ export class AgentToolRuntime {
   }
 
   async confirmPendingWrite(
-    context: LifeOSAgentToolExecutionContext
+    context: LifeOSAgentToolExecutionContext,
+    options: AgentToolRuntimeOptions = {}
   ): Promise<LifeOSAgentToolResult | null> {
     const sessionKey = this.runtimeSessionKey(context);
     const pending = this.pendingWrite(sessionKey);
     if (!pending) return null;
     this.pendingWrites.delete(sessionKey);
-    return this.execute(
+    const result = await this.execute(
       {
         ...pending.call,
         id: `${pending.call.id}-confirmed-${Date.now().toString(36)}`,
         input: { ...pending.call.input }
       },
       { ...context, explicitWriteIntent: true },
-      { confirmWrite: async () => ({ allowed: true, summary: pending.confirmationSummary }) }
+      { ...options, confirmWrite: async () => ({ allowed: true, summary: pending.confirmationSummary }) }
     );
+    if (result.ok && pending.remainingCalls?.length) {
+      const [next, ...remainingCalls] = pending.remainingCalls;
+      const descriptor = this.descriptors.get(next.name);
+      if (descriptor) this.pendingWrites.set(sessionKey, { descriptorId: next.name, call: next, remainingCalls, createdAt: Date.now(), confirmationSummary: this.confirmationSummary(descriptor, next) });
+    } else if (!result.ok) this.pendingWrites.set(sessionKey, pending);
+    return result;
   }
 
   async executeBatch(
@@ -145,13 +158,30 @@ export class AgentToolRuntime {
     const writes = canonical.filter((call) => this.descriptors.get(call.name)?.mode === "write");
     const parallelReads = reads.filter((call) => this.descriptors.get(call.name)?.parallelSafe === true);
     const serialReads = reads.filter((call) => this.descriptors.get(call.name)?.parallelSafe !== true);
-    const readResults = await Promise.all(parallelReads.map((call) => this.execute(call, context, options)));
+    // Fixed worker pool bounds simultaneous tool I/O; preserve result order.
+    // Writes and stateful reads remain serial and retain their permission gates.
+    const readResults: LifeOSAgentToolResult[] = new Array(parallelReads.length);
+    let nextRead = 0;
+    await Promise.all(Array.from({ length: Math.min(3, parallelReads.length) }, async () => {
+      while (nextRead < parallelReads.length) {
+        const index = nextRead++;
+        readResults[index] = await this.execute(parallelReads[index], context, options);
+      }
+    }));
     // Some reads touch shared indexes or provider state and deliberately opt
     // out of parallel execution.  Preserve that contract instead of treating
     // every non-write tool as concurrency-safe.
     for (const call of serialReads) readResults.push(await this.execute(call, context, options));
     const writeResults: LifeOSAgentToolResult[] = [];
-    for (const call of writes) writeResults.push(await this.execute(call, context, options));
+    for (let i = 0; i < writes.length; i++) {
+      const result = await this.execute(writes[i], context, options); writeResults.push(result);
+      if (result.needsConfirmation) {
+        const pending = this.pendingWrites.get(this.runtimeSessionKey(context));
+        if (pending?.call.id === writes[i].id) pending.remainingCalls = writes.slice(i + 1).map(call => ({ ...call, input: { ...call.input } }));
+        // Stop at the exact operation shown to the user. Never overwrite the pending slot.
+        break;
+      }
+    }
     const byId = new Map([...readResults, ...writeResults].map((result) => [result.callId, result]));
     return uniqueCalls.map((call) => {
       const signature = `${call.name}\u001f${JSON.stringify(call.input || {})}`;
@@ -189,16 +219,20 @@ export class AgentToolRuntime {
     if (cached) return { ...cached, callId: call.id, cached: true, durationMs: Date.now() - startedAt };
 
     if (descriptor.mode === "write") {
-      const canAutoWrite = descriptor.confirmation !== "always"
-        && context.permissionMode === "explicit-auto"
-        && context.explicitWriteIntent;
+      const existing = this.pendingWrite(this.runtimeSessionKey(context));
+      if (existing) return { ...this.failure(call, startedAt, "已有待确认操作；请先确认或取消，不会替换该操作。"), needsConfirmation: true, confirmationSummary: existing.confirmationSummary };
+      const canAutoWrite = mayAutoApplyAgentWrite({
+        mode: context.permissionMode,
+        explicitIntent: context.explicitWriteIntent,
+        forceConfirmation: descriptor.confirmation === "always"
+      });
       if (!canAutoWrite) {
-        const defaultConfirmationSummary = `准备执行：${descriptor.description}\n回复“确认”执行，回复“取消”放弃。`;
+        const defaultConfirmationSummary = this.confirmationSummary(descriptor, call);
         const confirmation = options.confirmWrite
           ? await options.confirmWrite(descriptor, call, context)
           : { allowed: false, summary: defaultConfirmationSummary };
         if (!confirmation.allowed) {
-          const confirmationSummary = confirmation.summary || defaultConfirmationSummary;
+          const confirmationSummary = confirmation.summary ? `${confirmation.summary}\n${defaultConfirmationSummary}` : defaultConfirmationSummary;
           this.pendingWrites.set(this.runtimeSessionKey(context), {
             descriptorId: descriptor.id,
             call: {
@@ -224,7 +258,12 @@ export class AgentToolRuntime {
     }
 
     try {
+      await options.onToolStart?.(call);
+      if (context.signal?.aborted) return this.failure(call, startedAt, "执行已取消。");
+      const perform = async (): Promise<LifeOSAgentToolResult> => {
+      if (context.signal?.aborted) throw new Error("执行已取消");
       const value = await executor(this.sanitizeInput(call.input, descriptor), context);
+      if (context.signal?.aborted && descriptor.mode !== "write") return this.failure(call, startedAt, "执行已取消，未使用迟到的读取结果。");
       const output = typeof value === "string" ? value : value.output;
       const result: LifeOSAgentToolResult = {
         callId: call.id,
@@ -234,13 +273,31 @@ export class AgentToolRuntime {
         durationMs: Date.now() - startedAt,
         ...(typeof value === "string" || !value.metadata ? {} : { metadata: value.metadata })
       };
-      this.pendingWrites.delete(this.runtimeSessionKey(context));
+      return result;
+      };
+      const { operationId: suppliedOperation, ...payload } = call.input;
+      const identity = stableAgentIdentity({ tool: call.name, input: payload });
+      const operationId = typeof suppliedOperation === "string" && suppliedOperation.trim() ? suppliedOperation.trim() : `${context.turnId}:${call.name}:${call.id}`;
+      const result = descriptor.mode === "write" && options.writeJournal
+        ? await options.writeJournal.run(this.runtimeSessionKey(context), operationId, identity, perform)
+        : await perform();
+      result.callId = call.id;
+      if (descriptor.mode === "write") result.metadata = { ...result.metadata, operationId };
+
       this.resultCache.set(cacheKey, result);
       if (this.resultCache.size > 400) this.resultCache.delete(this.resultCache.keys().next().value as string);
       return result;
     } catch (error) {
       return this.failure(call, startedAt, error instanceof Error ? error.message : String(error));
     }
+  }
+
+  private confirmationSummary(descriptor: LifeOSAgentToolDescriptor, call: LifeOSAgentToolCall): string {
+    const target = String(call.input.path || call.input.targetPath || call.input.title || call.input.id || "");
+    return `准备执行：${descriptor.description}
+操作编号：${call.id}${target ? `
+目标：${target}` : ""}
+回复“确认”只执行此项，回复“取消”放弃本批尚未执行项。`;
   }
 
   private validate(descriptor: LifeOSAgentToolDescriptor, input: Record<string, unknown>): string {
@@ -280,7 +337,8 @@ export class AgentToolRuntime {
   }
 
   private failure(call: LifeOSAgentToolCall, startedAt: number, error: string): LifeOSAgentToolResult {
-    return { callId: call.id, toolId: call.name, ok: false, output: "", error: this.sanitizeOutput(error), durationMs: Date.now() - startedAt };
+    return { callId: call.id, toolId: call.name, ok: false, output: "", error: this.sanitizeOutput(error), durationMs: Date.now() - startedAt,
+      metadata: classifyAgentFailure(error, this.descriptors.get(call.name)?.mode === "write") };
   }
 
   private cacheKey(call: LifeOSAgentToolCall, context: LifeOSAgentToolExecutionContext): string {

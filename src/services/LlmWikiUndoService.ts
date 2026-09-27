@@ -2,12 +2,18 @@ import { App, TFile } from "obsidian";
 import type { DirectoryLanguage } from "../settings";
 import { appendFile, ensureFolder, normalizePath, readFile } from "../utils/vault";
 import { LlmWikiPathService } from "./LlmWikiPathService";
+import { LlmWikiChangeService, type WikiChangeSet } from "./LlmWikiChangeService";
 
 export class LlmWikiUndoService {
   private paths: LlmWikiPathService;
 
-  constructor(private app: App, rootFolder = "PersonalLifeSystem", directoryLanguage: DirectoryLanguage = "en") {
+  constructor(private app: App, private rootFolder = "PersonalLifeSystem", private directoryLanguage: DirectoryLanguage = "en") {
     this.paths = new LlmWikiPathService(app, rootFolder, directoryLanguage);
+  }
+
+  /** Formal-page undo is version guarded and durable; batch trash permissions stay unchanged. */
+  async undoKnowledgeUpdate(receiptPath: string, approvedVersion: string): Promise<WikiChangeSet> {
+    return new LlmWikiChangeService(this.app, { rootFolder: this.rootFolder, directoryLanguage: this.directoryLanguage }).undo(receiptPath, approvedVersion);
   }
 
   async undoBatch(batchPath: string): Promise<string[]> {

@@ -1,3 +1,4 @@
+import type { AgentRequestBudget } from "./AgentRequestBudget";
 import type { AiImageUrlContentPart, AiMessage, AiResponse } from "../../ai";
 import type { ChatContextBundle } from "../ChatContextService";
 import type { AgentCompactionResult } from "./AgentContextCompactor";
@@ -5,6 +6,7 @@ import type { AgentCompactionResult } from "./AgentContextCompactor";
 export type LifeOSAgentChannel = "desktop" | "weixin";
 
 export type LifeOSAgentStopReason =
+  | "partial"
   | "completed"
   | "needs-user"
   | "permission-denied"
@@ -104,6 +106,7 @@ export interface LifeOSAgentToolResult {
 export type LifeOSAgentPermissionMode = "read-only" | "confirm" | "explicit-auto";
 
 export interface LifeOSAgentToolExecutionContext {
+  requestBudget?: AgentRequestBudget;
   channel: LifeOSAgentChannel;
   /** Public conversation identity used by tools, routes, logs, and UI events. */
   sessionId: string;

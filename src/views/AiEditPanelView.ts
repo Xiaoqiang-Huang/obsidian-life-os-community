@@ -1,8 +1,11 @@
 import { ItemView, WorkspaceLeaf } from "obsidian";
 import { AI_EDIT_PANEL_VIEW_TYPE } from "../constants";
 import type PersonalLifeSystemPlugin from "../main";
+import { applyExperienceTheme } from "../ui/theme";
+import { installLifeOSResponsiveShell } from "../utils/responsive-shell";
 
 export class AiEditPanelView extends ItemView {
+  private disposeResponsive: (() => void) | null = null;
   constructor(
     leaf: WorkspaceLeaf,
     private plugin: PersonalLifeSystemPlugin
@@ -25,6 +28,9 @@ export class AiEditPanelView extends ItemView {
   async onOpen(): Promise<void> {
     this.contentEl.empty();
     this.contentEl.addClass("lifeos-ai-edit-panel-view");
+    this.contentEl.addClass("lifeos-v3");
+    applyExperienceTheme(this.contentEl, this.plugin.settings);
+    this.disposeResponsive = installLifeOSResponsiveShell(this.contentEl);
     this.contentEl.setAttr("data-lifeos-ai-edit-panel", "true");
     const loading = this.contentEl.createDiv({ cls: "lifeos-ai-edit-panel-empty is-loading" });
     loading.createEl("strong", { text: "AI 修改侧边栏" });
@@ -42,6 +48,9 @@ export class AiEditPanelView extends ItemView {
 
   async onClose(): Promise<void> {
     this.plugin.unmountAiEditPanel();
+    this.disposeResponsive?.();
+    this.disposeResponsive = null;
+    this.contentEl.removeClass("lifeos-v3");
     this.contentEl.removeClass("lifeos-ai-edit-panel-view");
     this.contentEl.removeAttribute("data-lifeos-ai-edit-panel");
     this.contentEl.empty();

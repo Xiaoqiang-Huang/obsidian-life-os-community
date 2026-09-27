@@ -1,5 +1,10 @@
+import { installHostPopoverScope } from "../utils/host-popover-scope";
+import { createSharedProjectDocumentService } from "../services/project-document-factory";
+import { LifeOSModal as Modal } from "../components/LifeOSModal";
+import { TaskSuggestionsModal } from "../modals/TaskSuggestionsModal";
+import { readPageSession, savePageSession, savePageScroll, restorePageScroll } from "../utils/page-session-state";
 import type { App, TAbstractFile } from "obsidian";
-import { ItemView, Modal, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
+import { ItemView, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import { TASKS_VIEW_TYPE } from "../constants";
 import type PersonalLifeSystemPlugin from "../main";
 import { createButton } from "../components/Button";
@@ -23,6 +28,8 @@ import { TaskService, type TaskBatchUpdate, type TaskLane } from "../services/Ta
 import type { LifeOSProject, LifeOSProjectDocument, LifeOSProjectSummary, LifeOSTask } from "../types";
 import { formatDate, today } from "../utils/dates";
 import { renderMarkdownDisplay } from "../utils/markdown-render";
+import { disposeLifeOSResponsiveShells } from "../utils/responsive-shell";
+import { throwIfReadAborted, withReadSignal } from "../utils/vault-read-cache";
 import {
   captureStableViewState,
   renderStableView,
@@ -36,9 +43,23 @@ const TASK_COLUMN_INITIAL_LIMIT: Record<"today" | "open" | "done", number> = {
   done: 8
 };
 
+interface MountedTaskWorkspace {
+  context: string;
+  tasksKey: string;
+  root: HTMLElement;
+  main: HTMLElement;
+  layout: HTMLElement;
+  detail: HTMLElement;
+  board: HTMLElement;
+  documentsSlot: HTMLElement;
+  columns: Map<TaskLane, (tasks: LifeOSTask[]) => void>;
+}
+
 export class TaskManagerView extends ItemView {
   private toastEl: HTMLElement | null = null;
   private selectedProjectId: string | null = null;
+  private taskQuery = "";
+  private mobileLane: TaskLane | "" = "";
   private refreshTimer: number | null = null;
   private renderPromise: Promise<void> | null = null;
   private renderQueued = false;
@@ -50,6 +71,17 @@ export class TaskManagerView extends ItemView {
   private taskColumnVisibleLimits = new Map<string, number>();
   private projectDocumentsExpanded = false;
   private draggedTask: LifeOSTask | null = null;
+  private mountedWorkspace: MountedTaskWorkspace | null = null;
+  private latestOverview: LifeOSProjectOverview | null = null;
+  private documentsDirty = true;
+  private documentsRequestRevision = 0;
+  private closed = false;
+  private projectDocumentQueries = new Map<string, string>();
+  private taskReadController: AbortController | null = null;
+  private documentReadController: AbortController | null = null;
+  private documentReadScope = "";
+  private taskStructureKey: string | null = null;
+  private taskStructurePending: { key: string; promise: Promise<void> } | null = null;
 
   constructor(leaf: WorkspaceLeaf, private plugin: PersonalLifeSystemPlugin) {
     super(leaf);
@@ -64,30 +96,93 @@ export class TaskManagerView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
+    const saved = readPageSession<{ project: string | null; query: string; lane: TaskLane | ""; selected: string[]; limits: [string, number][]; documents: boolean; docQueries: [string, string][] }>(this.app.vault, this.plugin.getRoot(), "tasks");
+    if (saved) { this.selectedProjectId = saved.project; this.taskQuery = saved.query; this.mobileLane = saved.lane; this.selectedTaskKeys = new Set(saved.selected); this.taskColumnVisibleLimits = new Map(saved.limits); this.projectDocumentsExpanded = saved.documents; this.projectDocumentQueries = new Map(saved.docQueries); }
+    this.closed = false;
     this.renderLoadingState();
-    void this.render(false);
+    void this.render(false).then(() => {
+      if (this.closed) return;
+      restorePageScroll(this.app.vault, this.plugin.getRoot(), "tasks", this.contentEl, () => !this.closed);
+      this.registerDomEvent(this.contentEl, "scroll", () => savePageScroll(this.app.vault, this.plugin.getRoot(), "tasks", this.contentEl));
+    });
     const refresh = (file: TAbstractFile): void => {
-      if (this.vaultRefreshSuppression > 0 || !this.shouldRefreshForFile(file)) return;
+      if (!this.shouldRefreshForFile(file)) return;
+      this.taskReadController?.abort();
+      this.invalidateProjectDocuments(file);
+      if (this.vaultRefreshSuppression > 0) return;
       this.scheduleVaultRefresh();
     };
     this.registerEvent(this.app.vault.on("create", refresh));
     this.registerEvent(this.app.vault.on("modify", refresh));
     this.registerEvent(this.app.vault.on("delete", refresh));
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+      this.invalidateProjectDocuments(file);
+      this.invalidateProjectDocuments(oldPath);
+      const relevant = this.shouldRefreshForFile(file) || this.shouldRefreshForFile(oldPath);
+      if (relevant) this.taskReadController?.abort();
       if (this.vaultRefreshSuppression > 0) return;
-      if (this.shouldRefreshForFile(file) || this.shouldRefreshForFile(oldPath)) this.scheduleVaultRefresh();
+      if (relevant) this.scheduleVaultRefresh();
     }));
   }
 
   async onClose(): Promise<void> {
+    savePageScroll(this.app.vault, this.plugin.getRoot(), "tasks", this.contentEl);
+    savePageSession(this.app.vault, this.plugin.getRoot(), "tasks", { project: this.selectedProjectId, query: this.taskQuery, lane: this.mobileLane, selected: [...this.selectedTaskKeys], limits: [...this.taskColumnVisibleLimits], documents: this.projectDocumentsExpanded, docQueries: [...this.projectDocumentQueries] });
     if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
     this.renderRequestRevision += 1;
+    this.documentsRequestRevision += 1;
+    this.taskReadController?.abort();
+    this.documentReadController?.abort();
+    this.taskStructureKey = null;
+    this.closed = true;
+    this.renderQueued = false;
+    this.mountedWorkspace = null;
+    this.updateTaskBatchUi = null;
+    this.latestOverview = null;
+    disposeLifeOSResponsiveShells(this.contentEl);
   }
 
   /** Refresh hook used by the shared Agent after changing task view preferences. */
   refreshFromExternalChange(): void {
+    this.mountedWorkspace = null;
+    this.cancelDocumentRead();
     void this.render(true);
+  }
+
+  async openProject(projectId: string): Promise<void> {
+    this.selectedProjectId = projectId; this.taskQuery = "";
+    await this.render(false);
+  }
+
+  private invalidateProjectDocuments(file: TAbstractFile | string): void {
+    const path = (typeof file === "string" ? file : file.path).replace(/\\/g, "/");
+    const fs = new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage);
+    const root = fs.path("Projects").replace(/\\/g, "/").replace(/\/+$/g, "");
+    if (path === root || path.startsWith(`${root}/`) || (path && root.startsWith(`${path}/`))) this.cancelDocumentRead();
+  }
+
+  private cancelDocumentRead(): void {
+    this.documentsDirty = true;
+    this.documentsRequestRevision += 1;
+    this.documentReadController?.abort();
+    this.documentReadController = null;
+    this.mountedWorkspace?.documentsSlot.removeAttribute("aria-busy");
+    this.mountedWorkspace?.documentsSlot.querySelector(".lifeos-project-doc-load-error button")?.removeAttribute("disabled");
+  }
+
+  private async ensureTaskStructure(fs: FileSystemService, signal: AbortSignal): Promise<void> {
+    const key = JSON.stringify([fs.root, this.plugin.settings.directoryLanguage]);
+    const required = [fs.path("Tasks", "open.md"), fs.path("Tasks", "done.md"), fs.path("Projects", "index.md")];
+    if (this.taskStructureKey === key && required.every(path => this.app.vault.getAbstractFileByPath(path) instanceof TFile)) return;
+    if (!this.taskStructurePending || this.taskStructurePending.key !== key) {
+      const pending = { key, promise: Promise.resolve() };
+      pending.promise = this.plugin.ensureBaseStructure().then(() => {
+        if (!this.closed) this.taskStructureKey = key;
+      }).finally(() => { if (this.taskStructurePending === pending) this.taskStructurePending = null; });
+      this.taskStructurePending = pending;
+    }
+    await withReadSignal(this.taskStructurePending.promise, signal);
   }
 
   private scheduleVaultRefresh(): void {
@@ -103,7 +198,7 @@ export class TaskManagerView extends ItemView {
     const fs = new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage);
     const roots = [fs.path("Tasks"), fs.path("Projects")]
       .map((entry) => entry.replace(/\\/g, "/").replace(/\/+$/g, ""));
-    return roots.some((root) => path === root || path.startsWith(`${root}/`));
+    return roots.some((root) => path === root || path.startsWith(`${root}/`) || Boolean(path && root.startsWith(`${path}/`)));
   }
 
   private async withVaultRefreshSuppressed<T>(operation: () => Promise<T>): Promise<T> {
@@ -116,6 +211,13 @@ export class TaskManagerView extends ItemView {
   }
 
   private async render(preserveScroll = true): Promise<void> {
+    if (this.closed) return;
+    this.taskReadController?.abort();
+    const documentScope = JSON.stringify([this.plugin.getRoot(), this.plugin.settings.directoryLanguage, this.selectedProjectId]);
+    if (documentScope !== this.documentReadScope) {
+      this.cancelDocumentRead();
+      this.documentReadScope = documentScope;
+    }
     if (this.refreshTimer !== null) {
       window.clearTimeout(this.refreshTimer);
       this.refreshTimer = null;
@@ -142,26 +244,27 @@ export class TaskManagerView extends ItemView {
   private async renderPass(revision: number, preserveScroll: boolean): Promise<void> {
     const container = this.containerEl.children[1] as HTMLElement | undefined;
     if (!container) return;
-    // Capture before any asynchronous reads. If another refresh is already in
-    // flight, waiting until the DOM swap can otherwise snapshot a scrollTop
-    // that Obsidian has already reset after the clicked control lost focus.
-    const stableViewState = preserveScroll ? captureStableViewState(container) : null;
+    const controller = new AbortController();
+    this.taskReadController = controller;
+    const { signal } = controller;
     try {
-      await this.plugin.ensureBaseStructure();
-      if (revision !== this.renderRequestRevision) return;
       const fs = new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage);
+      await this.ensureTaskStructure(fs, signal);
+      if (revision !== this.renderRequestRevision || signal.aborted) return;
       const service = new TaskService(this.app, fs);
       const projectService = new ProjectService(this.app, fs);
       const projectDocumentService = this.createProjectDocumentService(fs);
       const projectWhiteboardService = new ProjectWhiteboardService(this.app, fs);
-      const [all, projects] = await Promise.all([service.loadAllTasks(), projectService.loadProjects()]);
-      if (revision !== this.renderRequestRevision) return;
+      const [all, projects] = await Promise.all([service.loadAllTasks(signal), projectService.loadProjects(signal)]);
+      if (revision !== this.renderRequestRevision || signal.aborted) return;
       const open = all.filter((task) => task.source === "open" && !task.isDone);
       const done = all.filter((task) => task.source === "done" || task.isDone);
       const overview = ProjectService.buildOverview(projects, open, done);
+      this.latestOverview = overview;
       const selectedSummary = this.findSelectedSummary(overview);
-      const visibleOpen = selectedSummary ? selectedSummary.openTasks : open;
-      const visibleDone = selectedSummary ? selectedSummary.doneTasks : done;
+      const matches = (task: LifeOSTask) => !this.taskQuery.trim() || task.text.toLocaleLowerCase().includes(this.taskQuery.trim().toLocaleLowerCase());
+      const visibleOpen = (selectedSummary ? selectedSummary.openTasks : open).filter(matches);
+      const visibleDone = (selectedSummary ? selectedSummary.doneTasks : done).filter(matches);
       const showCompleted = this.plugin.settings.taskManagerShowCompleted !== false;
       const displayedDone = showCompleted ? visibleDone : [];
       const visibleTaskKeys = new Set([...visibleOpen, ...displayedDone].map((task) => this.taskStableKey(task)));
@@ -169,9 +272,39 @@ export class TaskManagerView extends ItemView {
       const todayTasks = this.filterTodayTasks(visibleOpen);
       const pendingTasks = visibleOpen.filter((task) => this.taskLane(task) === "open");
       const defaultProjectId = this.selectedProjectId && this.selectedProjectId !== "unassigned" ? this.selectedProjectId : undefined;
+      const context = JSON.stringify([
+        this.plugin.getRoot(), this.plugin.settings.directoryLanguage, this.selectedProjectId,
+        showCompleted, projects, this.plugin.settings.themeStyle, this.plugin.settings.systemName,
+        this.plugin.settings.hiddenSidebarItems, this.plugin.settings.enableExamModule
+      ]);
+      const tasksKey = JSON.stringify([all, formatDate(), this.taskQuery]);
+      const mounted = this.mountedWorkspace;
+      container.querySelector(".lifeos-task-load-error")?.remove();
+      if (mounted?.root.isConnected && mounted.context === context) {
+        if (mounted.tasksKey !== tasksKey) {
+          const stableViewState = preserveScroll ? captureStableViewState(container) : null;
+          const restoreFocus = this.captureTaskActionFocus(container);
+          this.replaceTaskRegion(mounted.layout, ".lifeos-project-panel", (host) => this.renderProjectList(host, overview));
+          this.replaceTaskRegion(mounted.detail, ".lifeos-task-summary-grid", (host) => this.renderSummary(host, todayTasks, pendingTasks, visibleDone));
+          this.updateTaskBatchUi = null;
+          this.replaceTaskRegion(mounted.detail, ".lifeos-task-batch-toolbar", (host) => this.renderTaskBatchToolbar(host, {
+            today: todayTasks, open: pendingTasks, done: displayedDone
+          }, service, projects, done.length), mounted.board);
+          mounted.columns.get("today")?.(todayTasks);
+          mounted.columns.get("open")?.(pendingTasks);
+          mounted.columns.get("done")?.(displayedDone);
+          this.replaceTaskRegion(mounted.board, ".lifeos-board-column-note", (host) => this.renderAutoColumn(host, visibleOpen.length, service));
+          mounted.board.toggleClass("is-empty-board", visibleOpen.length === 0 && displayedDone.length === 0);
+          mounted.tasksKey = tasksKey;
+          restoreFocus();
+          if (stableViewState) restoreStableViewState(container, stableViewState, () => revision === this.renderRequestRevision);
+        }
+        this.refreshMountedDocuments(mounted, overview, projects, projectDocumentService, projectWhiteboardService);
+        return;
+      }
       this.updateTaskBatchUi = null;
       let nextToastEl: HTMLElement | null = null;
-      let projectDocumentsSlot: HTMLElement | null = null;
+      let nextWorkspace: MountedTaskWorkspace | null = null;
       const swapped = await renderStableView(container, (staging) => {
         const shellMain = createLifeOSShell(staging, this.plugin, "tasks");
         shellMain.addClass("lifeos-task-workspace");
@@ -183,8 +316,11 @@ export class TaskManagerView extends ItemView {
         const layout = shellMain.createDiv({ cls: "lifeos-project-task-layout" });
         this.renderProjectList(layout, overview);
         const detail = layout.createDiv({ cls: "lifeos-project-task-detail" });
+        const search = detail.createEl("input", { attr: { type: "search", placeholder: "搜索当前项目的任务…", "aria-label": "搜索任务", "data-lifeos-focus-key": "task-query" } });
+        search.value = this.taskQuery;
+        search.oninput = () => { this.taskQuery = search.value; this.scheduleVaultRefresh(); };
         this.renderSummary(detail, todayTasks, pendingTasks, visibleDone);
-        projectDocumentsSlot = this.renderProjectDocumentsLoading(detail);
+        const projectDocumentsSlot = this.renderProjectDocumentsLoading(detail);
         this.renderTaskBatchToolbar(detail, {
           today: todayTasks,
           open: pendingTasks,
@@ -197,39 +333,85 @@ export class TaskManagerView extends ItemView {
           showCompleted ? "" : "is-completed-hidden"
         ].filter(Boolean).join(" ");
         const board = detail.createDiv({ cls: boardClasses });
-        this.renderColumn(board, "today", "今日任务", "今天明确要推进的任务", todayTasks, service, "calendar-check");
-        this.renderColumn(board, "open", "待完成", "仍在待办池，不会丢失", pendingTasks, service, "circle");
-        if (showCompleted) this.renderColumn(board, "done", "已完成", "完成后自动归档到这里", visibleDone, service, "check-circle-2");
+        board.dataset.mobileLane = this.mobileLane === "done" && !showCompleted ? "open" : this.mobileLane || (todayTasks.length ? "today" : "open");
+        const tabs = detail.createDiv({ cls: "lifeos-task-mobile-tabs", attr: { role: "tablist", "aria-label": "任务状态" } });
+        detail.insertBefore(tabs, board);
+        for (const [key, label] of [["today", "今日"], ["open", "待办"], ...(showCompleted ? [["done", "已完成"]] : [])]) {
+          const button = createButton(tabs, label, () => {
+            board.dataset.mobileLane = key;
+            this.mobileLane = key as TaskLane;
+            tabs.querySelectorAll<HTMLButtonElement>("button").forEach(item => item.setAttribute("aria-selected", String(item === button)));
+          });
+          button.setAttribute("role", "tab"); button.setAttribute("aria-selected", String(key === board.dataset.mobileLane));
+        }
+        const columns = new Map<TaskLane, (tasks: LifeOSTask[]) => void>();
+        columns.set("today", this.renderColumn(board, "today", "今日任务", "今天明确要推进的任务", todayTasks, service, "calendar-check"));
+        columns.set("open", this.renderColumn(board, "open", "待完成", "仍在待办池，不会丢失", pendingTasks, service, "circle"));
+        if (showCompleted) columns.set("done", this.renderColumn(board, "done", "已完成", "完成后自动归档到这里", visibleDone, service, "check-circle-2"));
         this.renderAutoColumn(board, visibleOpen.length, service);
+        detail.appendChild(projectDocumentsSlot);
+        nextWorkspace = {context, tasksKey, root: staging.firstElementChild as HTMLElement,
+          main: shellMain, layout, detail, board, documentsSlot: projectDocumentsSlot, columns};
       }, {
-        preserveScroll: false,
-        isCurrent: () => revision === this.renderRequestRevision
+        preserveScroll,
+        isCurrent: () => revision === this.renderRequestRevision && !signal.aborted && !this.closed
       });
       if (!swapped) return;
-      if (stableViewState) {
-        restoreStableViewState(container, stableViewState, () => revision === this.renderRequestRevision);
-      }
       this.toastEl = nextToastEl;
-      if (projectDocumentsSlot) {
-        void this.hydrateProjectDocuments(
-          projectDocumentsSlot,
-          revision,
-          overview,
-          projects,
-          projectDocumentService,
-          projectWhiteboardService
-        );
+      this.mountedWorkspace = nextWorkspace;
+      this.cancelDocumentRead();
+      if (nextWorkspace) {
+        this.refreshMountedDocuments(nextWorkspace, overview, projects, projectDocumentService, projectWhiteboardService);
       }
     } catch (error) {
-      if (revision !== this.renderRequestRevision) return;
+      if (revision !== this.renderRequestRevision || signal.aborted || this.closed) return;
       console.error("[Life OS] Failed to render task manager", error);
       this.renderTaskErrorState(container, error);
+    } finally {
+      if (this.taskReadController === controller) this.taskReadController = null;
     }
+  }
+
+  private replaceTaskRegion(parent: HTMLElement, selector: string, build: (host: HTMLElement) => void, before: HTMLElement | null = null): void {
+    const previous = parent.querySelector(selector);
+    const staging = parent.ownerDocument.createElement("div");
+    build(staging);
+    if (previous) previous.replaceWith(...Array.from(staging.childNodes));
+    else if (staging.firstChild) parent.insertBefore(staging.firstChild, before);
+  }
+
+  private captureTaskActionFocus(container: HTMLElement): () => void {
+    const active = container.ownerDocument.activeElement as HTMLElement | null;
+    const card = active?.closest<HTMLElement>("[data-lifeos-task-key]");
+    if (!active || !container.contains(active) || (!card && !active.closest(".lifeos-task-batch-toolbar"))) return () => {};
+    const adjacent = card ? [card.nextElementSibling, card.previousElementSibling] : [];
+    const action = [".is-state", ".is-edit", ".is-delete", ".lifeos-task-lane-select", ".lifeos-task-select"]
+      .find((selector) => active.matches(selector)) ?? ".lifeos-task-select";
+    return () => {
+      if (active.isConnected) return;
+      const sameControl = Array.from(container.querySelectorAll<HTMLElement>("[data-lifeos-focus-key]"))
+        .find((element) => element.dataset.lifeosFocusKey === active.dataset.lifeosFocusKey && !element.matches(":disabled"));
+      const neighbor = adjacent.find((node) => node?.isConnected) as HTMLElement | undefined;
+      const target = sameControl ?? neighbor?.querySelector<HTMLElement>(action)
+        ?? container.querySelector<HTMLElement>(".lifeos-task-select-all")
+        ?? container.querySelector<HTMLElement>(".lifeos-board-empty:not([hidden]) button");
+      target?.focus({preventScroll: true});
+    };
+  }
+
+  private refreshMountedDocuments(mounted: MountedTaskWorkspace, overview: LifeOSProjectOverview, projects: LifeOSProject[], service: ProjectDocumentService, whiteboards: ProjectWhiteboardService): void {
+    if (!this.documentsDirty) return;
+    this.documentsDirty = false;
+    this.documentReadController?.abort();
+    const controller = new AbortController();
+    this.documentReadController = controller;
+    void this.hydrateProjectDocuments(mounted.documentsSlot, ++this.documentsRequestRevision, overview, projects, service, whiteboards, controller);
   }
 
   private renderLoadingState(): void {
     const container = this.containerEl.children[1] as HTMLElement | undefined;
     if (!container) return;
+    disposeLifeOSResponsiveShells(container);
     container.empty();
     const main = createLifeOSShell(container, this.plugin, "tasks");
     main.addClass("lifeos-task-workspace", "is-loading");
@@ -263,17 +445,24 @@ export class TaskManagerView extends ItemView {
   }
 
   private renderTaskErrorState(container: HTMLElement, error: unknown): void {
-    container.empty();
-    const main = createLifeOSShell(container, this.plugin, "tasks");
+    const preserved = this.mountedWorkspace?.root.isConnected;
+    if (!preserved) {
+      disposeLifeOSResponsiveShells(container);
+      container.empty();
+    }
+    const main = preserved ? this.mountedWorkspace!.main : createLifeOSShell(container, this.plugin, "tasks");
     main.addClass("lifeos-task-workspace");
+    main.querySelector(".lifeos-task-load-error")?.remove();
     const card = main.createDiv({ cls: "lifeos-task-load-error" });
+    card.setAttr("role", "alert");
+    main.prepend(card);
     setIcon(card.createSpan({ cls: "lifeos-task-load-error-icon" }), "triangle-alert");
     const copy = card.createDiv();
-    copy.createEl("h2", { text: "任务加载失败" });
+    copy.createEl("h2", { text: preserved ? "任务更新失败，仍保留上次内容" : "任务加载失败" });
     copy.createEl("p", { text: error instanceof Error ? error.message : "暂时无法读取任务，请重试。" });
     createButton(card, "重新加载", () => {
-      this.renderLoadingState();
-      void this.render(false);
+      if (!preserved) this.renderLoadingState();
+      void this.render(Boolean(preserved));
     }, { primary: true, icon: "refresh-cw" });
   }
 
@@ -296,33 +485,46 @@ export class TaskManagerView extends ItemView {
     overview: LifeOSProjectOverview,
     projects: LifeOSProject[],
     service: ProjectDocumentService,
-    whiteboards: ProjectWhiteboardService
+    whiteboards: ProjectWhiteboardService,
+    controller: AbortController
   ): Promise<void> {
+    const { signal } = controller;
+    const isCurrent = () => !signal.aborted && revision === this.documentsRequestRevision && slot.isConnected && !this.closed;
+    slot.setAttr("aria-busy", "true");
+    slot.querySelector<HTMLButtonElement>(".lifeos-project-doc-load-error button")?.setAttr("disabled", "");
     try {
-      await this.withVaultRefreshSuppressed(() => renderStableView(slot, async (staging) => {
-        await this.renderProjectDocuments(staging, overview, projects, service, whiteboards);
+      // Reading documents must not swallow unrelated task/file events while
+      // large sources are loading. New project folders coalesce normally.
+      await renderStableView(slot, async (staging) => {
+        await withReadSignal(this.renderProjectDocuments(staging, overview, projects, service, whiteboards, signal), signal);
       }, {
         preserveScroll: true,
-        isCurrent: () => revision === this.renderRequestRevision && slot.isConnected
-      }));
-    } catch (error) {
-      if (revision !== this.renderRequestRevision || !slot.isConnected) return;
-      await renderStableView(slot, (staging) => {
-        const panel = staging.createDiv({ cls: "lifeos-project-doc-panel is-error" });
-        panel.createEl("h2", { text: "项目文档暂时无法加载" });
-        panel.createEl("p", { text: error instanceof Error ? error.message : "请稍后重试。" });
-        createButton(panel, "重试", () => void this.hydrateProjectDocuments(
-          slot,
-          revision,
-          overview,
-          projects,
-          service,
-          whiteboards
-        ), { ghost: true, icon: "refresh-cw" });
-      }, {
-        preserveScroll: true,
-        isCurrent: () => revision === this.renderRequestRevision && slot.isConnected
+        isCurrent
       });
+    } catch (error) {
+      if (!isCurrent()) return;
+      const state = captureStableViewState(slot);
+      slot.querySelector(".lifeos-project-doc-load-error")?.remove();
+      const previous = slot.querySelector(".lifeos-project-doc-panel:not(.is-loading)");
+      slot.querySelector(".lifeos-project-doc-panel.is-loading")?.remove();
+      const panel = slot.createDiv({ cls: "lifeos-project-doc-panel is-error lifeos-project-doc-load-error", attr: { role: "alert" } });
+      slot.prepend(panel);
+      const head = panel.createDiv({ cls: "lifeos-project-doc-head" });
+      const copy = head.createDiv({ cls: "lifeos-project-doc-head-copy" });
+      copy.createEl("h2", { text: previous ? "项目文档更新失败，仍保留上次内容" : "项目文档暂时无法加载" });
+      copy.createEl("p", { text: error instanceof Error ? error.message : "请稍后重试。" });
+      createButton(head, "重试", () => {
+        this.documentsDirty = true;
+        void this.render(true);
+      }, { ghost: true, icon: "refresh-cw" });
+      restoreStableViewState(slot, state, isCurrent);
+      // A failed project must not leave other projects reading in the background.
+      controller.abort();
+    } finally {
+      if (this.documentReadController === controller) {
+        slot.removeAttribute("aria-busy");
+        this.documentReadController = null;
+      }
     }
   }
 
@@ -342,12 +544,17 @@ export class TaskManagerView extends ItemView {
     copy.createEl("h1", { text: "行动清单" });
     copy.createEl("p", { text: "把今天要推进的事放在这里。完成后归档，未完成会延续，不会丢失。" });
     const toolbar = header.createDiv({ cls: "lifeos-toolbar" });
+    createButton(toolbar, "候选建议", () => new TaskSuggestionsModal(this.app, this.plugin, () => void this.render()).open(), { ghost: true, icon: "list-filter" });
     createButton(toolbar, "新建任务", () => new NewTaskModal(this.app, this.plugin, () => this.render(), defaultProjectId).open(), { primary: true, icon: "plus" });
-    createButton(toolbar, "新增项目", () => {
+    const more = toolbar.createEl("details", { cls: "lifeos-page-more" });
+    more.createEl("summary", { text: "更多", attr: { "aria-label": "任务更多操作" } });
+    const menu = more.createDiv({ cls: "lifeos-page-more-menu" });
+    createButton(menu, "新增项目", () => {
+      more.open = false;
       if (!requireProFeature(this.plugin, "projectManagement")) return;
       new NewProjectModal(this.app, this.plugin, () => this.render()).open();
-    }, { primary: true, icon: "folder-plus" });
-    createButton(toolbar, "从今日日记提取", () => void this.extractTasksFromToday(), { ghost: true, icon: "wand-2" });
+    }, { ghost: true, icon: "folder-plus" });
+    createButton(menu, "从今日日记提取", () => { more.open = false; void this.extractTasksFromToday(); }, { ghost: true, icon: "wand-2" });
   }
 
   private renderSummary(parent: HTMLElement, todayTasks: LifeOSTask[], pendingTasks: LifeOSTask[], done: LifeOSTask[]): void {
@@ -355,7 +562,6 @@ export class TaskManagerView extends ItemView {
     this.summaryItem(stats, "今日任务", String(todayTasks.length), "今天优先处理", "calendar-check");
     this.summaryItem(stats, "待完成", String(pendingTasks.length), "仍在待办池", "circle");
     this.summaryItem(stats, "已完成", String(done.length), "已归档", "check-circle-2");
-    this.summaryItem(stats, "自动延续", String(todayTasks.length + pendingTasks.length), "未完成会到明天", "refresh-cw");
   }
 
   private summaryItem(parent: HTMLElement, label: string, value: string, hint: string, icon: string): void {
@@ -432,13 +638,14 @@ export class TaskManagerView extends ItemView {
   ): void {
     const item = parent.createEl("button", {
       cls: active ? "lifeos-project-option is-active" : "lifeos-project-option",
-      attr: { type: "button", "data-project-id": id }
+      attr: { type: "button", "data-project-id": id, "data-lifeos-focus-key": `task-project:${id}` }
     });
     item.onclick = onClick;
+    const completion = Number.isFinite(progress) ? Math.max(0, Math.min(progress, 100)) : 0;
     const copy = item.createDiv({ cls: "lifeos-project-option-copy" });
     const row = copy.createDiv({ cls: "lifeos-project-option-row" });
     row.createEl("strong", { text: label });
-    row.createSpan({ text: `${openCount} 个待办 · ${progress}%` });
+    row.createSpan({ text: `${openCount} 个待办 · ${completion}%` });
     const progressTrack = copy.createDiv({
       cls: "lifeos-project-progress-track",
       attr: {
@@ -446,12 +653,12 @@ export class TaskManagerView extends ItemView {
         "aria-label": `${label}完成进度`,
         "aria-valuemin": "0",
         "aria-valuemax": "100",
-        "aria-valuenow": String(Math.max(0, Math.min(progress, 100)))
+        "aria-valuenow": String(completion)
       }
     });
     const progressFill = progressTrack.createDiv({ cls: "lifeos-project-progress-fill" });
     progressFill.setCssProps({
-      "--lifeos-project-progress": `${Math.max(0, Math.min(progress, 100))}%`
+      "--lifeos-project-progress": `${completion}%`
     });
   }
 
@@ -460,17 +667,19 @@ export class TaskManagerView extends ItemView {
     overview: LifeOSProjectOverview,
     projects: LifeOSProject[],
     service: ProjectDocumentService,
-    whiteboards: ProjectWhiteboardService
+    whiteboards: ProjectWhiteboardService,
+    signal: AbortSignal
   ): Promise<void> {
     const selectedProject = this.selectedProjectId && this.selectedProjectId !== "unassigned"
       ? projects.find((project) => project.id === this.selectedProjectId) ?? null
       : null;
     const projectDocuments = selectedProject
-      ? [{ project: selectedProject, docs: await service.listDocuments(selectedProject) }]
+      ? [{ project: selectedProject, docs: await service.listDocuments(selectedProject, { signal }) }]
       : await Promise.all(projects.map(async (project) => ({
         project,
-        docs: await service.listDocuments(project)
+        docs: await service.listDocuments(project, { signal })
       })));
+    throwIfReadAborted(signal);
     const totalDocuments = projectDocuments.reduce((total, entry) => total + entry.docs.length, 0);
     const panel = parent.createDiv({
       cls: `lifeos-project-doc-panel${this.projectDocumentsExpanded ? "" : " is-collapsed"}`
@@ -492,13 +701,14 @@ export class TaskManagerView extends ItemView {
 
       if (selectedProject) {
         const docs = projectDocuments[0]?.docs ?? [];
-        const summary = this.summaryForProject(selectedProject, overview);
         const actions = content.createDiv({ cls: "lifeos-project-doc-head-actions lifeos-project-doc-content-actions" });
         createButton(actions, "生成白板", () => {
-          void this.openProjectWhiteboardModal(selectedProject, summary, docs, overview, whiteboards);
+          const current = this.latestOverview ?? overview;
+          void this.openProjectWhiteboardModal(selectedProject, this.summaryForProject(selectedProject, current), docs, current, whiteboards);
         }, { primary: true, icon: "network" });
         createButton(actions, "资料生成白板", () => {
-          void this.importProjectDocumentsToWhiteboard(selectedProject, summary, service, whiteboards, overview);
+          const current = this.latestOverview ?? overview;
+          void this.importProjectDocumentsToWhiteboard(selectedProject, this.summaryForProject(selectedProject, current), service, whiteboards, current);
         }, { ghost: true, icon: "files" });
         createButton(actions, "打开最近白板", () => void this.openLatestProjectWhiteboard(selectedProject, whiteboards), {
           ghost: true,
@@ -597,9 +807,11 @@ export class TaskManagerView extends ItemView {
       attr: {
         type: "search",
         placeholder: "搜索标题、正文或来源",
+        "data-lifeos-focus-key": `project-doc-search:${project.id}`,
         "aria-label": `搜索${project.name}的项目文档`
       }
     });
+    searchInput.value = this.projectDocumentQueries.get(project.id) ?? "";
     const initialVisibleCount = previewLimit > 0 ? Math.min(previewLimit, docs.length) : docs.length;
     const resultMeta = toolbar.createDiv({ cls: "lifeos-project-doc-result-meta" });
     const resultCount = resultMeta.createSpan({
@@ -697,7 +909,10 @@ export class TaskManagerView extends ItemView {
       }
     };
 
-    searchInput.addEventListener("input", renderRows);
+    searchInput.addEventListener("input", () => {
+      this.projectDocumentQueries.set(project.id, searchInput.value);
+      renderRows();
+    });
     renderRows();
   }
 
@@ -843,61 +1058,7 @@ export class TaskManagerView extends ItemView {
     return button;
   }
 
-  private createProjectDocumentService(fs: FileSystemService): ProjectDocumentService {
-    return new ProjectDocumentService(this.app, fs, {
-      pdfOcr: new PdfOcrService(this.app, {
-        engine: this.plugin.settings.pdfOcrEngine,
-        paddleEndpoint: this.plugin.settings.paddleOcrEndpoint
-      }),
-      aiFormatter: (input) => this.formatImportedProjectDocumentWithAi(input)
-    });
-  }
-
-  private async formatImportedProjectDocumentWithAi(input: ProjectDocumentAiFormatterInput): Promise<{ markdown: string }> {
-    const response = await this.plugin.ai.complete({
-      responseFormat: "text",
-      temperature: 0.15,
-      reasoningEffort: "default",
-      skipModelCheck: true,
-      messages: [
-        {
-          role: "system",
-          content: [
-            "You are the Life OS project document formatting assistant.",
-            "The original file has already been fully extracted and will be sent to you in ordered batches.",
-            "This is a formatting pass over imported source text, not a summarization or analysis task.",
-            "Format the current batch paragraph by paragraph as readable Markdown: headings, paragraphs, lists, tables, or code blocks.",
-            "Every source paragraph, line, question number, option, table cell, figure caption, citation, date, number, and proper noun must still be represented in your output.",
-            "Do not summarize, omit, translate, deduplicate, rewrite facts, merge away paragraphs, or invent content.",
-            "If a fragment is messy or uncertain, copy it unchanged instead of shortening it.",
-            "Return only the formatted Markdown for the current batch. Do not wrap it in code fences and do not add explanations, disclaimers, or an AI signature."
-          ].join("\n")
-        },
-        {
-          role: "user",
-          content: [
-            `Project: ${input.project.name}`,
-            `Document: ${input.title}`,
-            `Source: ${input.sourceName}`,
-            `Type: ${input.importKind}`,
-            `Batch: ${input.chunkIndex ?? 1}/${input.chunkCount ?? 1}`,
-            `Batch characters: ${input.chunkTextLength ?? input.text.length}`,
-            `Full extracted characters: ${input.fullTextLength ?? input.text.length}`,
-            "",
-            "Format only this ordered source batch. Keep one-to-one coverage with the source text and do not omit any sentence, number, option, or line:",
-            "----- SOURCE BATCH START -----",
-            input.text,
-            "----- SOURCE BATCH END -----"
-          ].join("\n")
-        }
-      ]
-    });
-    const responseText = response.text?.trim() ?? "";
-    if (!response.ok || !responseText) {
-      throw new Error(response.error || "AI formatter returned no markdown.");
-    }
-    return { markdown: responseText };
-  }
+  private createProjectDocumentService(fs: FileSystemService): ProjectDocumentService { return createSharedProjectDocumentService(this.plugin, fs); }
 
   private async createProjectDocument(project: LifeOSProject, service: ProjectDocumentService): Promise<void> {
     if (!requireProFeature(this.plugin, "projectDocuments")) return;
@@ -1038,14 +1199,17 @@ export class TaskManagerView extends ItemView {
     const selectAllControl = selection.createEl("label", { cls: "lifeos-task-select-all-control" });
     const selectAll = selectAllControl.createEl("input", {
       cls: "lifeos-task-select-all",
-      attr: { type: "checkbox", "aria-label": "全选当前筛选结果" }
+      attr: { type: "checkbox", "aria-label": "全选当前筛选结果", "data-lifeos-focus-key": "task-batch:all" }
     });
     selectAllControl.createSpan({ text: "全选当前范围" });
     const selectionCopy = selection.createDiv({ cls: "lifeos-batch-selection-copy" });
     const selectedLabel = selectionCopy.createEl("strong", { text: "批量处理" });
     selectionCopy.createSpan({ text: `当前范围 ${unique.length} 项` });
 
-    const quickSelect = toolbar.createDiv({ cls: "lifeos-task-batch-quick-select" });
+    const quickMenu = toolbar.createEl("details", { cls: "lifeos-page-more lifeos-task-batch-more" });
+    installHostPopoverScope(quickMenu, this.app);
+    quickMenu.createEl("summary", { text: "批量操作", attr: { "aria-label": "批量选择和操作任务" } });
+    const quickSelect = quickMenu.createDiv({ cls: "lifeos-task-batch-quick-select lifeos-page-more-menu" });
     const selectOnly = (tasks: LifeOSTask[]): void => {
       for (const task of unique) {
         const key = this.taskStableKey(task);
@@ -1058,6 +1222,7 @@ export class TaskManagerView extends ItemView {
         this.syncTaskSelectionDom(key, true);
       }
       syncToolbar();
+      quickMenu.open = false;
     };
     const selectToday = createButton(quickSelect, "全选今日", () => selectOnly(groups.today), {
       ghost: true,
@@ -1075,7 +1240,7 @@ export class TaskManagerView extends ItemView {
     selectPending.disabled = groups.open.length === 0;
     selectCompleted.disabled = groups.done.length === 0;
 
-    const actions = toolbar.createDiv({ cls: "lifeos-task-batch-actions" });
+    const actions = quickSelect.createDiv({ cls: "lifeos-task-batch-actions" });
     const edit = createButton(actions, "批量编辑", () => {
       const selected = selectedTasks();
       if (selected.length === 0) return;
@@ -1123,6 +1288,9 @@ export class TaskManagerView extends ItemView {
       }
       syncToolbar();
     }, { icon: "x", ghost: true });
+    for (const [key, button] of Object.entries({today: selectToday, open: selectPending, done: selectCompleted, edit, complete, restore, remove, clearCompleted, clear})) {
+      button.setAttr("data-lifeos-focus-key", `task-batch:${key}`);
+    }
 
     const syncToolbar = (): void => {
       const selected = selectedTasks();
@@ -1131,6 +1299,7 @@ export class TaskManagerView extends ItemView {
       selectAll.checked = selected.length > 0 && selected.length === unique.length;
       selectAll.indeterminate = selected.length > 0 && selected.length < unique.length;
       selectedLabel.setText(selected.length > 0 ? `已选 ${selected.length} 项` : "批量处理");
+      toolbar.classList.toggle("has-selection", selected.length > 0);
       edit.disabled = selected.length === 0;
       complete.disabled = selectedOpen.length === 0;
       restore.disabled = selectedDone.length === 0;
@@ -1151,12 +1320,15 @@ export class TaskManagerView extends ItemView {
   }
 
   private async runTaskBatch(
-    operation: () => Promise<{ succeeded: number; failed: Array<{ reason: string }> }>,
+    operation: () => Promise<{ succeeded: number; failed: Array<{ task?: LifeOSTask; reason: string }> }>,
     actionLabel: string
   ): Promise<void> {
     try {
       const result = await this.withVaultRefreshSuppressed(operation);
       this.selectedTaskKeys.clear();
+      for (const failure of result.failed) {
+        if (failure.task) this.selectedTaskKeys.add(this.taskStableKey(failure.task));
+      }
       new Notice(
         result.failed.length > 0
           ? `${actionLabel} ${result.succeeded} 项，${result.failed.length} 项因内容已变化未处理。`
@@ -1187,8 +1359,8 @@ export class TaskManagerView extends ItemView {
     tasks: LifeOSTask[],
     service: TaskService,
     icon: string
-  ): void {
-    const uniqueTasks = this.uniqueVisibleTasks(tasks);
+  ): (tasks: LifeOSTask[]) => void {
+    let uniqueTasks = this.uniqueVisibleTasks(tasks);
     const column = board.createDiv({
       cls: "lifeos-board-column",
       attr: {
@@ -1201,28 +1373,66 @@ export class TaskManagerView extends ItemView {
     const titleEl = head.createDiv();
     setIcon(titleEl.createSpan({ cls: "lifeos-status-icon" }), icon);
     titleEl.createSpan({ text: title });
-    head.createSpan({ cls: "lifeos-badge", text: String(uniqueTasks.length) });
+    const count = head.createSpan({ cls: "lifeos-badge", text: String(uniqueTasks.length) });
     column.createDiv({ cls: "lifeos-board-column-hint", text: hint });
 
-    if (uniqueTasks.length === 0) {
-      const empty = column.createDiv({ cls: "lifeos-board-empty" });
-      empty.createDiv({ text: "暂无任务" });
-      createButton(empty, "新建任务", () => new NewTaskModal(this.app, this.plugin, () => this.render()).open(), { ghost: true, icon: "plus" });
-      return;
-    }
+    const empty = column.createDiv({ cls: "lifeos-board-empty" });
+    empty.createDiv({ text: "暂无任务" });
+    createButton(empty, "新建任务", () => new NewTaskModal(this.app, this.plugin, () => this.render()).open(), { ghost: true, icon: "plus" });
 
     const list = column.createDiv({ cls: "lifeos-board-column-list" });
     list.setAttr("data-lifeos-scroll-key", `task-column:${title}`);
     const footer = column.createDiv({ cls: "lifeos-board-column-footer" });
     const limitKey = `${this.selectedProjectId ?? "all"}:${columnKey}`;
     const initialLimit = TASK_COLUMN_INITIAL_LIMIT[columnKey];
+    const rows = new Map<string, { signature: string; element: HTMLElement }>();
+    let footerKey = "";
 
     const renderVisibleTasks = (): void => {
       const visibleLimit = Math.max(initialLimit, this.taskColumnVisibleLimits.get(limitKey) ?? initialLimit);
       const visibleTasks = uniqueTasks.slice(0, visibleLimit);
-      list.empty();
+      const nextKeys = new Set(visibleTasks.map((task) => this.taskStableKey(task)));
+      for (const [key, row] of rows) {
+        if (!nextKeys.has(key)) { row.element.remove(); rows.delete(key); }
+      }
+      let cursor = list.firstElementChild;
+      for (const task of visibleTasks) {
+        const key = this.taskStableKey(task);
+        const signature = JSON.stringify(task);
+        let row = rows.get(key);
+        if (!row || row.signature !== signature) {
+          const staging = list.ownerDocument.createElement("div");
+          const element = this.renderBoardCard(staging, task, service, columnKey);
+          if (row) {
+            if (cursor === row.element) cursor = row.element.nextElementSibling;
+            row.element.replaceWith(element);
+          }
+          row = {signature, element};
+          rows.set(key, row);
+        }
+        if (row.element === cursor) cursor = cursor.nextElementSibling;
+        else if (row.element.nextElementSibling !== cursor || row.element.parentElement !== list) list.insertBefore(row.element, cursor);
+        const selected = this.selectedTaskKeys.has(key);
+        row.element.toggleClass("is-selected", selected);
+        row.element.querySelector<HTMLInputElement>(".lifeos-task-select")!.checked = selected;
+      }
+      count.setText(String(uniqueTasks.length));
+      // Legacy themes set display directly on these classes and can override
+      // the native hidden attribute. Keep inactive regions out of the DOM,
+      // rather than adding another theme-specific !important override.
+      if (uniqueTasks.length === 0) {
+        list.remove();
+        footer.remove();
+        if (!empty.isConnected) column.append(empty);
+      } else {
+        empty.remove();
+        if (list.parentElement !== column) column.append(list);
+        if (footer.parentElement !== column) column.append(footer);
+      }
+      const nextFooterKey = `${visibleTasks.length}:${uniqueTasks.length}`;
+      if (footerKey === nextFooterKey) return;
+      footerKey = nextFooterKey;
       footer.empty();
-      for (const task of visibleTasks) this.renderBoardCard(list, task, service, columnKey);
 
       if (uniqueTasks.length <= initialLimit) return;
       const status = footer.createSpan({
@@ -1248,9 +1458,13 @@ export class TaskManagerView extends ItemView {
     };
 
     renderVisibleTasks();
+    return (nextTasks) => {
+      uniqueTasks = this.uniqueVisibleTasks(nextTasks);
+      renderVisibleTasks();
+    };
   }
 
-  private renderBoardCard(parent: HTMLElement, task: LifeOSTask, service: TaskService, columnKey: TaskLane): void {
+  private renderBoardCard(parent: HTMLElement, task: LifeOSTask, service: TaskService, columnKey: TaskLane): HTMLElement {
     const key = this.taskStableKey(task);
     const selected = this.selectedTaskKeys.has(key);
     const doneColumn = columnKey === "done";
@@ -1278,9 +1492,10 @@ export class TaskManagerView extends ItemView {
       this.clearTaskDropTargets();
     });
     const top = card.createDiv({ cls: "lifeos-board-card-top" });
-    const select = top.createEl("input", {
+    const selectHitbox = top.createEl("label", { cls: "lifeos-task-selection-hitbox", attr: { title: `选择任务：${task.text}` } });
+    const select = selectHitbox.createEl("input", {
       cls: "lifeos-task-select",
-      attr: { type: "checkbox", "aria-label": `选择任务：${task.text}` }
+      attr: { type: "checkbox", "aria-label": `选择任务：${task.text}`, "data-lifeos-focus-key": `task:${key}:select` }
     });
     select.checked = selected;
     select.onchange = () => {
@@ -1299,7 +1514,7 @@ export class TaskManagerView extends ItemView {
     const actions = card.createDiv({ cls: "lifeos-board-card-actions" });
     const move = actions.createEl("select", {
       cls: "lifeos-task-lane-select",
-      attr: { "aria-label": `移动任务：${task.text}` }
+      attr: { "aria-label": `移动任务：${task.text}`, "data-lifeos-focus-key": `task:${key}:move` }
     });
     move.createEl("option", { value: "", text: "移动到…" });
     move.createEl("option", { value: "today", text: "移动到今日" });
@@ -1346,6 +1561,7 @@ export class TaskManagerView extends ItemView {
       new Notice("任务已删除。", 4000);
       await this.render(true);
     }).open(), { ghost: true, className: "is-delete" });
+    return card;
   }
 
   private createTaskCardIconAction(
@@ -1365,6 +1581,8 @@ export class TaskManagerView extends ItemView {
     });
     button.setAttr("aria-label", label);
     button.setAttr("title", label);
+    const key = parent.closest<HTMLElement>("[data-lifeos-task-key]")?.dataset.lifeosTaskKey;
+    if (key) button.setAttr("data-lifeos-focus-key", `task:${key}:${options.className ?? icon}`);
     return button;
   }
 
@@ -1535,7 +1753,7 @@ interface EditTaskDraft {
   dueDate?: string;
 }
 
-class EditTaskModal extends Modal {
+export class EditTaskModal extends Modal {
   constructor(
     app: App,
     private task: LifeOSTask,
@@ -1709,7 +1927,7 @@ class TaskBatchEditModal extends Modal {
   }
 }
 
-class TaskDeleteConfirmModal extends Modal {
+export class TaskDeleteConfirmModal extends Modal {
   constructor(
     app: App,
     private count: number,

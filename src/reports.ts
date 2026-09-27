@@ -1,4 +1,5 @@
-import { Component, Modal, Notice, TFile, type App, type TAbstractFile } from "obsidian";
+import { LifeOSModal as Modal } from "./components/LifeOSModal";
+import { Component, Notice, TFile, type App, type TAbstractFile } from "obsidian";
 import type { IPlugin } from "./plugin-api";
 import { buildSystemPrompt } from "./ai";
 import { getExamChatModeLabel, getExamProfileLabel } from "./settings";

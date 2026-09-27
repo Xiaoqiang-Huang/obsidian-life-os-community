@@ -27,25 +27,28 @@ export class GraphContextService {
     const related = this.relatedItems(inventory, seeds, input.userMessage);
     const sections: ContextSection[] = [];
 
-    for (const item of this.uniqueItems([...seeds, ...related]).slice(0, MAX_ENTITY_LINES)) {
+    for (const candidate of this.uniqueItems([...seeds, ...related]).slice(0, MAX_ENTITY_LINES)) {
+      if (!await this.metadata.readCitableSource(candidate.path)) continue;
+      const item = this.metadata.citableInventoryItem(candidate);
       sections.push({
         title: `Obsidian 图谱节点：${item.title}`,
         content: this.graphSummary(item, seeds, related),
         priority: 72,
         source: item.path,
-        sourceInfo: this.sourceFor(item, "")
+        sourceInfo: this.metadata.decorateSource(this.sourceFor(item, ""))
       });
     }
 
-    for (const item of related.slice(0, MAX_EVIDENCE_FILES)) {
-      const markdown = await this.metadata.readFile(item.path);
+    for (const candidate of related.slice(0, MAX_EVIDENCE_FILES)) {
+      const markdown = await this.metadata.readFile(candidate.path);
       if (!markdown) continue;
+      const item = this.metadata.citableInventoryItem(candidate);
       sections.push({
         title: `Obsidian 图谱证据：${item.title}`,
         content: this.excerpt(markdown),
         priority: 64,
         source: item.path,
-        sourceInfo: this.sourceFor(item, markdown)
+        sourceInfo: this.metadata.decorateSource(this.sourceFor(item, markdown))
       });
     }
 
@@ -115,8 +118,7 @@ export class GraphContextService {
     return score;
   }
 
-  private sourceFor(item: ContextInventoryItem | undefined, markdown: string): ContextSource | undefined {
-    if (!item) return undefined;
+  private sourceFor(item: ContextInventoryItem, markdown: string): ContextSource {
     return {
       path: item.path,
       title: item.title,

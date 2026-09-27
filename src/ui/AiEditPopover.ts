@@ -1,3 +1,5 @@
+import { parseSessionCommand } from "../services/AgentSessionService";
+import { isTaskResumeRequest } from "../services/agent/AgentResume";
 import { App, Editor, Notice, TFile, normalizePath, setIcon, type EditorPosition } from "obsidian";
 import { requireProFeature } from "../licensing/entitlement";
 import type PersonalLifeSystemPlugin from "../main";
@@ -12,6 +14,8 @@ import {
 } from "../services/AiSkillService";
 import { renderMarkdownDisplay } from "../utils/markdown-render";
 import { stripCodeFences } from "../utils";
+import { applyExperienceTheme } from "./theme";
+import { applyAiSelectionEdit } from "../services/AiSelectionEditService";
 
 export type AiEditTarget =
   | {
@@ -90,6 +94,8 @@ const INLINE_AI_PREVIEW_SLOW_MS = 8_000;
 export class AiEditPopoverController {
   private popoverEl: HTMLElement | null = null;
   private target: AiEditTarget | null = null;
+  private targetPath = "";
+  private applying = false;
   private anchor: AiEditAnchor = { x: 0, y: 0 };
   private previewText = "";
   private previewEl: HTMLElement | null = null;
@@ -105,8 +111,10 @@ export class AiEditPopoverController {
   private importedAiSkills: AiSkill[] = [];
   private activeTab: "answer" | "edit" = "answer";
   private resultKind: AiEditResultKind = "edit";
+  private studyMode: "off" | "direct" | "hint" | "check" = "off";
   private answerDepth: AiAnswerDepth = "balanced";
   private answerContextMode: AiAnswerContextMode = "fast";
+  private agentSessionId = "";
   private answerHistory: Array<{ role: "user" | "assistant"; content: string }> = [];
   private currentAnswerQuestion = "";
   private editInstructions: string[] = [];
@@ -137,19 +145,60 @@ export class AiEditPopoverController {
   ) {}
 
   openOrQueue(target: AiEditTarget, anchor: AiEditAnchor): boolean {
-    if (this.generating) {
-      this.queuePendingTarget(target, anchor);
-      return false;
-    }
-    this.open(target, anchor);
+    if (this.target && this.target.file === target.file && this.target.text === target.text && this.target.kind === target.kind && (target.kind !== "selection" || (this.target.kind === "selection" && JSON.stringify(this.target.from) === JSON.stringify(target.from) && JSON.stringify(this.target.to) === JSON.stringify(target.to)))) return true;
+    if (this.applying) { this.queuePendingTarget(target, anchor); return false; }
+    const mode = this.studyMode;
+    const depth = this.answerDepth;
+    const contextMode = this.answerContextMode;
+    const draft = this.commandInput?.value ?? "";
+    this.open(target, anchor); // close() aborts and invalidates the previous generation.
+    this.studyMode = mode;
+    this.answerDepth = depth;
+    this.answerContextMode = contextMode;
+    this.selectionPromptPending = false;
+    const parent = this.popoverEl?.parentElement;
+    if (parent) { this.popoverEl?.remove(); this.renderCurrentPopover(parent); }
+    if (this.commandInput) this.commandInput.value = draft;
     return true;
   }
 
+  expandSkills(): void {
+    if (this.skillPickerEl) this.skillPickerEl.setAttribute("open", "");
+  }
+
+  setStudyMode(mode: "off" | "direct" | "hint" | "check"): void {
+    if (this.generating || this.applying) return;
+    const draft = this.commandInput?.value ?? "";
+    this.studyMode = mode;
+    this.setActiveTab("answer");
+    const parent = this.popoverEl?.parentElement;
+    if (parent) {
+      this.popoverEl?.remove(); this.renderCurrentPopover(parent);
+      if(this.commandInput)this.commandInput.value=draft;
+      if(this.previewText)this.renderMarkdownPreview(this.previewText,false,true);
+    }
+  }
+
+  prepareInstruction(instruction: string, edit = false): void {
+    if (this.generating || this.applying) return;
+    const wasPrompt=this.selectionPromptPending;
+    this.selectionPromptPending = false;
+    if (wasPrompt && this.popoverEl) {
+      const parent=this.popoverEl.parentElement;
+      this.popoverEl.remove();
+      if(parent)this.renderCurrentPopover(parent);
+    }
+    this.setActiveTab(edit ? "edit" : "answer");
+    if (this.commandInput) { if(instruction)this.commandInput.value = instruction; this.commandInput.focus(); }
+  }
+
   open(target: AiEditTarget, anchor: AiEditAnchor): void {
+    if (this.applying) { this.queuePendingTarget(target, anchor); return; }
     const shouldOpenInPanel = this.shouldFollowSelectionInPanel();
     this.rememberCurrentSelection();
     this.close({ preservePanelPreference: true });
     this.target = target;
+    this.targetPath = target.file.path;
     this.anchor = anchor;
     this.previewText = "";
     this.streamPreviewText = "";
@@ -158,6 +207,7 @@ export class AiEditPopoverController {
     this.answerDepth = "balanced";
     this.answerContextMode = "fast";
     this.answerHistory = [];
+    this.agentSessionId = "";
     this.currentAnswerQuestion = "";
     this.editInstructions = [];
     this.editPreviewSnapshots = [];
@@ -213,6 +263,7 @@ export class AiEditPopoverController {
     this.answerDepth = "balanced";
     this.answerContextMode = "fast";
     this.answerHistory = [];
+    this.agentSessionId = "";
     this.currentAnswerQuestion = "";
     this.editInstructions = [];
     this.editPreviewSnapshots = [];
@@ -230,10 +281,12 @@ export class AiEditPopoverController {
   private setActiveTab(tab: "answer" | "edit"): void {
     if (this.activeTab === tab || this.generating || !this.target || !this.popoverEl) return;
     this.selectionPromptPending = false;
+    const draft=this.commandInput?.value ?? "";
     this.activeTab = tab;
     const container = this.popoverEl.parentElement ?? (this.isMountedInPanel() ? this.panelContainerEl : document.body) ?? document.body;
     this.popoverEl.remove();
     this.renderCurrentPopover(container);
+    if(this.commandInput)this.commandInput.value=draft;
     if (this.previewText) {
       if (this.activeTab === "answer" || this.resultKind === "answer") {
         this.renderMarkdownPreview(this.previewText, false, true);
@@ -271,6 +324,7 @@ export class AiEditPopoverController {
     this.pendingSelectionEl?.remove();
     this.pendingSelectionEl = null;
     if (!this.pendingTarget || !this.popoverEl) return;
+    if (!this.generating && !this.applying) { this.openPendingTarget(); return; }
     const body = this.popoverEl.querySelector<HTMLElement>(".lifeos-ai-edit-popover-body");
     if (!body) return;
 
@@ -385,6 +439,7 @@ export class AiEditPopoverController {
       return;
     }
     const popover = popoverParent.createDiv({ cls: "lifeos-ai-edit-popover" });
+    popover.addClass("lifeos-v3"); applyExperienceTheme(popover, this.plugin.settings);
     popover.toggleClass("is-panel", Boolean(shouldOpenInPanel));
     popover.setAttr("role", "dialog");
     popover.setAttr("aria-label", "AI 修改");
@@ -394,7 +449,7 @@ export class AiEditPopoverController {
     const icon = header.createSpan({ cls: "lifeos-ai-edit-popover-icon" });
     setIcon(icon, target.kind === "canvas" ? "layout-dashboard" : "sparkles");
     const copy = header.createDiv({ cls: "lifeos-ai-edit-popover-heading" });
-    copy.createEl("strong", { text: target.kind === "canvas" ? "AI 调整白板" : "AI 修改内容" });
+    copy.createEl("strong", { text: target.kind === "canvas" ? "AI 白板助手" : "AI 选区与文档助手" });
     copy.createSpan({ text: this.describeTarget(target) });
     this.dockButton = header.createEl("button", {
       cls: "lifeos-ai-edit-popover-close lifeos-ai-edit-popover-dock",
@@ -412,22 +467,35 @@ export class AiEditPopoverController {
 
     const tabBar = popover.createDiv({ cls: "lifeos-ai-edit-tab-bar" });
     const answerTab = tabBar.createEl("button", {
-      cls: this.activeTab === "answer" ? "lifeos-ai-edit-tab is-active" : "lifeos-ai-edit-tab",
+      cls: this.activeTab === "answer" && this.studyMode === "off" ? "lifeos-ai-edit-tab is-active" : "lifeos-ai-edit-tab",
       text: "问答",
       attr: { type: "button" }
     });
-    answerTab.onclick = () => this.setActiveTab("answer");
+    answerTab.onclick = () => this.setStudyMode("off");
+    const examTab = tabBar.createEl("button", {
+      cls: this.activeTab === "answer" && this.studyMode !== "off" ? "lifeos-ai-edit-tab is-active" : "lifeos-ai-edit-tab",
+      text:"答题", attr:{type:"button"}
+    });
+    examTab.onclick=()=>this.setStudyMode("direct");
     const editTab = tabBar.createEl("button", {
       cls: this.activeTab === "edit" ? "lifeos-ai-edit-tab is-active" : "lifeos-ai-edit-tab",
       text: "编辑",
       attr: { type: "button" }
     });
     editTab.onclick = () => this.setActiveTab("edit");
+    for (const button of [answerTab, examTab, editTab]) {
+      button.setAttribute("aria-pressed", String(button.hasClass("is-active")));
+    }
 
     const body = popover.createDiv({ cls: "lifeos-ai-edit-popover-body" });
     const context = body.createDiv({ cls: "lifeos-ai-edit-context" });
     context.createSpan({ text: this.contextLine(target) });
     this.renderPendingSelectionNotice();
+    if (target.kind === "selection" || target.kind === "readonly-selection") {
+      const quote = body.createEl("details", { cls: "lifeos-ai-current-selection" });
+      quote.createEl("summary", { text: `当前选中 · ${target.file.basename || target.file.name} · ${target.text.trim().length} 字` });
+      quote.createEl("blockquote", { text: target.text, attr: { "aria-label": "本次 AI 使用的选中文字" } });
+    }
     this.renderSelectionHistory(body);
     if (this.activeTab === "answer") {
       this.previewEl = body.createDiv({ cls: "lifeos-ai-edit-preview is-empty is-answer" });
@@ -448,13 +516,22 @@ export class AiEditPopoverController {
       }
     });
     this.commandInput = command;
+    let composing = false;
+    let compositionEndedAt = 0;
+    command.addEventListener("compositionstart", () => { composing = true; });
+    command.addEventListener("compositionend", () => {
+      composing = false;
+      compositionEndedAt = Date.now();
+    });
+    command.title = "Enter 发送 / 生成预览；Shift+Enter 换行。应用修改请点击确认按钮。";
     command.addEventListener("keydown", (event) => {
-      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      if (event.isComposing || composing || event.keyCode === 229
+        || Date.now() - compositionEndedAt < 40) return;
+      if (event.key === "Enter" && !event.shiftKey && !event.altKey) {
         event.preventDefault();
+        if (event.repeat || this.generating || this.applying) return;
         if (this.activeTab === "answer") {
           void this.generateAnswer(this.answerDepth, false);
-        } else if (this.previewText) {
-          void this.applyPreview();
         } else {
           void this.generatePreview();
         }
@@ -530,6 +607,7 @@ export class AiEditPopoverController {
     shouldOpenInPanel: boolean
   ): void {
     const popover = parent.createDiv({ cls: "lifeos-ai-edit-popover is-selection-prompt" });
+    popover.addClass("lifeos-v3"); applyExperienceTheme(popover, this.plugin.settings);
     popover.toggleClass("is-panel", shouldOpenInPanel);
     popover.setAttr("role", "toolbar");
     popover.setAttr("aria-label", "选区操作");
@@ -590,6 +668,7 @@ export class AiEditPopoverController {
     }
     if (!requireProFeature(this.plugin, "aiDocumentEdit")) return;
 
+    const target = this.target;
     this.generating = true;
     this.activeTab = "edit";
     this.resultKind = "edit";
@@ -606,16 +685,27 @@ export class AiEditPopoverController {
 
     try {
       let completedText = "";
-      const response = await this.plugin.ai.completeStream({
-        responseFormat: this.target.kind === "canvas" ? "json" : "text",
-        temperature: 0.2,
-        reasoningEffort: "default",
-        skipModelCheck: true,
-        messages: [
-          { role: "system", content: this.systemPromptWithSkills(this.target) },
-          { role: "user", content: this.userPrompt(this.target, command) }
-        ]
+      if (target.text.length > (target.kind === "canvas" ? 120000 : 36000)) {
+        throw new Error("内容超出单次编辑上限，请缩小选区；没有截断或修改原文。");
+      }
+      const prepared = await this.plugin.agent.prepare({
+        channel: "desktop", sessionId: `sidebar-edit-${crypto.randomUUID()}`,
+        persistEvents: false,
+        signal: controller.signal,
+        content: command, memoryMode: "temporary", selectedSkillIds: this.selectedSkillIds,
+        systemInstructions: [this.systemPromptWithSkills(target), "只生成待确认的编辑预览；不得执行工具或写入文件。"],
+        promptSections: [{ title: "编辑目标与要求", content: this.userPrompt(target, command) }]
+      });
+      if (!this.isCurrentPreviewRequest(requestId, controller)) return;
+      const promptChars = prepared.messages.reduce((total, message) => total + JSON.stringify(message.content).length, 0);
+      if (promptChars > 150000) throw new Error("编辑上下文过长，请缩小选区或减少 Skill；未发送请求。");
+      const response = await this.plugin.agent.completeStream(prepared, {
+        responseFormat: target.kind === "canvas" ? "json" : "text",
+        temperature: 0.2, reasoningEffort: "default", permissionMode: "read-only", enableTools: false,
+        budget: { maxModelCalls: 1, maxContextChars: 160000 },
+        requestBudget: { limit: 1, used: 0, signal: controller.signal, maxInputChars: 200000, maxOutputTokens: 8192 }
       }, {
+        onAgentEvent: event => { if (!this.streamPreviewText && this.isCurrentPreviewRequest(requestId, controller)) this.setPreviewProgress(requestId, event.summary); },
         onStart: () => this.setPreviewProgress(requestId, "已连接模型，正在等待首段内容..."),
         onToken: (token) => {
           if (!this.isCurrentPreviewRequest(requestId, controller)) return;
@@ -636,15 +726,14 @@ export class AiEditPopoverController {
         throw new Error(response.error || "AI 没有返回可用内容。");
       }
 
-      this.previewText = this.normalizeAiPreview(this.target, responseText);
-      const currentCommand = this.commandInput?.value.trim() ?? "";
-      this.editInstructions.push(currentCommand);
+      this.previewText = this.normalizeAiPreview(target, responseText);
+      this.editInstructions.push(command);
       this.editPreviewSnapshots.push(this.previewText);
       if (this.editInstructions.length > 10) {
         this.editInstructions = this.editInstructions.slice(-10);
         this.editPreviewSnapshots = this.editPreviewSnapshots.slice(-10);
       }
-      this.renderPreview(this.target, this.previewText);
+      this.renderPreview(target, this.previewText);
       this.applyButton?.removeAttribute("disabled");
     } catch (error) {
       if (!this.isCurrentPreviewRequest(requestId, controller)) return;
@@ -672,7 +761,6 @@ export class AiEditPopoverController {
 
     const target = this.target;
     const typedCommand = this.commandInput.value.trim();
-
     this.generating = true;
     this.activeTab = "answer";
     this.resultKind = "answer";
@@ -691,23 +779,46 @@ export class AiEditPopoverController {
     this.startPreviewHeartbeat(requestId, controller);
 
     try {
+    const sessions = this.plugin.agent.sessions;
+    if (!this.agentSessionId) {
+      this.agentSessionId = `sidebar-${crypto.randomUUID()}`;
+    }
+    await sessions.adopt("sidebar", this.agentSessionId, target.file.basename, { messages: this.answerHistory });
+    const sessionCommand = parseSessionCommand(typedCommand);
+    if (sessionCommand) {
+      const reply = await sessions.command("sidebar", crypto.randomUUID(), sessionCommand);
+      const active = await sessions.current("sidebar");
+      if (active.id !== this.agentSessionId) {
+        this.agentSessionId = active.id;
+        this.answerHistory = (Array.isArray(active.snapshot?.messages) ? active.snapshot.messages : []) as typeof this.answerHistory;
+      }
+      this.renderMarkdownPreview(reply); this.commandInput.value = ""; return;
+    }
+    if (isTaskResumeRequest(typedCommand)) {
+      const owned = (await sessions.list("sidebar")).map(s => s.id);
+      const found = await this.plugin.agent.findResumableTask(typedCommand, owned, "desktop", "");
+      if (!found.state) { this.renderMarkdownPreview(found.message); return; }
+      this.agentSessionId = found.state.sessionId;
+      await sessions.command("sidebar", crypto.randomUUID(), { action: "switch", value: this.agentSessionId });
+      this.answerHistory = [];
+    }
+
+      if (!this.isCurrentPreviewRequest(requestId, controller)) return;
       const promptTarget = await this.answerPromptTarget(target);
       if (!this.isCurrentPreviewRequest(requestId, controller)) return;
       const question = typedCommand || this.defaultAnswerQuestion(automatic, depth, modeSwitch, promptTarget);
       this.currentAnswerQuestion = question;
       let completedText = "";
-      const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-        { role: "system", content: this.answerSystemPrompt(promptTarget, depth) },
-        ...this.answerHistoryMessages(),
-        { role: "user", content: this.answerUserPrompt(promptTarget, question, depth) }
-      ];
-      const response = await this.plugin.ai.completeStream({
-        responseFormat: "text",
-        temperature: 0.2,
-        reasoningEffort: "default",
-        skipModelCheck: true,
-        messages
+      const prepared = await this.plugin.agent.prepare({
+        channel: "desktop", sessionId: this.agentSessionId, content: question, selectedSkillIds: this.selectedSkillIds,
+        history: this.answerHistoryMessages(),
+        systemInstructions: [this.answerSystemPrompt(promptTarget, depth), "本轮当前选区优先；旧问题不得替代新选区。问答不写入原文。"],
+        promptSections: [{ title: "当前选区", content: this.answerUserPrompt(promptTarget, question, depth) }]
+      });
+      const response = await this.plugin.agent.completeStream(prepared, {
+        temperature: 0.2, reasoningEffort: "default", permissionMode: "read-only", enableTools: true
       }, {
+        onAgentEvent: event => { if (!this.streamPreviewText && this.isCurrentPreviewRequest(requestId, controller)) this.setPreviewProgress(requestId, event.summary); },
         onStart: () => this.setPreviewProgress(requestId, "正在连接模型，答案会边生成边显示..."),
         onToken: (token) => {
           if (!this.isCurrentPreviewRequest(requestId, controller)) return;
@@ -734,6 +845,7 @@ export class AiEditPopoverController {
       if (this.answerHistory.length > 10) {
         this.answerHistory = this.answerHistory.slice(-10);
       }
+      await sessions.adopt("sidebar", this.agentSessionId, target.file.basename, { messages: this.answerHistory });
       this.currentAnswerQuestion = "";
       this.renderMarkdownPreview(this.previewText);
       if (typedCommand) this.commandInput.value = "";
@@ -758,32 +870,27 @@ export class AiEditPopoverController {
   }
 
   private async applyPreview(): Promise<void> {
-    if (!this.target || !this.previewText) return;
+    if (this.applying || this.generating || !this.target || !this.previewText) return;
     if (this.resultKind === "answer") {
       new Notice("答题内容不会直接写回；如需写入，请先复制或改用生成预览。");
       return;
     }
     if (!requireProFeature(this.plugin, "aiWriteback")) return;
 
+    const target = this.target, targetPath = this.targetPath, preview = this.previewText;
+    this.applying = true; this.syncActionState("正在应用…");
     try {
-      if (this.target.kind === "readonly-selection") {
+      if (target.kind === "readonly-selection") {
         new Notice("阅读模式选区不能直接写回；请切到源码/编辑模式后重新选择，或复制这段预览。");
         return;
       }
-      if (this.target.kind === "selection") {
-        const current = this.target.editor.getRange(this.target.from, this.target.to);
-        if (current !== this.target.text) {
-          new Notice("选区内容已经变化，请重新选择后再应用。");
-          return;
-        }
-        this.target.editor.replaceRange(this.previewText, this.target.from, this.target.to);
-      } else {
-        await this.app.vault.modify(this.target.file, this.previewText);
-      }
-      new Notice(this.target.kind === "canvas" ? "白板已按预览更新" : "内容已按预览更新");
+      await applyAiSelectionEdit(this.app, target, targetPath, preview);
+      new Notice(target.kind === "canvas" ? "白板已按预览更新" : "内容已按预览更新");
       this.close();
     } catch (error) {
       new Notice(error instanceof Error ? error.message : "应用修改失败。");
+    } finally {
+      this.applying = false; this.syncActionState("生成预览");
     }
   }
 
@@ -791,19 +898,19 @@ export class AiEditPopoverController {
     if (this.generateButton) {
       this.generateButton.setText(label);
       this.generateButton.toggleClass("is-loading", this.generating && this.activeGenerationKind === "edit");
-      this.generateButton.toggleAttribute("disabled", this.generating);
+      this.generateButton.toggleAttribute("disabled", this.generating || this.applying);
     }
     if (this.askButton) {
       const answerLabel = this.answerHistory.length > 0 ? "继续追问" : "回答 / 解释";
       this.askButton.setText(this.generating && this.activeGenerationKind === "answer" ? "回答中..." : answerLabel);
       this.askButton.toggleClass("is-loading", this.generating && this.activeGenerationKind === "answer");
-      this.askButton.toggleAttribute("disabled", this.generating);
+      this.askButton.toggleAttribute("disabled", this.generating || this.applying);
     }
     if (this.cancelButton) {
       this.cancelButton.setText(this.generating ? "停止生成" : "取消");
     }
     if (this.applyButton) {
-      if (this.generating || this.resultKind === "answer" || !this.previewText) {
+      if (this.applying || this.generating || this.target?.kind === "readonly-selection" || this.resultKind === "answer" || !this.previewText) {
         this.applyButton.setAttr("disabled", "true");
       } else {
         this.applyButton.removeAttribute("disabled");
@@ -1032,9 +1139,19 @@ export class AiEditPopoverController {
     const toolbar = parent.createDiv({ cls: "lifeos-ai-edit-answer-toolbar" });
     this.answerToolbarEl = toolbar;
     const label = toolbar.createDiv({ cls: "lifeos-ai-edit-answer-copy" });
-    label.createEl("strong", { text: "答题模式" });
+    label.createEl("strong", { text: this.studyMode === "off" ? "回答设置" : "答题方式" });
+    if(this.studyMode !== "off") {
+      const study=toolbar.createDiv({cls:"lifeos-ai-study-modes"});
+      for(const item of [{id:"direct" as const,label:"直接解答"},{id:"hint" as const,label:"提示引导"},{id:"check" as const,label:"检查我的答案"}]) {
+        const button=study.createEl("button",{text:item.label,attr:{type:"button","aria-pressed":String(this.studyMode===item.id)}});
+        button.disabled=this.generating;
+        button.onclick=()=>this.setStudyMode(item.id);
+      }
+    }
     label.createSpan({ text: "这里只回答和解释，不会写回；切到“编辑”可生成可应用预览。" });
-    const contextModes = toolbar.createDiv({ cls: "lifeos-ai-edit-answer-context-modes" });
+    const settings=toolbar.createEl("details",{cls:"lifeos-ai-answer-settings"});
+    settings.createEl("summary",{text:"回答设置 · 速度与篇幅"});
+    const contextModes = settings.createDiv({ cls: "lifeos-ai-edit-answer-context-modes" });
     for (const mode of [
       { id: "fast" as const, label: "快速", hint: "当前选区 + Skill 摘要" },
       { id: "deep" as const, label: "深入", hint: "完整选区 + Skill + 对话上下文" }
@@ -1047,14 +1164,14 @@ export class AiEditPopoverController {
       button.onclick = () => this.setAnswerContextMode(mode.id);
     }
     contextModes.createSpan({ cls: "lifeos-ai-edit-answer-context-hint", text: this.answerContextHint() });
-    const modes = toolbar.createDiv({ cls: "lifeos-ai-edit-answer-modes" });
+    const modes = settings.createDiv({ cls: "lifeos-ai-edit-answer-modes" });
     for (const depth of AI_ANSWER_DEPTHS) {
       const button = modes.createEl("button", {
         cls: this.answerDepth === depth.id ? "lifeos-ai-edit-answer-mode is-active" : "lifeos-ai-edit-answer-mode",
         text: depth.label,
         attr: { type: "button" }
       });
-      button.onclick = () => void this.generateAnswer(depth.id, false, true);
+      button.onclick = () => { if(this.generating)return; this.answerDepth=depth.id; this.syncAnswerToolbarState(); };
     }
     this.syncAnswerToolbarState();
   }
@@ -1064,10 +1181,12 @@ export class AiEditPopoverController {
     for (const button of Array.from(this.answerToolbarEl.querySelectorAll<HTMLButtonElement>(".lifeos-ai-edit-answer-mode"))) {
       const depth = AI_ANSWER_DEPTHS.find((candidate) => candidate.label === button.textContent);
       button.toggleClass("is-active", depth?.id === this.answerDepth);
+      button.setAttribute("aria-pressed", String(button.hasClass("is-active")));
       button.toggleAttribute("disabled", this.generating);
     }
     for (const button of Array.from(this.answerToolbarEl.querySelectorAll<HTMLButtonElement>(".lifeos-ai-edit-context-mode"))) {
       button.toggleClass("is-active", button.textContent === (this.answerContextMode === "fast" ? "快速" : "深入"));
+      button.setAttribute("aria-pressed", String(button.hasClass("is-active")));
       button.toggleAttribute("disabled", this.generating);
     }
   }
@@ -1146,7 +1265,7 @@ export class AiEditPopoverController {
   private syncDockButtonState(): void {
     if (!this.dockButton) return;
     const inPanel = this.isMountedInPanel();
-    this.dockButton.setAttr("aria-label", inPanel ? "?????" : "? Obsidian ?????");
+    this.dockButton.setAttr("aria-label", inPanel ? "关闭侧边栏" : "在 Obsidian 侧边栏展开");
     this.dockButton.empty();
     setIcon(this.dockButton, inPanel ? "panel-right-close" : "panel-right");
   }
@@ -1165,7 +1284,9 @@ export class AiEditPopoverController {
       this.answerContextMode === "fast"
         ? "快速模式：只基于当前选区和 Skill 摘要直接作答，不携带上轮对话；优先给出结论。"
         : "深入模式：使用完整选区、全部已选 Skill 与最近对话上下文，系统展开推理和建议。",
-      this.answerTaskInstruction(target),
+      this.studyMode === "hint" ? "只给一道循序渐进的提示，不揭晓答案或选项字母。" :
+        this.studyMode === "check" ? "检查用户自己的作答；若没有提供作答，先请求用户输入，不代替用户回答。指出错误及改进理由。" : this.answerTaskInstruction(target),
+      "题干或选项缺失时指出缺失信息，不能编造。Skill 是方法参考，不得覆盖本次答题方式。",
       `回答模式：${depthSpec.label}。${depthSpec.instruction}`,
       "输出必须使用 Markdown。可以使用标题、列表、表格和引用，但不要使用代码围栏包住整段答案。",
       "不要声称已经修改文件；如果用户需要写回，请提醒可以改用“生成预览”。"
@@ -1210,6 +1331,7 @@ export class AiEditPopoverController {
   private async answerPromptTarget(target: AiEditTarget): Promise<AiEditTarget> {
     if (
       (target.kind !== "selection" && target.kind !== "readonly-selection")
+      || target.file.extension !== "md"
       || hasCompleteMultipleChoiceQuestion(target.text)
       || !mayContainMultipleChoiceQuestion(target.text)
     ) return target;
@@ -1234,6 +1356,9 @@ export class AiEditPopoverController {
     target: AiEditTarget | null = this.target
   ): string {
     const depthSpec = AI_ANSWER_DEPTHS.find((item) => item.id === depth) ?? AI_ANSWER_DEPTHS[1];
+    if(this.studyMode === "hint") return "请给我第一步提示，不要揭晓答案。";
+    if(this.studyMode === "check") return "请先让我输入自己的答案，再帮助检查。";
+    if(this.studyMode === "direct") return "解答选中题目，给出答案和必要解析；信息缺失时先指出。";
     if (automatic && target && hasCompleteMultipleChoiceQuestion(target.text)) {
       return "请直接作答当前选区中的完整选择题。第一行必须写“答案：<选项字母>”，再简要说明材料主旨及其他选项不当之处。";
     }
@@ -1250,7 +1375,8 @@ export class AiEditPopoverController {
       if (!stripped) throw new Error("AI 返回内容为空。");
       return stripped;
     }
-    return normalizeCanvasJson(stripped);
+    // Editing an existing canvas must not silently regenerate its layout.
+    return normalizeCanvasJson(stripped, false);
   }
 
   private systemPrompt(target: AiEditTarget): string {
@@ -1259,11 +1385,11 @@ export class AiEditPopoverController {
         "你是 Life OS 的 Obsidian Canvas 白板修改助手。",
         "只输出完整、合法的 Obsidian .canvas JSON，不要解释，不要 Markdown 代码围栏。",
         "必须保留 nodes 和 edges 数组。除非用户明确要求删除，否则保留原有节点和连接。",
-        "可以根据用户命令优化节点文本、补充节点、调整 x/y/width/height，让白板更清晰可读。",
+        "仅修改用户要求的内容。仅编辑文字时，必须保留全部节点的坐标、尺寸、类型、ID、连接和其他字段；只有用户明确要求布局调整时才能移动或调整尺寸。",
         "新增节点要短标题、短正文，避免一张卡片塞入大段文字。",
-        "布局必须使用语义泳道：中心主题、资料摘要、阶段/模块、证据、问题/行动、统计/模板分列摆放。",
-        "节点之间至少保留 80px 呼吸间距；不要重叠，不要把大量节点堆成圆环或单点辐射。",
-        "连线应尽量从左到右或从上到下，避免交叉；如果只是整理布局，也要输出完整 Canvas JSON。"
+        "若用户明确要求重新布局，可使用语义泳道：中心主题、资料摘要、阶段/模块、证据、问题/行动、统计/模板分列摆放。",
+        "仅在用户明确要求重新布局时，节点之间至少保留 80px 呼吸间距；不要重叠，不要把大量节点堆成圆环或单点辐射。",
+        "仅在用户明确要求重新布局时，连线应尽量从左到右或从上到下，避免交叉；如果只是整理布局，也要输出完整 Canvas JSON。"
       ].join("\n");
     }
 
@@ -1318,15 +1444,22 @@ export class AiEditPopoverController {
 
   private renderSkillSelector(parent: HTMLElement): void {
     const existing = this.skillPickerEl;
+    const wasOpen=existing?.hasAttribute("open") ?? false;
+    const query=existing?.querySelector<HTMLInputElement>("input")?.value ?? "";
+    const scrollTop = existing?.querySelector(".lifeos-ai-edit-skill-groups")?.scrollTop ?? 0;
+    const nextSibling = existing?.nextSibling ?? null;
+    const focusedSkill = existing?.querySelector<HTMLButtonElement>("button:focus")?.getAttribute("data-skill-id");
     if (existing) existing.remove();
 
     const selectedSkills = getAiSkills(this.selectedSkillIds, this.importedAiSkills, this.plugin.settings.aiSkillOverrides);
     const skillCategories = getAiSkillCategories(this.plugin.settings.customAiSkillCategories);
     const panel = parent.createEl("details", { cls: "lifeos-ai-edit-skill-panel" });
+    if (nextSibling) parent.insertBefore(panel, nextSibling);
     this.skillPickerEl = panel;
+    if(wasOpen)panel.setAttribute("open","");
 
     const summary = panel.createEl("summary", { cls: "lifeos-ai-edit-skill-summary" });
-    summary.createSpan({ cls: "lifeos-ai-edit-skill-label", text: "回复 Skill" });
+    summary.createSpan({ cls: "lifeos-ai-edit-skill-label", text: `选择 Skill · 已选 ${selectedSkills.length} 项 ▾` });
     const current = summary.createSpan({ cls: "lifeos-ai-edit-skill-current" });
     for (const skill of selectedSkills.slice(0, 2)) {
       current.createSpan({ cls: "lifeos-ai-edit-skill-current-chip", text: skill.name });
@@ -1335,10 +1468,21 @@ export class AiEditPopoverController {
       current.createSpan({ cls: "lifeos-ai-edit-skill-more", text: `+${selectedSkills.length - 2}` });
     }
 
+    const search=panel.createEl("input",{attr:{type:"search",placeholder:"搜索 Skill 名称或描述","aria-label":"搜索 Skill"}});
     const groups = panel.createDiv({ cls: "lifeos-ai-edit-skill-groups" });
+    search.oninput=()=>{
+      const query=search.value.trim().toLocaleLowerCase();
+      for(const group of Array.from(groups.querySelectorAll<HTMLElement>(".lifeos-ai-edit-skill-category"))) {
+        let visible=0;
+        for(const chip of Array.from(group.querySelectorAll<HTMLElement>(".lifeos-ai-edit-skill-chip"))) {
+          chip.hidden=!(chip.title.toLocaleLowerCase().includes(query)); if(!chip.hidden)visible++;
+        }
+        group.hidden=visible===0;
+      }
+    };
     groups.createDiv({
       cls: "lifeos-ai-edit-skill-hint",
-      text: "选择这次修改要使用的 Skill。它会影响回复方法和语气，但仍只写回当前选区、文档或白板。"
+      text: "选择回答方法，可多选。切换不会调用 AI；问答和答题不会写回文档。"
     });
 
     for (const category of skillCategories) {
@@ -1352,15 +1496,26 @@ export class AiEditPopoverController {
       for (const skill of skills) {
         const chip = list.createEl("button", {
           cls: this.selectedSkillIds.includes(skill.id) ? "lifeos-ai-edit-skill-chip is-active" : "lifeos-ai-edit-skill-chip",
-          attr: { type: "button", title: `${skill.name}｜${skill.description}` }
+          attr: { type: "button", title: `${skill.name}｜${skill.description.split(/[。！？\n]/u)[0]}` }
         });
-        chip.createSpan({ text: skill.name });
+        chip.setAttribute("data-skill-id", skill.id);
+        chip.createSpan({ cls: "lifeos-skill-option-name", text: `${this.selectedSkillIds.includes(skill.id) ? "✓ " : ""}${skill.name}` });
+
+        chip.setAttribute("aria-pressed",String(this.selectedSkillIds.includes(skill.id)));
+        chip.disabled=this.generating;
         chip.onclick = () => this.toggleSkill(skill.id);
       }
+    }
+    search.value=query;
+    search.dispatchEvent(new Event("input"));
+    groups.scrollTop = scrollTop;
+    if (focusedSkill) {
+      Array.from(groups.querySelectorAll<HTMLButtonElement>("button")).find(button => button.getAttribute("data-skill-id") === focusedSkill)?.focus({ preventScroll: true });
     }
   }
 
   private toggleSkill(id: string): void {
+    if(this.generating || this.applying)return;
     const next = new Set(this.selectedSkillIds);
     if (next.has(id)) next.delete(id);
     else next.add(id);
@@ -1369,14 +1524,7 @@ export class AiEditPopoverController {
     void this.plugin.saveSettings();
     if (this.skillPickerEl?.parentElement) this.renderSkillSelector(this.skillPickerEl.parentElement);
     this.placePopover();
-    window.setTimeout(() => this.commandInput?.focus(), 0);
-    if (this.activeTab === "answer" && this.target && !this.generating) {
-      this.answerHistory = [];
-      this.currentAnswerQuestion = "";
-      this.previewText = "";
-      this.previewEl?.addClass("is-empty");
-      this.previewEl?.setText("Skill 已更新，尚未调用 AI。点击“回答 / 解释”后再分析。");
-    }
+    // Changing method affects the next request only; preserve the current response.
   }
 
   private userPrompt(target: AiEditTarget, command: string): string {
@@ -1405,7 +1553,7 @@ export class AiEditPopoverController {
         return `将围绕 ${target.text.trim().length} 个字符回答；问答不会写回当前文档。`;
       }
       return target.kind === "readonly-selection"
-        ? `将围绕 ${target.text.trim().length} 个字符回答；阅读模式选区不会直接写回。`
+        ? `将改写 ${target.text.trim().length} 个字符；阅读模式只能复制预览，切到编辑模式重新选中后可确认替换。`
         : `将改写 ${target.text.trim().length} 个字符，只替换当前选区。`;
     }
     if (target.kind === "canvas") {
@@ -1606,17 +1754,46 @@ export function cloneEditorPosition(position: EditorPosition): EditorPosition {
   return { line: position.line, ch: position.ch };
 }
 
-export function normalizeCanvasJson(text: string): string {
+export function normalizeCanvasJson(text: string, relayout = true): string {
   const direct = tryParseCanvas(text);
-  if (direct) return JSON.stringify(normalizeCanvasLayout(direct), null, 2);
+  if (direct) return JSON.stringify(relayout ? normalizeCanvasLayout(direct) : validateCanvasStructure(direct), null, 2);
 
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start >= 0 && end > start) {
     const sliced = tryParseCanvas(text.slice(start, end + 1));
-    if (sliced) return JSON.stringify(normalizeCanvasLayout(sliced), null, 2);
+    if (sliced) return JSON.stringify(relayout ? normalizeCanvasLayout(sliced) : validateCanvasStructure(sliced), null, 2);
   }
   throw new Error("AI 返回的内容不是合法 Canvas JSON。");
+}
+
+/** Validate without repairing, dropping fields, or moving user nodes. */
+function validateCanvasStructure(canvas: CanvasDocumentLike): CanvasDocumentLike {
+  const nodeIds = new Set<string>(), edgeIds = new Set<string>();
+  const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+  const nonempty = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
+  const fail = (): never => { throw new Error("Canvas 节点或连线结构无效，未生成可应用预览。"); };
+  for (const node of canvas.nodes) {
+    if (!record(node) || !nonempty(node.id) || nodeIds.has(node.id)) fail();
+    const n = node as Record<string, unknown>;
+    if (typeof n.type !== "string" || !["text", "file", "link", "group"].includes(n.type)) fail();
+    if (!["x", "y", "width", "height"].every(k => typeof n[k] === "number" && Number.isFinite(n[k]))) fail();
+    if (Number(n.width) <= 0 || Number(n.height) <= 0) fail();
+    if (n.type === "text" && typeof n.text !== "string") fail();
+    if (n.type === "file" && !nonempty(n.file)) fail();
+    if (n.type === "link" && !nonempty(n.url)) fail();
+    nodeIds.add(n.id as string);
+  }
+  for (const edge of canvas.edges) {
+    if (!record(edge) || !nonempty(edge.id) || edgeIds.has(edge.id)) fail();
+    const e = edge as Record<string, unknown>;
+    if (!nonempty(e.fromNode) || !nonempty(e.toNode) || !nodeIds.has(e.fromNode) || !nodeIds.has(e.toNode)) fail();
+    for (const side of ["fromSide", "toSide"]) {
+      if (e[side] !== undefined && (typeof e[side] !== "string" || !["top", "right", "bottom", "left"].includes(e[side] as string))) fail();
+    }
+    edgeIds.add(e.id as string);
+  }
+  return canvas;
 }
 
 function tryParseCanvas(text: string): CanvasDocumentLike | null {
@@ -1624,7 +1801,7 @@ function tryParseCanvas(text: string): CanvasDocumentLike | null {
     const parsed = JSON.parse(text) as Partial<CanvasDocumentLike> | null;
     if (!parsed || typeof parsed !== "object") return null;
     if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return null;
-    return { nodes: parsed.nodes, edges: parsed.edges };
+    return parsed as CanvasDocumentLike;
   } catch {
     return null;
   }

@@ -1,4 +1,5 @@
 import type { ContextEngineMode, ContextEngineResult, ContextSection, ContextSource } from "./types";
+import { prepareCitableMarkdown, USER_SAVED_CONVERSATION_LABEL } from "./ContextSourcePolicyService";
 
 interface ComposeInput {
   userMessage: string;
@@ -23,7 +24,17 @@ export class ContextComposer {
     const maxChars = Math.max(0, input.maxChars);
     let promptContext = ["# 用户当前问题", input.userMessage, "", "# Life OS 相关证据"].join("\n");
 
-    for (const section of sortedSections) {
+    for (const originalSection of sortedSections) {
+      let section = originalSection;
+      if (section.kind === "context") {
+        section = { ...section, content: section.content.replace(/\[S(\d+)\]/gu, "［上下文中的旧引用 S$1］") };
+      }
+      const path = section.sourceInfo?.path ?? section.source;
+      if (path && section.kind !== "context" && !/^https?:\/\//iu.test(path)) {
+        const decision = prepareCitableMarkdown(path, section.content);
+        if (!decision.allowed) continue;
+        section = { ...section, content: decision.markdown };
+      }
       const rawSource = this.sourceFor(section, section.content);
       const source = rawSource ? this.withCitation(rawSource, sourceByKey) : null;
       const header = this.sectionHeader(section, source);
@@ -42,7 +53,7 @@ export class ContextComposer {
       if (includedSource) sourceByKey.set(this.sourceKey(includedSource), includedSource);
 
       promptContext += `${header}${content}`;
-      includedSections.push({ ...section, content, sourceInfo: includedSource ?? section.sourceInfo });
+      includedSections.push({ ...section, content, sourceInfo: includedSource ?? undefined });
       if (includedSource && !sources.some((item) => this.sourceKey(item) === this.sourceKey(includedSource))) {
         sources.push(includedSource);
       }
@@ -77,6 +88,7 @@ export class ContextComposer {
       "",
       `## [${source.citationId}] ${section.title}`,
       `来源：[${source.citationId}] ${source.path}`,
+      source.evidenceOrigin === "user-saved-conversation" ? `来源性质：${USER_SAVED_CONVERSATION_LABEL}；仅说明该对话被保存，不证明其中主张为真。` : "",
       locator ? `定位：${locator}` : ""
     ].filter((line, index) => line || index < 2).join("\n") + "\n";
   }
@@ -94,6 +106,9 @@ export class ContextComposer {
   }
 
   private sourceFor(section: ContextSection, content: string): ContextSource | null {
+    if (section.kind === "context" || section.sourceInfo?.evidenceOrigin === "context-only") return null;
+    const sourcePath = section.sourceInfo?.path ?? section.source;
+    if (sourcePath && !/^https?:\/\//iu.test(sourcePath) && !prepareCitableMarkdown(sourcePath, content).allowed) return null;
     if (section.sourceInfo) return { ...section.sourceInfo };
     if (!section.source) return null;
     const path = section.source;

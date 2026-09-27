@@ -10,6 +10,7 @@ import { getExamMetricProfiles, getExamProfileLabel } from "../settings";
 import { ensureFile, ensureFolder } from "../utils";
 import { today, formatDate } from "../utils/dates";
 import { renderStableView } from "../utils/stable-view-refresh";
+import { saveGuardedDocument, undoGuardedDocument, type LocalEditReceipt } from "../services/GuardedDocumentService";
 
 interface CheckinRecord {
   date: string;
@@ -22,6 +23,8 @@ interface CheckinRecord {
   streak: number;
 }
 
+interface CheckinFormSnapshot { date: string; root: string; path: string; original: string | null; historical: boolean }
+
 const MOODS = [
   { key: "happy", label: "顺利" },
   { key: "neutral", label: "平稳" },
@@ -32,6 +35,12 @@ const MOODS = [
 
 export class CheckinView extends ItemView {
   private moodValue = "neutral";
+  private original: string | null = null;
+  private formDate = today();
+  private saving = false;
+  private closed = false;
+  private draftTimer: number | null = null;
+  private receipt: LocalEditReceipt | null = null;
   private refreshTimer: number | null = null;
   private renderPromise: Promise<void> | null = null;
   private renderQueued = false;
@@ -51,6 +60,7 @@ export class CheckinView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
+    this.closed = false;
     await this.render(false);
     const refresh = (file: TAbstractFile): void => {
       if (this.shouldRefreshForFile(file)) this.scheduleVaultRefresh();
@@ -64,12 +74,16 @@ export class CheckinView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.closed = true;
+    if (this.draftTimer !== null) { window.clearTimeout(this.draftTimer); this.draftTimer = null; await this.plugin.saveSettings().catch(() => {}); }
     if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
     this.renderRequestRevision += 1;
   }
 
   private scheduleVaultRefresh(): void {
+    // A background event must not replace an in-progress form or its CAS base.
+    if (this.saving || this.plugin.settings.checkinDraft) return;
     if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
     this.refreshTimer = window.setTimeout(() => {
       this.refreshTimer = null;
@@ -114,8 +128,14 @@ export class CheckinView extends ItemView {
 
     const checkinsPath = this.plugin.path("Exam", "Checkins");
     await ensureFolder(this.app, checkinsPath);
-    const date = today();
+    const savedDraft = this.plugin.settings.checkinDraft;
+    const date = savedDraft?.root === this.plugin.getRoot() && /^\d{4}-\d{2}-\d{2}$/.test(savedDraft.date) ? savedDraft.date : today();
+    this.formDate = date;
     const existingFile = this.app.vault.getAbstractFileByPath(`${checkinsPath}/${date}.md`);
+    const freshOriginal = existingFile instanceof TFile ? await this.app.vault.read(existingFile) : null;
+    const draft = this.plugin.settings.checkinDraft;
+    this.original = draft?.date === date && draft.root === this.plugin.getRoot() ? draft.original : freshOriginal;
+    const snapshot: CheckinFormSnapshot = { date, root: this.plugin.getRoot(), path: `${checkinsPath}/${date}.md`, original: this.original, historical: date !== today() };
     const record = existingFile instanceof TFile ? await this.readRecord(existingFile) : null;
     const streak = await this.calculateStreak(checkinsPath, date);
     if (revision !== this.renderRequestRevision) return;
@@ -124,8 +144,9 @@ export class CheckinView extends ItemView {
       const main = createLifeOSShell(staging, this.plugin, "checkins");
       main.addClass("lifeos-checkin-page");
       createHeroHeader(main, {
+        app: this.app,
       kicker: "学习打卡",
-      title: record ? "今日已打卡" : "今日学习打卡",
+      title: snapshot.historical ? `${date} 未保存草稿` : record ? "今日已打卡" : "今日学习打卡",
       description: record ? "今天已经留下进度。你可以查看记录，也可以更新今日打卡。" : "记录一次学习动作，让长期趋势更完整。",
       icon: "graduation-cap",
       meta: `连续 ${record?.streak ?? streak} 天`,
@@ -136,7 +157,7 @@ export class CheckinView extends ItemView {
     });
 
     const grid = main.createDiv({ cls: "lifeos-checkin-page-grid" });
-    this.renderForm(grid, record, streak);
+    this.renderForm(grid, record, streak, snapshot);
       this.renderSide(grid, record, streak);
     }, {
       preserveScroll,
@@ -144,7 +165,9 @@ export class CheckinView extends ItemView {
     });
   }
 
-  private renderForm(parent: HTMLElement, record: CheckinRecord | null, streak: number): void {
+  private renderForm(parent: HTMLElement, record: CheckinRecord | null, streak: number, snapshot: CheckinFormSnapshot): void {
+    const saved = this.plugin.settings.checkinDraft;
+    const draft = saved?.date === snapshot.date && saved.root === snapshot.root ? saved : null;
     const metrics = getExamMetricProfiles(this.plugin.settings);
     const card = createCard(parent, "lifeos-panel lifeos-checkin-form-card");
     const header = card.createDiv({ cls: "lifeos-card-heading-row" });
@@ -154,6 +177,7 @@ export class CheckinView extends ItemView {
     header.createSpan({ cls: "lifeos-muted-text", text: record ? "保存会更新今日记录" : "填写后保存到本地 Vault" });
 
     const form = card.createDiv({ cls: "lifeos-checkin-form-page" });
+    if (snapshot.historical) form.createEl("p", { text: `正在恢复 ${snapshot.date} 的草稿。保存只写回这一天；保存或明确放弃后才进入今天。`, cls: "lifeos-inline-status" });
     const dataGroup = form.createDiv({ cls: "lifeos-form-group lifeos-form-field-wide" });
     dataGroup.createDiv({ cls: "lifeos-form-group-title", text: "学习数据" });
     const dataGrid = dataGroup.createDiv({ cls: "lifeos-checkin-data-grid" });
@@ -165,7 +189,7 @@ export class CheckinView extends ItemView {
     const moodGroup = form.createDiv({ cls: "lifeos-form-group lifeos-form-field-wide" });
     moodGroup.createDiv({ cls: "lifeos-form-group-title", text: "今日状态" });
     const moodRow = moodGroup.createDiv({ cls: "lifeos-mood-grid lifeos-mood-grid-page" });
-    this.moodValue = record?.mood || this.moodValue;
+    this.moodValue = draft?.mood || record?.mood || this.moodValue;
     const renderMoods = () => {
       moodRow.empty();
       for (const mood of MOODS) {
@@ -175,7 +199,9 @@ export class CheckinView extends ItemView {
           attr: { type: "button" }
         });
         button.onclick = () => {
+          if (this.saving) return;
           this.moodValue = mood.key;
+          persist();
           renderMoods();
         };
       }
@@ -188,11 +214,26 @@ export class CheckinView extends ItemView {
       cls: "lifeos-input lifeos-soft-input lifeos-checkin-summary",
       attr: { placeholder: "今天完成了什么，哪里卡住了，明天继续什么..." }
     });
-    summary.value = record?.summary || "";
+    summary.value = draft?.summary ?? record?.summary ?? "";
+    summary.maxLength = 16000;
+    if (draft) { duration.value = draft.duration; tasksCompleted.value = draft.tasks; xingceQuestions.value = draft.first; interviewPractice.value = draft.second; }
+    const persist = () => {
+      // A read started while the form was clean may still be awaiting I/O.
+      // Invalidate it before it can mount a new CAS base over this draft.
+      this.renderRequestRevision += 1;
+      this.plugin.settings.checkinDraft = { date: snapshot.date, root: snapshot.root, original: snapshot.original,
+        duration: duration.value, tasks: tasksCompleted.value, first: xingceQuestions.value, second: interviewPractice.value,
+        mood: this.moodValue, summary: summary.value };
+      if (this.draftTimer !== null) window.clearTimeout(this.draftTimer);
+      this.draftTimer = window.setTimeout(() => { this.draftTimer = null; void this.plugin.saveSettings().catch(() => new Notice("草稿保存失败，请勿关闭当前页面。")); }, 300);
+    };
+    for (const input of [duration, tasksCompleted, xingceQuestions, interviewPractice, summary]) input.oninput = persist;
 
     const actions = card.createDiv({ cls: "lifeos-card-actions lifeos-checkin-actions" });
     createButton(actions, "取消", () => void this.plugin.activateDashboard(), { ghost: true, icon: "arrow-left" });
-    createButton(actions, record ? "更新今日打卡" : "完成今日打卡", () => void this.submit(duration, tasksCompleted, xingceQuestions, interviewPractice, summary, streak, Boolean(record)), {
+    if (draft) createButton(actions, "放弃草稿并读取最新", () => { if (this.saving || !window.confirm("放弃未保存的打卡草稿？")) return; const prior = this.plugin.settings.checkinDraft; this.plugin.settings.checkinDraft = null; void this.plugin.saveSettings().then(() => this.render()).catch(error => { this.plugin.settings.checkinDraft = prior; new Notice(String(error)); }); }, { ghost: true });
+    if (this.receipt) createButton(actions, "撤销上次保存", () => void (async () => { try { await undoGuardedDocument(this.app, this.receipt!); this.receipt = null; await this.render(); } catch (error) { new Notice(String(error)); } })(), { ghost: true, icon: "undo-2" });
+    createButton(actions, snapshot.historical ? "保存历史草稿" : record ? "更新今日打卡" : "完成今日打卡", () => void this.submit(duration, tasksCompleted, xingceQuestions, interviewPractice, summary, record?.streak ?? streak, Boolean(record), snapshot, card), {
       primary: true,
       icon: "check-circle-2"
     });
@@ -234,13 +275,18 @@ export class CheckinView extends ItemView {
     interviewPractice: HTMLInputElement,
     summary: HTMLTextAreaElement,
     currentStreak: number,
-    isUpdate: boolean
+    isUpdate: boolean,
+    snapshot: CheckinFormSnapshot,
+    form: HTMLElement
   ): Promise<void> {
+    if (this.saving) return;
+    if (snapshot.root !== this.plugin.getRoot()) { new Notice("资料根目录已变化，请重新打开页面核对；草稿未丢弃。"); return; }
+    if (snapshot.date !== today() && !snapshot.historical) { new Notice("日期已切换，昨天的草稿仍保留。重新进入打卡页面可恢复并保存到原日期。"); return; }
+    if (snapshot.historical && !window.confirm(`将草稿保存回 ${snapshot.date}，不写入今天，确认吗？`)) return;
+    if ([duration, tasksCompleted, xingceQuestions, interviewPractice].some(input => !Number.isFinite(Number(input.value)) || Number(input.value) < 0 || Number(input.value) > 1_000_000)) { new Notice("请输入 0–1000000 之间的有效数值。"); return; }
     if (isUpdate && !window.confirm("今天已经打卡。确认更新今日打卡内容吗？")) return;
-    const date = today();
+    const date = snapshot.date;
     const streak = isUpdate ? currentStreak : currentStreak + 1;
-    const checkinsPath = this.plugin.path("Exam", "Checkins");
-    const file = await ensureFile(this.app, `${checkinsPath}/${date}.md`, "");
     const summaryText = summary.value.trim() || "今天也完成了一次稳定的学习记录。";
     const content = this.buildCheckinMarkdown(date, streak, {
       duration: Number(duration.value) || 0,
@@ -251,9 +297,18 @@ export class CheckinView extends ItemView {
       summary: summaryText
     });
 
-    await this.app.vault.modify(file, content);
-    new Notice(isUpdate ? "今日打卡已更新。" : `打卡成功，已连续 ${streak} 天。`, 5000);
-    await this.render();
+    this.saving = true;
+    const inputs = Array.from(form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement>("input, textarea, button"));
+    inputs.forEach(input => input.disabled = true);
+    try {
+      this.receipt = await saveGuardedDocument(this.app, snapshot.path, snapshot.original, content);
+      this.plugin.settings.checkinDraft = null;
+      if (this.draftTimer !== null) { window.clearTimeout(this.draftTimer); this.draftTimer = null; }
+      await this.plugin.saveSettings();
+      new Notice(`已核对保存：${snapshot.path}`, 5000);
+      if (!this.closed) await this.render();
+    } catch (error) { new Notice(`保存未完成：${error instanceof Error ? error.message : String(error)}`, 7000); }
+    finally { this.saving = false; inputs.forEach(input => input.disabled = false); }
   }
 
   private buildCheckinMarkdown(date: string, streak: number, data: {
@@ -271,9 +326,8 @@ export class CheckinView extends ItemView {
   }
 
   private async readRecord(file: TFile): Promise<CheckinRecord | null> {
-    const fm = parseFrontmatter(this.app, file);
-    if (fm) return this.recordFromFrontmatter(fm);
     const content = await this.app.vault.read(file);
+    if (!content.trim()) return null;
     const date = file.basename;
     return {
       date,
@@ -312,8 +366,9 @@ export class CheckinView extends ItemView {
     const files = listExamFiles(this.app, checkinsPath);
     const dates = new Set<string>();
     for (const file of files) {
-      const fm = parseFrontmatter(this.app, file);
-      dates.add(String(fm?.date ?? file.basename));
+      // Empty CAS undo receipts are not checkins, even if the metadata cache is stale.
+      const record = await this.readRecord(file);
+      if (record) dates.add(record.date);
     }
     let streak = 0;
     const cursor = new Date(date);

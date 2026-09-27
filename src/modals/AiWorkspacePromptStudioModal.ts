@@ -1,4 +1,5 @@
-import { App, Modal, Notice, TFile, setIcon } from "obsidian";
+import { LifeOSModal as Modal } from "../components/LifeOSModal";
+import { App, Notice, TFile, setIcon } from "obsidian";
 import { createButton } from "../components/Button";
 import { createModalShell } from "../components/ModalShell";
 import { requireProFeature } from "../licensing/entitlement";

@@ -1,4 +1,5 @@
 import type { ContextEvidence } from "./types";
+import type { ObsidianMetadataService } from "./ObsidianMetadataService";
 
 export interface VectorRetrievalIndex {
   search?: (input: VectorSearchInput) => Promise<ContextEvidence[]> | ContextEvidence[];
@@ -22,7 +23,7 @@ const SOURCE_EXCERPT_MAX_CHARS = 240;
 const SOURCE_TYPES = new Set(["current-note", "daily", "task", "memory", "summary", "knowledge", "llm-wiki", "graph", "url"]);
 
 export class VectorRetrievalService {
-  constructor(private readonly index?: VectorRetrievalIndex) {}
+  constructor(private readonly index?: VectorRetrievalIndex, private readonly metadata?: ObsidianMetadataService) {}
 
   async search(input: VectorSearchInput): Promise<VectorSearchResult> {
     if (!this.index?.search) {
@@ -34,9 +35,19 @@ export class VectorRetrievalService {
         ...input,
         maxResults: this.maxResults(input.maxResults)
       });
+      if (!this.metadata) return { available: true, evidence: [], warnings: ["向量候选未绑定本地来源验证，不作为引用证据。"] };
+      const verified: ContextEvidence[] = [];
+      for (const item of this.sanitizeEvidence(evidence, input.maxResults)) {
+        const source = await this.metadata.readCitableSource(item.source.path);
+        if (!source?.allowed) continue;
+        // Reject stale, invented, or auto-chat passages even if the provider calls them knowledge.
+        const normalize = (value: string) => value.replace(/\r\n/gu, "\n").trim();
+        if (!normalize(source.markdown).includes(normalize(item.content))) continue;
+        verified.push({ ...item, source: { ...item.source, excerpt: item.content.slice(0, SOURCE_EXCERPT_MAX_CHARS), evidenceOrigin: source.origin } });
+      }
       return {
         available: true,
-        evidence: this.sanitizeEvidence(evidence, input.maxResults),
+        evidence: verified,
         warnings: []
       };
     } catch {

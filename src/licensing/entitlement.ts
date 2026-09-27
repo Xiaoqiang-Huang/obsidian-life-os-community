@@ -1,7 +1,8 @@
-import { Modal } from "obsidian";
+import { LifeOSModal as Modal } from "../components/LifeOSModal";
 import type { IPlugin } from "../plugin-api";
 import { isLifeOsMonthlyProSku, type LicenseStateSnapshot, type LicenseStatusLabel } from "./license-types";
 import { getVerifiedEntitlementPayload } from "./entitlement-token";
+import { accountAccess } from './account-access';
 export { __seedVerifiedEntitlementPayloadForTests } from "./entitlement-token";
 
 export type ProFeatureId =
@@ -108,12 +109,16 @@ export function hasProAccess(snapshot: LicenseStateSnapshot | null, now = new Da
   return resolveLicenseStatus(snapshot, now, entitlementToken) !== "free";
 }
 
+export function hasSettingsProAccess(settings: IPlugin['settings'], now = new Date()): boolean {
+  return accountAccess(settings, now) ?? hasProAccess(settings.licenseSnapshot, now, settings.licenseEntitlementToken);
+}
+
 export function getProFeatureLabel(feature: ProFeatureId): string {
   return FEATURE_LABELS[feature];
 }
 
 export function requireProFeature(plugin: EntitlementPlugin, feature: ProFeatureId): boolean {
-  if (hasProAccess(plugin.settings.licenseSnapshot, new Date(), plugin.settings.licenseEntitlementToken)) return true;
+  if (hasSettingsProAccess(plugin.settings)) return true;
   new ProRequiredModal(plugin, feature).open();
   return false;
 }

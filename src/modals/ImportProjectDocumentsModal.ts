@@ -1,4 +1,5 @@
-import { App, Modal, Notice, setIcon } from "obsidian";
+import { LifeOSModal as Modal } from "../components/LifeOSModal";
+import { App, Notice, setIcon } from "obsidian";
 import { createButton } from "../components/Button";
 import { createModalShell } from "../components/ModalShell";
 import { requireProFeature } from "../licensing/entitlement";
@@ -81,8 +82,9 @@ export class ImportProjectDocumentsModal extends Modal {
     const copy = drop.createDiv({ cls: "lifeos-project-import-drop-copy" });
     copy.createEl("strong", { text: "拖拽文件到这里，或选择文件" });
     copy.createEl("span", { text: "可一次选择整个目录。PDF / Word 会先保存原件；可读正文会完整写入项目文档，再按下方选项整理为可检索 Markdown。" });
-    createButton(drop, "选择文件", () => input.click(), { ghost: true, icon: "paperclip" });
-    createButton(drop, "选择目录", () => directoryInput.click(), { ghost: true, icon: "folder-open" });
+    const fileActions = drop.createDiv({ cls: "lifeos-project-import-file-actions" });
+    createButton(fileActions, "选择文件", () => input.click(), { ghost: true, icon: "paperclip" });
+    createButton(fileActions, "选择目录", () => directoryInput.click(), { ghost: true, icon: "folder-open" });
 
     drop.addEventListener("dragover", (event) => {
       event.preventDefault();
@@ -95,6 +97,8 @@ export class ImportProjectDocumentsModal extends Modal {
       this.addFiles(event.dataTransfer?.files ?? null);
     });
     drop.addEventListener("keydown", (event) => {
+      // The nested buttons own their keyboard clicks; do not also open the file picker.
+      if (event.target !== drop) return;
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
         input.click();
@@ -226,7 +230,7 @@ export class ImportProjectDocumentsModal extends Modal {
     const panel = body.createDiv({ cls: "lifeos-project-import-options" });
     const copy = panel.createDiv({ cls: "lifeos-project-import-options-copy" });
     copy.createEl("strong", { text: "正文处理方式" });
-    copy.createEl("span", { text: "先决定是否完整导入可检索正文；AI 只在正文导入后按段落调整格式，不负责读取原文件。" });
+    copy.createEl("span", { text: "AI 只在正文导入后按段落调整格式。可选择立即解析正文，或仅保存原文件。仅保存 PDF 时，AI 无法直接检索其正文，可能需要先按文件名找到原文件，再解析文字，最后回答或引用；扫描件还可能需要 OCR。" });
     const options: Array<{ mode: ProjectDocumentTextImportMode; title: string; description: string }> = [
       {
         mode: "ai-formatted",
@@ -241,7 +245,7 @@ export class ImportProjectDocumentsModal extends Modal {
       {
         mode: "attachment-only",
         title: "只保存原文件",
-        description: "不提取全文、不生成可检索正文，适合暂存大文件或敏感资料。"
+        description: "保留原文件，不提取全文。后续需先找到文件名并解析正文，AI 才能基于内容处理；也可打开 PDF，选中可复制的文字使用 AI。"
       }
     ];
     const group = panel.createDiv({ cls: "lifeos-project-import-option-list" });

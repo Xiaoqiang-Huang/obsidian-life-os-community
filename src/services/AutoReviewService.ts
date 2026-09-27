@@ -14,6 +14,8 @@ import {
   type PeriodReviewWindow
 } from "./PeriodReviewService";
 import type { ReviewQualityReport } from "./ReviewQualityService";
+import { commitDraftPromotion, DraftPromotionPartialError } from "./DraftPromotionReceipt";
+export { DraftPromotionPartialError } from "./DraftPromotionReceipt";
 
 export type AutoReviewTrigger = "timer" | "startup" | "manual";
 export type AutoReviewRunStatus =
@@ -47,6 +49,7 @@ export interface AutoReviewDraft {
   draft: string;
   userNotes: string;
   formalPath: string;
+  instruction: string;
   modifiedAt: number;
 }
 
@@ -183,6 +186,10 @@ export class AutoReviewService {
     });
   }
 
+  hasPromotionReceipt(path: string): boolean {
+    return Boolean(this.app.vault.getAbstractFileByPath(`${path}.promotion.json`));
+  }
+
   async promoteDraft(
     path: string,
     draft: string,
@@ -197,11 +204,30 @@ export class AutoReviewService {
       await this.setDraftStatus(path, "stale");
       throw new Error("来源已变化，请刷新事实并重新生成后再保存。旧草稿已标记为过期。");
     }
-    const quality = this.periodReviews.validateDraft(draft, facts);
+    const quality = this.periodReviews.validateDraft(draft, facts, instruction);
     if (!quality.ok) throw new Error(`草稿尚未通过质量检查：${quality.errors[0] ?? "请检查结构和来源"}`);
-    const formal = await this.periodReviews.saveReview(facts, draft, instruction, userNotes);
-    await this.updateDraft(path, draft, userNotes);
-    await this.setDraftStatus(path, "saved", formal.path);
+    const source = this.app.vault.getAbstractFileByPath(path);
+    if (!(source instanceof TFile)) throw new Error("自动复盘草稿已不存在。");
+    const currentDraft = await this.app.vault.read(source);
+    const committed = await commitDraftPromotion(this.app, path, this.fs.path("Reviews", "Periods"),
+      `${facts.kind}-${facts.window.start}_to_${facts.window.end}`,
+      JSON.stringify({ sourceHash: facts.sourceHash, draft: draft.trim(), userNotes: userNotes.trim(), instruction: instruction.trim() }),
+      this.periodReviews.buildReviewMarkdown(facts, draft, instruction, userNotes), currentDraft);
+    const formal = committed.file, before = committed.draftBefore;
+    const after = setFrontmatterValue(setFrontmatterValue(replacePeriodReviewUserNotesRegion(
+      replacePeriodReviewAiRegion(before, draft), `## 用户补充\n\n${userNotes.trim()}`), "status", "saved"), "formal_path", formal.path);
+    try {
+      if (typeof this.app.vault.process !== "function") throw new Error("当前宿主不支持安全写入。");
+      await this.app.vault.process(source, current => {
+        if (source.path !== path || this.app.vault.getAbstractFileByPath(path) !== source || (current !== before && current !== after)) throw new Error("草稿在保存期间被修改，未覆盖。");
+        return after;
+      });
+    } catch (error) {
+      let acknowledged = false;
+      try { acknowledged = source.path === path && this.app.vault.getAbstractFileByPath(path) === source && await this.app.vault.read(source) === after; }
+      catch { /* Keep the persisted formal identity even if acknowledgement cannot be read. */ }
+      if (!acknowledged) throw new DraftPromotionPartialError(formal, error);
+    }
     return formal;
   }
 
@@ -289,6 +315,7 @@ export class AutoReviewService {
       generatedAt: frontmatter.generated_at || "",
       qualityStatus: frontmatter.quality_status === "pass" ? "pass" : "warning",
       qualityScore: Number(frontmatter.quality_score) || 0,
+      instruction: frontmatter.review_instruction || "",
       draft: regions.ai.trim(),
       userNotes: regions.userNotes.replace(/^\s*## 用户补充\s*/u, "").replace(/<!--[^]*?-->/gu, "").trim(),
       formalPath: frontmatter.formal_path || "",
@@ -375,7 +402,12 @@ function parseFrontmatter(content: string): Record<string, string> {
   for (const line of match[1].split(/\r?\n/u)) {
     const separator = line.indexOf(":");
     if (separator < 0) continue;
-    result[line.slice(0, separator).trim()] = line.slice(separator + 1).trim().replace(/^['"]|['"]$/gu, "");
+    const key = line.slice(0, separator).trim();
+    const raw = line.slice(separator + 1).trim();
+    if (key === "review_instruction" && raw.startsWith('"')) {
+      try { const decoded = JSON.parse(raw); result[key] = typeof decoded === "string" ? decoded : ""; }
+      catch { result[key] = ""; }
+    } else { result[key] = raw.replace(/^['"]|['"]$/gu, ""); }
   }
   return result;
 }

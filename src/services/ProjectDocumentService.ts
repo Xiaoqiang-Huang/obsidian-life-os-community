@@ -18,6 +18,8 @@ import {
 } from "./DocumentImportService";
 import { buildKeywordLinkedMarkdown, stripKeywordLinksSection } from "./KeywordLinkService";
 import { PdfOcrService, type PdfOcrProvider } from "./PdfOcrService";
+import { readVaultSnapshot, throwIfReadAborted } from "../utils/vault-read-cache";
+import { saveGuardedDocument } from "./GuardedDocumentService";
 
 export { docxXmlToMarkdown, formatImportedPlainText, reconstructPdfPageText } from "./DocumentImportService";
 export { formatTesseractBlocksForMarkdown, parsePaddleStructuredOcrResponse } from "./PdfOcrService";
@@ -41,10 +43,13 @@ interface ProjectDocumentCreateInput {
   title: string;
   kind?: LifeOSProjectDocumentKind;
   content?: string;
+  /** Explicit native form input, not generated/import-formatting output. */
+  preserveInput?: boolean;
 }
 
 interface ProjectDocumentListOptions {
   includeTrash?: boolean;
+  signal?: AbortSignal;
 }
 
 export interface ProjectDocumentServiceOptions {
@@ -113,6 +118,12 @@ interface ProjectDocumentVault {
 
 const PROJECT_DOCUMENT_KINDS: LifeOSProjectDocumentKind[] = ["note", "meeting", "requirement", "reference", "review"];
 const PROJECT_DOCUMENT_TYPE = "lifeos-project-document";
+const documentMutations = new WeakMap<App, Set<string>>();
+
+/** Display the real stored filename; never infer a breadcrumb from authored headings. */
+export function projectDocumentFileName(document: Pick<LifeOSProjectDocument, "path">): string {
+  return document.path.split("/").pop() || "未命名文档.md";
+}
 const PROJECT_DOCUMENT_AI_FORMAT_CHUNK_CHARS = 3600;
 const PROJECT_DOCUMENT_AI_FORMAT_MIN_RETENTION_RATIO = 0.72;
 const PROJECT_DOCUMENT_AI_FORMAT_MARKER_RETENTION_RATIO = 0.86;
@@ -142,6 +153,9 @@ export class ProjectDocumentService {
   constructor(private app: App, private fs: FileSystemService, private options: ProjectDocumentServiceOptions = {}) {}
 
   projectRootPath(project: Pick<LifeOSProject, "id">): string {
+    if (!project.id || project.id === "." || project.id === ".." || /[\\/:\u0000-\u001f]/u.test(project.id)) {
+      throw new Error("项目标识无效，未访问项目资料。");
+    }
     return joinPath(this.fs.path("Projects"), project.id);
   }
 
@@ -172,7 +186,7 @@ export class ProjectDocumentService {
     const title = this.cleanTitle(input.title);
     const kind = this.normalizeKind(input.kind);
     const path = this.uniquePath(this.documentsPath(project), `${this.slugify(title)}.md`);
-    const file = await this.createFile(path, this.documentMarkdown(project, title, kind, input.content ?? ""));
+    const file = await this.createFile(path, this.documentMarkdown(project, title, kind, input.content ?? "", input.preserveInput));
     return this.describeDocument(project, file, await this.readFile(file));
   }
 
@@ -202,9 +216,9 @@ export class ProjectDocumentService {
       const saved = await saveImportedFileToVault(this.app, sourceFile, {
         folderPath: this.attachmentsPath(project)
       });
-      report("extracting");
+      if (textMode !== "attachment-only") report("extracting");
       const extraction = textMode === "attachment-only"
-        ? { text: "", warnings: ["Original file saved only. Searchable text conversion was skipped by import option."] }
+        ? { text: "", warnings: ["仅保存原文件，未解析正文；不会据此生成内容标签。"] }
         : await this.extractImportText(sourceFile, importKind);
       const formatted = await this.prepareImportedDocumentText(project, {
         title,
@@ -247,7 +261,9 @@ export class ProjectDocumentService {
     project: LifeOSProject,
     options: ProjectDocumentListOptions = {}
   ): Promise<LifeOSProjectDocument[]> {
-    await this.ensureProjectSpace(project);
+    // Browsing must not create folders or rewrite protocol/index files. Write
+    // operations already call ensureProjectSpace; missing directories are empty.
+    throwIfReadAborted(options.signal);
     const documentsRoot = `${this.documentsPath(project)}/`;
     const trashRoot = `${this.trashPath(project)}/`;
     const files = this.markdownFiles()
@@ -257,10 +273,13 @@ export class ProjectDocumentService {
 
     const docs: LifeOSProjectDocument[] = [];
     for (const file of files) {
-      const content = await this.readFile(file);
+      throwIfReadAborted(options.signal);
+      const content = await readVaultSnapshot(this.app, file.path, options.signal);
+      throwIfReadAborted(options.signal);
       if (this.isAiWorkspaceSessionAsset(file.path, content)) continue;
       docs.push(await this.describeDocument(project, file, content));
     }
+    throwIfReadAborted(options.signal);
     return docs;
   }
 
@@ -269,31 +288,86 @@ export class ProjectDocumentService {
       || /^---[\s\S]*?\ntype:\s*ai-workspace-session\s*$/imu.test(content);
   }
 
-  async updateDocument(path: string, content: string): Promise<void> {
+  async readDocument(project: LifeOSProject, documentOrPath: LifeOSProjectDocument | string): Promise<string> {
+    return this.readFile(await this.scopedDocumentFile(project, documentOrPath));
+  }
+
+  async sourceFilePath(project: LifeOSProject, document: LifeOSProjectDocument): Promise<string> {
+    const markdown = await this.readDocument(project, document);
+    const raw = String(parseFrontmatter(markdown).source_file || "");
+    if (!raw || /[\\:\u0000-\u001f]/u.test(raw) || raw.startsWith("/")
+      || raw.split("/").some(p => !p || p === "." || p === "..")
+      || !raw.startsWith(this.attachmentsPath(project) + "/")) throw new Error("原文件路径不属于当前项目附件，未打开。");
+    if (!this.getFile(raw)) throw new Error("原文件已移动或删除，请检查附件目录。");
+    return raw;
+  }
+
+  async updateDocument(path: string, content: string, snapshot?: { project: LifeOSProject; expectedContent: string }): Promise<void> {
+    if (snapshot) {
+      return this.withDocumentMutation(path, async () => {
+        await this.scopedDocumentFile(snapshot.project, path);
+        this.checkDocumentOwner(snapshot.project, content);
+        // Native manual editing is byte-preserving and must not overwrite intervening edits.
+        await saveGuardedDocument(this.app, path, snapshot.expectedContent, content);
+      });
+    }
     const file = this.getFile(path);
     if (!file) throw new Error(`Project document not found: ${path}`);
     await this.vault().modify(file, buildKeywordLinkedMarkdown(content));
   }
 
   async renameDocument(project: LifeOSProject, documentOrPath: LifeOSProjectDocument | string, nextTitle: string): Promise<LifeOSProjectDocument> {
-    await this.ensureProjectSpace(project);
-    const file = this.getFile(this.documentPath(documentOrPath));
-    if (!file) throw new Error(`Project document not found: ${this.documentPath(documentOrPath)}`);
-    const title = this.cleanTitle(nextTitle);
-    const nextPath = this.uniquePath(this.documentsPath(project), `${this.slugify(title)}.md`, file.path);
-    await this.renameFile(file, nextPath);
-    const renamed = this.getFile(nextPath) ?? { ...file, path: nextPath, name: nextPath.split("/").pop() ?? nextPath };
-    return this.describeDocument(project, renamed, await this.readFile(renamed));
+    return this.withDocumentMutation(this.documentPath(documentOrPath), async () => {
+      const file = await this.scopedDocumentFile(project, documentOrPath);
+      const title = this.cleanTitle(nextTitle.trim().replace(/\.md$/iu, ""));
+      const parent = file.path.slice(0, file.path.lastIndexOf("/"));
+      const nextPath = this.uniquePath(parent, `${this.slugify(title)}.md`, file.path);
+      if (nextPath !== file.path) await this.renameFile(file, nextPath);
+      const renamed = this.getFile(nextPath);
+      if (!renamed) throw new Error("重命名后未找到文档，请刷新资料列表核对。");
+      return this.describeDocument(project, renamed, await this.readFile(renamed));
+    });
   }
 
   async deleteDocument(project: LifeOSProject, documentOrPath: LifeOSProjectDocument | string): Promise<LifeOSProjectDocument> {
-    await this.ensureProjectSpace(project);
-    const file = this.getFile(this.documentPath(documentOrPath));
-    if (!file) throw new Error(`Project document not found: ${this.documentPath(documentOrPath)}`);
-    const nextPath = this.uniquePath(this.trashPath(project), file.name || `${this.slugify(file.path)}.md`);
-    await this.renameFile(file, nextPath);
-    const moved = this.getFile(nextPath) ?? { ...file, path: nextPath, name: nextPath.split("/").pop() ?? nextPath };
-    return this.describeDocument(project, moved, await this.readFile(moved));
+    return this.withDocumentMutation(this.documentPath(documentOrPath), async () => {
+      let file = await this.scopedDocumentFile(project, documentOrPath);
+      await this.ensureFolder(this.trashPath(project));
+      file = await this.scopedDocumentFile(project, documentOrPath);
+      const nextPath = this.uniquePath(this.trashPath(project), file.name);
+      await this.renameFile(file, nextPath);
+      const moved = this.getFile(nextPath);
+      if (!moved) throw new Error("移动后未找到回收站文档，请刷新核对。");
+      return this.describeDocument(project, moved, await this.readFile(moved));
+    });
+  }
+
+  private async scopedDocumentFile(project: LifeOSProject, documentOrPath: LifeOSProjectDocument | string): Promise<VaultFileLike> {
+    const raw = typeof documentOrPath === "string" ? documentOrPath : documentOrPath.path;
+    if (!raw || /[\\:\u0000-\u001f]/u.test(raw) || raw.startsWith("/") || raw.split("/").some(p => !p || p === "." || p === "..") ||
+      !raw.startsWith(this.documentsPath(project) + "/") || !raw.toLowerCase().endsWith(".md")) {
+      throw new Error("只能操作当前项目资料目录中的 Markdown 文档。");
+    }
+    const file = this.getFile(raw);
+    if (!file) throw new Error("文档已移动或删除，请刷新项目资料。");
+    const content = await this.readFile(file);
+    if (file.path !== raw || this.getFile(raw) !== file) throw new Error("文档位置已变化，请刷新后重试。");
+    if (this.isAiWorkspaceSessionAsset(raw, content)) throw new Error("AI 会话记录不属于可编辑的项目资料。");
+    this.checkDocumentOwner(project, content);
+    return file;
+  }
+
+  private checkDocumentOwner(project: LifeOSProject, content: string): void {
+    const owner = parseFrontmatter(content).project_id;
+    if (owner && String(owner) !== project.id) throw new Error("文档所属项目与当前项目不一致，未执行操作。");
+  }
+
+  private async withDocumentMutation<T>(path: string, action: () => Promise<T>): Promise<T> {
+    let active = documentMutations.get(this.app);
+    if (!active) { active = new Set(); documentMutations.set(this.app, active); }
+    if (active.has(path)) throw new Error("此文档正在保存或移动，请稍后再试。");
+    active.add(path);
+    try { return await action(); } finally { active.delete(path); }
   }
 
   private projectIndexMarkdown(project: LifeOSProject): string {
@@ -319,8 +393,14 @@ export class ProjectDocumentService {
     project: LifeOSProject,
     title: string,
     kind: LifeOSProjectDocumentKind,
-    content: string
+    content: string,
+    preserveInput = false
   ): string {
+    if (preserveInput) {
+      return ["---", `type: ${PROJECT_DOCUMENT_TYPE}`, `project_id: ${yamlScalar(project.id)}`,
+        `project_name: ${yamlScalar(project.name)}`, `kind: ${yamlScalar(kind)}`,
+        `created: ${formatDate()}`, `updated: ${formatDate()}`, "---", "", `# ${title}`, "", content, ""].join("\n");
+    }
     const body = content.trim() ? content.trim() : "";
     return buildKeywordLinkedMarkdown([
       "---",
@@ -388,7 +468,10 @@ export class ProjectDocumentService {
       lines.push("## 可检索正文", "", input.text.trim(), "");
     }
 
-    return buildKeywordLinkedMarkdown(lines.join("\n"), { title: input.title });
+    const markdown = lines.join("\n");
+    return input.textMode === "attachment-only" || !input.text.trim()
+      ? markdown.trimEnd() + "\n"
+      : buildKeywordLinkedMarkdown(markdown, { evidence: input.text });
   }
 
   private async describeDocument(

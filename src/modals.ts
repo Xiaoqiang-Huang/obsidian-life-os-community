@@ -1,4 +1,5 @@
-import { App, Component, Modal, Notice } from "obsidian";
+import { LifeOSModal as Modal } from "./components/LifeOSModal";
+import { App, Component, Notice } from "obsidian";
 import type { IPlugin } from "./plugin-api";
 import { buildSystemPrompt } from "./ai";
 import { evaluateAnswer, formatEvaluation, generatePracticePlan, type ScoreResult } from "./exam/interview";

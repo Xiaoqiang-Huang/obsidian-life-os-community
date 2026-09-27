@@ -1,4 +1,16 @@
-import { MarkdownView, Notice, Plugin, TFile, type Editor, type WorkspaceLeaf } from "obsidian";
+import { capturePdfTextSelection } from "./ui/pdf-selection";
+import { DocumentTagsModal } from "./modals/DocumentTagsModal";
+import { GENERATED_NOTE_TAG_RULE, normalizeGeneratedNoteMarkdown } from "./utils/generated-note-markdown";
+import { resolveVisionSettings } from "./settings";
+import { TaskSuggestionService, normalizeTaskSuggestionDailyLimit } from "./services/TaskSuggestionService";
+import { refreshExperienceTheme, syncThemeClassNames } from "./ui/theme";
+import { persistSettingsSnapshot } from "./ui/theme-selection";
+import { applyDocumentAppearance, clearDocumentAppearance, documentBackgroundUrl } from "./ui/document-appearance";
+import { prepareDailyAnalysisSource } from "./services/DailyAnalysisSource";
+import { USER_SAVED_CONVERSATION_LABEL, USER_SAVED_CONVERSATION_SOURCE, type EvidenceOrigin } from "./services/context-engine/ContextSourcePolicyService";
+import { snapshotWritebackUndo } from "./services/writeback-undo";
+import { Menu, MarkdownView, Notice, Plugin, TFile, type Editor, type WorkspaceLeaf } from "obsidian";
+import { installVaultReadCache } from "./utils/vault-read-cache";
 import {
   AI_EDIT_PANEL_VIEW_TYPE,
   AI_WORKSPACE_VIEW_TYPE,
@@ -60,7 +72,8 @@ import {
   type AgentMemoryMode
 } from "./settings";
 import { normalizeInstallationId } from "./licensing/installation-id";
-import { hasProAccess, requireProFeature } from "./licensing/entitlement";
+import { hasSettingsProAccess, requireProFeature } from "./licensing/entitlement";
+import { accountRuntime } from './licensing/account-runtime';
 import { verifyLicenseEntitlementToken } from "./licensing/entitlement-token";
 import { normalizeAiSkillOverrides, normalizeCustomAiSkillCategories, normalizeImportedAiSkillRecords } from "./services/AiSkillService";
 import { PersonalLifeSystemSettingTab } from "./settings-tab";
@@ -96,7 +109,7 @@ import { showTodayTasks } from "./exam/tasks";
 import { showTrainingPlan } from "./exam/training-plan";
 import { showUploadMaterial } from "./exam/materials";
 import { showInterviewTrends } from "./exam/interview";
-import { destroyLifeOSLiquidGlassRuntime, refreshLifeOSLiquidGlassRuntime } from "./ui/liquid-glass-runtime";
+import { destroyLifeOSLiquidGlassRuntime } from "./ui/liquid-glass-runtime";
 import { AiEditPopoverController, cloneEditorPosition, type AiEditAnchor, type AiEditTarget } from "./ui/AiEditPopover";
 import { showEmotionTracking, showDiarySearch } from "./reports";
 import { QuickCaptureModal } from "./modals/QuickCaptureModal";
@@ -124,7 +137,9 @@ import {
   type WeixinConnectionStatus
 } from "./services/weixin/WeixinIlinkService";
 import { DailyNoteService } from "./services/DailyNoteService";
+import { tagConfirmedDiary } from "./services/ConfirmedDiaryTagService";
 import { TaskService } from "./services/TaskService";
+import { TaskRecoveryController } from "./services/TaskRecoveryController";
 import { formatMemoryCandidate } from "./services/lifeos-logic";
 import {
   applyWritebackItems,
@@ -230,6 +245,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   private pendingChatPrompt = "";
   private aiWorkspaceSyncRunning = false;
   private autoReviewService: AutoReviewService | null = null;
+  private finishingTodayNote = false;
   private readonly browserCaptureServer = new AiWorkspaceBrowserCaptureServer();
   private weixinIlinkService: WeixinIlinkService | null = null;
   private weixinAssistantService: WeixinAssistantService | null = null;
@@ -253,8 +269,38 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   ];
 
   async onload(): Promise<void> {
+    this.register(installVaultReadCache(this.app));
     await this.loadSettings();
+    // Inspect before initializers/channels write. Index readiness is transient;
+    // every later write still enters the same guarded, serialized coordinator.
+    let taskRecoveryNotice: Notice | null = null;
+    const taskRecovery = new TaskRecoveryController(
+      (signal) => new TaskService(this.app, this.fileSystem()).recoverPendingWrites(signal),
+      (status) => {
+        if (status.phase === "waiting") {
+          taskRecoveryNotice ??= new Notice("正在等待任务文件索引，就绪后会自动重试恢复；期间保留任务写入保护。", 0);
+          return;
+        }
+        taskRecoveryNotice?.hide(); taskRecoveryNotice = null;
+        if (status.phase === "blocked") {
+          taskRecoveryNotice = new Notice(status.indexPending
+            ? "任务文件索引仍未就绪，尚未完成恢复。请稍后在命令面板运行「Life OS：重试任务恢复」；无需删除恢复记录，任务写入保护继续保留。"
+            : status.error instanceof Error ? status.error.message : String(status.error), 15000);
+        }
+      }
+    );
+    this.register(() => { taskRecovery.dispose(); taskRecoveryNotice?.hide(); });
+    this.addCommand({ id: "retry-task-recovery", name: "重试任务恢复", callback: () => taskRecovery.retry() });
+    await taskRecovery.start();
+    this.app.workspace.onLayoutReady(() => { void taskRecovery.layoutReady(); });
     await this.verifyStoredLicenseEntitlement();
+    const restoreAccount = () => {
+      if (this.settings.licenseAccountSessionId || this.settings.licenseAccountPendingSessionId) void accountRuntime(this).then(runtime => runtime.restore()).catch(() => {
+        // Account mode remains fail-closed; the authorization page offers recovery.
+      });
+    };
+    restoreAccount();
+    this.registerInterval(window.setInterval(restoreAccount, 5 * 60 * 1000));
     this.applyTheme();
     this.installMobileViewportVariables();
     this.registerModalTextareaEnhancer();
@@ -263,11 +309,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       this.app,
       () => this.settings,
       this.ai,
-      () => hasProAccess(
-        this.settings.licenseSnapshot,
-        new Date(),
-        this.settings.licenseEntitlementToken
-      ),
+      () => hasSettingsProAccess(this.settings),
       () => this.saveSettings()
     );
     this.autoReviewService = new AutoReviewService(
@@ -276,11 +318,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       this.settings,
       this.ai,
       {
-        hasEntitlement: () => hasProAccess(
-          this.settings.licenseSnapshot,
-          new Date(),
-          this.settings.licenseEntitlementToken
-        ),
+        hasEntitlement: () => hasSettingsProAccess(this.settings),
         onDraftCreated: (draft) => new Notice(`已生成待确认的今日复盘草稿：${draft.window.start}`, 7000)
       }
     );
@@ -712,6 +750,14 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       && storedChatWritebackMode !== "confirm"
       && storedChatWritebackMode !== "explicit-auto";
     this.settings = Object.assign({}, DEFAULT_SETTINGS, storedData);
+    this.settings.firstRunState = { ...DEFAULT_SETTINGS.firstRunState, ...(this.settings.firstRunState || {}) };
+    this.settings.firstRunState.draft = String(this.settings.firstRunState.draft || "").slice(0, 16000);
+    this.settings.sidebarPinnedItems = Array.isArray(this.settings.sidebarPinnedItems) ? [...new Set(this.settings.sidebarPinnedItems.filter(item => typeof item === "string"))].slice(0, 14) : [];
+    this.settings.uiAppearance = !Object.prototype.hasOwnProperty.call(storedData, "uiAppearance") && Object.prototype.hasOwnProperty.call(storedData, "themeStyle") ? "theme" : this.settings.uiAppearance;
+    if (!["theme", "warm-paper", "cool-slate"].includes(this.settings.uiAppearance)) this.settings.uiAppearance = "theme";
+    if (this.settings.uiDensity !== "compact") this.settings.uiDensity = "standard";
+    this.settings.taskSuggestionDailyLimit = normalizeTaskSuggestionDailyLimit(this.settings.taskSuggestionDailyLimit);
+    this.settings.taskSuggestionsPaused = this.settings.taskSuggestionsPaused === true;
     this.settings.themeStyle = normalizeThemeStyle(this.settings.themeStyle);
     this.settings.uiFramework = normalizeUiFrameworkSettings(
       (storedData as Record<string, unknown>).uiFramework ?? (storedData as Record<string, unknown>).uiFrameworkVersion
@@ -847,9 +893,10 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     }
   }
 
-  async saveSettings(): Promise<void> {
+  async saveSettings(themeRevision?: number): Promise<void> {
     this.settings.autoReviewTime = normalizeAutoReviewTime(this.settings.autoReviewTime);
-    await this.saveData(this.settings);
+    // Snapshot at invocation; rapid controls cannot persist an older selection last.
+    await persistSettingsSnapshot(this, themeRevision);
   }
 
   private async runAgentMemoryBackgroundPass(includeMaintenance = false): Promise<void> {
@@ -914,11 +961,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     if (!this.settings.browserCaptureEnabled) return this.browserCaptureServer.getStatus();
     const port = normalizeBrowserCapturePort(this.settings.browserCapturePort);
     this.settings.browserCapturePort = port;
-    const hasProjectMutationAccess = (): boolean => hasProAccess(
-      this.settings.licenseSnapshot,
-      new Date(),
-      this.settings.licenseEntitlementToken
-    );
+    const hasProjectMutationAccess = (): boolean => hasSettingsProAccess(this.settings);
     return this.browserCaptureServer.start({
       port,
       token: this.settings.browserCaptureToken,
@@ -975,7 +1018,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
         approvedSenders: this.settings.weixinApprovedSenders,
         allowedGroups: this.settings.weixinAllowedGroups
       }, request).allowed,
-      canAnalyzeImages: () => this.settings.enableVisionFileAnalysis === true && Boolean(this.settings.visionAiModel?.trim()),
+      canAnalyzeImages: () => Boolean(resolveVisionSettings(this.settings)),
       stageInboundMessage: (request) => this.getWeixinAssistantService().stageInboundMessage(request),
       handleMessage: (request) => this.getWeixinAssistantService().handleMessage(request),
       recoverPendingMessages: (accountId) => this.getWeixinAssistantService().recoverPendingMessages(accountId),
@@ -1099,12 +1142,9 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
 
   private createWeixinAssistantService(): WeixinAssistantService {
     return new WeixinAssistantService(this.app, this.settings, this.ai, {
+      getSettings: () => this.settings,
       saveSettings: () => this.saveSettings(),
-      hasWriteEntitlement: () => hasProAccess(
-        this.settings.licenseSnapshot,
-        new Date(),
-        this.settings.licenseEntitlementToken
-      ),
+      hasWriteEntitlement: () => hasSettingsProAccess(this.settings),
       sendProactiveText: (accountId, senderId, conversationId, text, clientId) => this.getWeixinIlinkService()
         .sendProactiveText(accountId, senderId, conversationId, text, clientId)
     }, this.agent);
@@ -1125,7 +1165,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
           approvedSenders: this.settings.weixinApprovedSenders,
           allowedGroups: this.settings.weixinAllowedGroups
         }, request).allowed,
-        canAnalyzeImages: () => this.settings.enableVisionFileAnalysis === true && Boolean(this.settings.visionAiModel?.trim()),
+        canAnalyzeImages: () => Boolean(resolveVisionSettings(this.settings)),
         stageInboundMessage: (request) => this.getWeixinAssistantService().stageInboundMessage(request),
         handleMessage: (request) => this.getWeixinAssistantService().handleMessage(request),
         recoverPendingMessages: (accountId) => this.getWeixinAssistantService().recoverPendingMessages(accountId),
@@ -1153,11 +1193,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   }
 
   async refreshTrackedAiWorkspaceSessions(showNotice = false): Promise<void> {
-    const hasAccess = hasProAccess(
-      this.settings.licenseSnapshot,
-      new Date(),
-      this.settings.licenseEntitlementToken
-    );
+    const hasAccess = hasSettingsProAccess(this.settings);
     if (!hasAccess) {
       if (showNotice) requireProFeature(this, "projectManagement");
       return;
@@ -1204,66 +1240,33 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   }
 
   applyTheme(): void {
-    const themes = ["pls-theme-cool", "pls-theme-dark-tech", "pls-theme-wabi", "pls-theme-pastel"];
-    for (const cls of themes) {
-      document.body.removeClass(cls);
-    }
-    for (const cls of THEME_STYLES.map((style) => `lifeos-theme-${style}`)) {
-      document.body.removeClass(cls);
-    }
     const themeStyle = normalizeThemeStyle(this.settings.themeStyle);
     this.settings.themeStyle = themeStyle;
-    document.body.addClass(`pls-theme-${this.settings.theme}`);
-    for (const cls of getThemeStyleClasses(themeStyle)) {
-      document.body.addClass(cls);
-    }
+    syncThemeClassNames(document.body, [`pls-theme-${this.settings.theme}`], ["pls-theme-cool", "pls-theme-dark-tech", "pls-theme-wabi", "pls-theme-pastel"]);
+    syncThemeClassNames(document.body, getThemeStyleClasses(themeStyle));
     this.syncThemeTargets(themeStyle);
+    refreshExperienceTheme(this.settings);
     this.configureLiquidGlassRuntime(themeStyle);
     this.refreshVisibleNames();
     this.queueLifeOsFileStyling();
-    document.body.removeClass("pls-has-custom-bg");
-    document.body.style.removeProperty("--pls-custom-bg");
     const backgroundUrl = this.getBackgroundResourceUrl();
-    if (backgroundUrl) {
-      document.body.addClass("pls-has-custom-bg");
-      document.body.style.setProperty("--pls-custom-bg", `url("${backgroundUrl.replace(/"/g, "%22")}")`);
+    const background = backgroundUrl ? `url("${backgroundUrl.replace(/"/g, "%22")}")` : "";
+    if (document.body.classList.contains("pls-has-custom-bg") !== Boolean(background)) document.body.classList.toggle("pls-has-custom-bg", Boolean(background));
+    if (document.body.style.getPropertyValue("--pls-custom-bg") !== background) {
+      if (background) document.body.style.setProperty("--pls-custom-bg", background);
+      else document.body.style.removeProperty("--pls-custom-bg");
     }
   }
 
   private syncThemeTargets(themeStyle: ThemeStyle): void {
-    const themeClasses = THEME_STYLES.map((style) => `lifeos-theme-${style}`);
-    document.querySelectorAll<HTMLElement>(".lifeos-root, .lifeos-settings, .lifeos-file-leaf").forEach((element) => {
-      element.removeClass(...themeClasses);
-      for (const cls of getThemeStyleClasses(themeStyle)) {
-        element.addClass(cls);
-      }
-    });
+    const active = getThemeStyleClasses(themeStyle);
+    document.querySelectorAll<HTMLElement>(".lifeos-root, .lifeos-settings, .lifeos-file-leaf").forEach((element) => syncThemeClassNames(element, active));
   }
 
-  private configureLiquidGlassRuntime(themeStyle: ThemeStyle): void {
-    if (themeStyle !== "liquid-glass") {
-      this.stopLiquidGlassRuntime();
-      return;
-    }
-    if (!this.liquidGlassObserver) {
-      this.liquidGlassObserver = new MutationObserver(() => this.queueLiquidGlassRefresh());
-      this.liquidGlassObserver.observe(document.body, {
-        childList: true,
-        subtree: true
-      });
-    }
-    this.queueLiquidGlassRefresh();
-  }
-
-  private queueLiquidGlassRefresh(): void {
-    if (this.settings.themeStyle !== "liquid-glass") return;
-    if (this.liquidGlassRefreshTimer) {
-      window.clearTimeout(this.liquidGlassRefreshTimer);
-    }
-    this.liquidGlassRefreshTimer = window.setTimeout(() => {
-      this.liquidGlassRefreshTimer = null;
-      void refreshLifeOSLiquidGlassRuntime();
-    }, 180);
+  private configureLiquidGlassRuntime(_themeStyle: ThemeStyle): void {
+    // Registered V3 views render real DOM with semantic CSS glass surfaces.
+    // The old body-wide observer/canvas snapshot pipeline caused self-triggered rerenders.
+    this.stopLiquidGlassRuntime();
   }
 
   private stopLiquidGlassRuntime(): void {
@@ -1280,28 +1283,21 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     const systemName = this.settings.systemName?.trim() || "Life OS";
     const assistantName = this.settings.assistantName?.trim() || "Life OS";
     document.querySelectorAll<HTMLElement>(".lifeos-brand-title, .pls-sidebar-title").forEach((element) => {
-      element.setText(systemName);
+      if (element.textContent !== systemName) element.setText(systemName);
     });
     document.querySelectorAll<HTMLElement>(".lifeos-chat-top-copy h1").forEach((element) => {
-      element.setText(assistantName);
+      if (element.textContent !== assistantName) element.setText(assistantName);
     });
     document.querySelectorAll<HTMLElement>(".lifeos-chat-welcome-assistant-name").forEach((element) => {
-      element.setText(assistantName);
+      if (element.textContent !== assistantName) element.setText(assistantName);
     });
     document.querySelectorAll<HTMLElement>(".lifeos-chat-bubble-ai .lifeos-chat-bubble-label").forEach((element) => {
-      element.setText(assistantName);
+      if (element.textContent !== assistantName) element.setText(assistantName);
     });
   }
 
   getBackgroundResourceUrl(): string | null {
-    const imagePath = this.settings.backgroundImagePath?.trim();
-    const resourcePath = imagePath || `${this.app.vault.configDir}/plugins/${this.manifest.id}/assets/default-background.png`;
-    const abstract = this.app.vault.getAbstractFileByPath(resourcePath);
-    if (!(abstract instanceof TFile)) return null;
-    const adapter = this.app.vault.adapter as unknown as {
-      getResourcePath?: (normalizedPath: string) => string;
-    };
-    return adapter.getResourcePath?.(abstract.path) ?? null;
+    return documentBackgroundUrl(this.app, this.settings.backgroundImagePath || "");
   }
 
   private registerModalTextareaEnhancer(): void {
@@ -1574,25 +1570,35 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   }
 
   async finishTodayNote(): Promise<void> {
+    if (this.finishingTodayNote) { new Notice("日终整理正在处理中，请勿重复提交。"); return; }
+    this.finishingTodayNote = true;
+    try { await this.finishTodayNoteCore(); }
+    catch (error) { new Notice(`日终整理未完成：${error instanceof Error ? error.message : String(error)}`, 8000); }
+    finally { this.finishingTodayNote = false; }
+  }
+
+  private async finishTodayNoteCore(): Promise<void> {
     const file = await this.openTodayNote(false);
-    if (!this.settings.enableAutoAnalysis) {
-      new Notice("已打开今日记录。自动分析已关闭，可手动触发总结或待办提取。");
-      return;
-    }
     if (!requireProFeature(this, "aiDiarySummary")) return;
-    const archive = await this.generateDailyArchive(file, formatDate());
     const content = await this.app.vault.read(file);
+    const sourcePath = file.path;
+    const archive = await this.generateDailyArchive(file, formatDate(), true);
+    if (file.path !== sourcePath || this.app.vault.getAbstractFileByPath(sourcePath) !== file || await this.app.vault.read(file) !== content) {
+      throw new Error("日记在生成期间已变更，请根据最新内容重新整理；未写入过期结果。");
+    }
+    const analysisSource = prepareDailyAnalysisSource(sourcePath, content, this.getRoot());
     const items: WritebackItem[] = [
       {
         id: makeId("daily-archive"),
         kind: "replace",
         title: "写入日终总结",
         content: this.buildDailyArchiveNoteContent(content, archive),
+        expectedOriginal: content,
         targetPath: file.path,
         sourcePath: file.path,
         checked: true
       },
-      ...this.buildMemoryArtifactWritebackItems(file, archive.summary, archive.nextSteps),
+      ...this.buildMemoryArtifactWritebackItems(file, archive.summary, archive.nextSteps, analysisSource.origin),
       ...await this.buildTaskWritebackItems(file, false),
       ...await this.buildMemoryWritebackItems(file)
     ];
@@ -1601,7 +1607,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       if (content.includes("## 四圣谏言")) {
         new Notice("四圣谏言已存在，跳过重复生成。");
       } else {
-        const result = await this.analyzeFourSages(content);
+        const result = analysisSource.content ? await this.analyzeFourSages(analysisSource.content) : null;
         if (result) {
           items.push({
             id: makeId("four-sages"),
@@ -1621,10 +1627,26 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       description: "AI 生成的日终总结、待办和候选记忆会先进入预览。只有确认后才会写入 Markdown 文件。",
       items,
       onConfirm: async (confirmed) => {
+        let expectedSource = content;
+        // On partial retry, accept only the exact bytes written by this preview,
+        // not arbitrary later edits. The diary item may itself be unchecked.
+        for (const item of items.filter(item => item.targetPath === sourcePath)) {
+          const receipt = snapshotWritebackUndo(this.app, item.id, sourcePath);
+          if (receipt?.before === expectedSource) expectedSource = receipt.after;
+        }
+        if (file.path !== sourcePath || this.app.vault.getAbstractFileByPath(sourcePath) !== file || await this.app.vault.read(file) !== expectedSource) {
+          throw new Error("来源日记在预览期间已变化，未写入过期派生内容；请重新整理。");
+        }
         await applyWritebackItems(this.app, confirmed);
       }
     });
     if (written.length > 0) {
+      try {
+        const tagged = await tagConfirmedDiary(this.app, this.ai, this.getRoot(), file.path, content, written);
+        if (tagged) new Notice(tagged.message || "已根据日记内容更新顶部 tags，未新增正文标签。");
+      } catch (error) {
+        new Notice(`日终整理已保存，顶部标签未更新：${error instanceof Error ? error.message : String(error)}`, 8000);
+      }
       await this.checkAndGeneratePeriodicSummaries();
       new Notice("今日记录分析已确认写入。");
     } else {
@@ -1642,10 +1664,12 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       return;
     }
     if (!requireProFeature(this, "aiDiarySummary")) return;
-    const content = await this.app.vault.read(file);
+    const source = prepareDailyAnalysisSource(file.path, await this.app.vault.read(file), this.getRoot());
+    const content = source.content;
+    if (!content) { new Notice("没有可用于总结的用户记录；自动聊天与历史 AI 整理不会作为事实来源。"); return; }
     const response = await this.ai.complete({
       messages: [
-        { role: "system", content: buildSystemPrompt(this.settings) },
+        { role: "system", content: buildSystemPrompt(this.settings) + "\n\n" + GENERATED_NOTE_TAG_RULE },
         {
           role: "user",
           content: `请总结下面这篇日记，输出 Markdown，包含：完成了什么、卡点、明天最重要的一件事。\n\n${content}`
@@ -1660,7 +1684,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       id: makeId("summary"),
       kind: "append",
       title: `${this.settings.assistantName}总结`,
-      content: `\n\n## ${this.settings.assistantName}总结\n\n${response.text}\n`,
+      content: `\n\n<!-- pls-daily-archive:start -->\n## ${this.settings.assistantName}总结\n\n${source.origin === "user-saved-conversation" ? `${USER_SAVED_CONVERSATION_LABEL}\n\n` : ""}${normalizeGeneratedNoteMarkdown(response.text)}\n<!-- pls-daily-archive:end -->\n`,
       targetPath: file.path,
       sourcePath: file.path,
       checked: true
@@ -1685,7 +1709,8 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       }
     };
 
-    const content = await this.app.vault.read(file);
+    const source = prepareDailyAnalysisSource(file.path, await this.app.vault.read(file), this.getRoot());
+    const content = source.content;
     const taskLimit = this.taskExtractionLimitForSource(file, content);
     const plainContent = content
       .replace(/^---[\s\S]*?---\s*/m, "")
@@ -1726,15 +1751,19 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
 
     const taskLines = parsed
       .map((item, index) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("AI 待办格式无效，未写入。");
         const obj = item as Record<string, unknown>;
-        const title = String(obj.title ?? "").trim();
+        if (typeof obj.title !== "string" || (obj.due_date != null && typeof obj.due_date !== "string") || (obj.category != null && typeof obj.category !== "string")) throw new Error("AI 待办字段类型无效，未写入。");
+        const title = normalizeGeneratedNoteMarkdown(obj.title).trim().replace(/\r?\n/gu, " ");
         if (!title) {
           return "";
         }
-        const due = String(obj.due_date ?? "").trim();
-        const category = String(obj.category ?? "task").trim() || "task";
+        const due = (obj.due_date as string | undefined)?.trim() ?? "";
+        if (due && (!/^20\d{2}-\d{2}-\d{2}$/u.test(due) || Number.isNaN(Date.parse(due)) || new Date(due).toISOString().slice(0, 10) !== due)) throw new Error("AI 待办日期无效，未写入。");
+        const category = ((obj.category as string | undefined)?.trim() ?? "task").replace(/^#+/u, "").replace(/[^\p{L}\p{N}_/-]/gu, "-") || "task";
         const dueText = due ? ` 📅 ${due}` : "";
-        return `- [ ] ${title} #pls/task #pls/${category}${dueText} ^${makeId(`pls-task-${index + 1}`)}`;
+        const provenance = source.origin === "user-saved-conversation" ? ` source:${USER_SAVED_CONVERSATION_SOURCE}` : "";
+        return `- [ ] ${title} #pls/task #pls/${category}${dueText}${provenance} ^${makeId(`pls-task-${index + 1}`)}`;
       })
       .filter(Boolean);
 
@@ -1784,8 +1813,8 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       {
         id: makeId("tasks-source"),
         kind: "append",
-        title: "在来源笔记记录提取结果",
-        content: `\n\n## 提取待办\n\n${lines}\n`,
+        title: "在来源笔记记录任务入口",
+        content: `\n\n## 提取待办\n\n任务入口：[[${openPath}|查看当前任务]]。任务状态以任务列表为准，不在来源笔记重复创建复选任务。\n`,
         targetPath: file.path,
         sourcePath: file.path,
         checked: true
@@ -1816,7 +1845,9 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   }
 
   private async buildMemoryWritebackItems(file: TFile): Promise<WritebackItem[]> {
-    const content = await this.app.vault.read(file);
+    const source = prepareDailyAnalysisSource(file.path, await this.app.vault.read(file), this.getRoot());
+    const content = source.content;
+    if (!content) return [];
     const response = await this.ai.complete({
       responseFormat: "json",
       messages: [
@@ -1838,12 +1869,14 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     }
     const writebackItems: WritebackItem[] = [];
     for (const item of parsed) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("AI 候选记忆格式无效，未写入。");
       const obj = item as Record<string, unknown>;
-      const memory = String(obj.memory ?? "").trim();
+      if (typeof obj.memory !== "string" || (obj.category != null && typeof obj.category !== "string")) throw new Error("AI 候选记忆字段类型无效，未写入。");
+      const memory = normalizeGeneratedNoteMarkdown(obj.memory).trim().replace(/\r?\n/gu, " ");
       if (!memory) {
         continue;
       }
-      const rawCategory = String(obj.category ?? "其他").trim();
+      const rawCategory = (obj.category as string | undefined)?.trim() ?? "其他";
       const category = MEMORY_CATEGORIES.includes(rawCategory) ? rawCategory : "其他";
       writebackItems.push({
         id: makeId("memory"),
@@ -1851,9 +1884,9 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
         title: `候选记忆：${category}`,
         content: `\n${formatMemoryCandidate({
           id: `mem_${makeId("memory").replace(/-/g, "_")}`,
-          content: memory,
+          content: source.origin === "user-saved-conversation" ? `${USER_SAVED_CONVERSATION_LABEL}：${memory}（来源：${file.path}）` : memory,
           category,
-          source: file.path,
+          source: source.origin === "user-saved-conversation" ? USER_SAVED_CONVERSATION_SOURCE : file.path,
           created: `${formatDate()} ${new Date().toTimeString().slice(0, 5)}`,
           status: "pending",
           importance: "normal"
@@ -1891,7 +1924,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     if (!requireProFeature(this, "aiDiarySummary")) return null;
     const response = await this.ai.complete({
       messages: [
-        { role: "system", content: buildSystemPrompt(this.settings) },
+        { role: "system", content: buildSystemPrompt(this.settings) + "\n\n" + GENERATED_NOTE_TAG_RULE },
         {
           role: "user",
           content:
@@ -1904,21 +1937,25 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       new Notice(response.error ?? "四圣谏言生成失败。");
       return null;
     }
-    return `## 四圣谏言\n\n${response.text}`;
+    return `## 四圣谏言\n\n${normalizeGeneratedNoteMarkdown(response.text)}`;
   }
 
   private buildMemoryArtifactWritebackItems(
     file: TFile,
     dailySummary: string,
-    nextSteps: string[]
+    nextSteps: string[],
+    origin: EvidenceOrigin = "context-only"
   ): WritebackItem[] {
     const date = file.basename.match(/\d{4}-\d{2}-\d{2}/)?.[0] ?? formatDate();
     const [year, month] = date.split("-");
     const items: WritebackItem[] = [];
+    const evidence = origin === "user-saved-conversation" ? "user-saved-conversation-v1" : origin === "note" ? "confirmed-ai-v1" : "context-only";
+    const provenance = `lifeos_evidence: ${evidence}\nlifeos_generated: daily-analysis-v1\n`;
+    const sourceLabel = origin === "user-saved-conversation" ? `${USER_SAVED_CONVERSATION_LABEL}\n\n` : "";
 
     if (dailySummary) {
       const summaryPath = this.path("Memory", "Summaries", "Daily", `${date}.md`);
-      const summaryContent = `---\ntype: daily-summary\ndate: ${date}\nsource: ${file.path}\nupdated: ${formatDate()}\n---\n\n# ${date} 摘要\n\n${dailySummary}\n`;
+      const summaryContent = `---\ntype: daily-summary\ndate: ${date}\nsource: ${JSON.stringify(file.path)}\n${provenance}updated: ${formatDate()}\n---\n\n# ${date} 摘要\n\n${sourceLabel}${dailySummary}\n`;
       items.push({
         id: makeId("daily-summary"),
         kind: "replace",
@@ -1931,7 +1968,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     }
 
     const episodePath = this.path("Memory", "Episodes", year, month, `${date}.md`);
-    const episodeContent = `---\ntype: episode\ndate: ${date}\nsource: ${file.path}\nimportance: 3\nstatus: active\n---\n\n# ${date} 事件卡\n\n## 事件\n\n${dailySummary || "（自动归档，待补充）"}\n\n## 结果\n\n${dailySummary || "（自动归档，待补充）"}\n\n## 后续\n\n${nextSteps.length > 0 ? nextSteps.map((step) => `- ${step}`).join("\n") : "- （暂无）"}\n`;
+    const episodeContent = `---\ntype: episode\ndate: ${date}\nsource: ${JSON.stringify(file.path)}\n${provenance}importance: 3\nstatus: active\n---\n\n# ${date} 事件卡\n\n${sourceLabel}## 事件\n\n${dailySummary || "（自动归档，待补充）"}\n\n## 结果\n\n${dailySummary || "（自动归档，待补充）"}\n\n## 后续\n\n${nextSteps.length > 0 ? nextSteps.map((step) => `- ${step}`).join("\n") : "- （暂无）"}\n`;
     items.push({
       id: makeId("episode"),
       kind: "replace",
@@ -2000,53 +2037,40 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     const openTaskLines = this.extractOpenTaskLines(sourceContent);
     if (openTaskLines.length === 0) return 0;
 
-    const targetFile = await this.ensureDailyNoteForDate(targetDate, false);
-    const targetContent = await this.app.vault.read(targetFile);
-    const openPath = this.path("Tasks", "open.md");
-    const openFile = await ensureFile(this.app, openPath, "# 未完成待办\n\n");
-    const openContent = await this.app.vault.read(openFile);
-    const candidateLines = openTaskLines.map((line) => this.makeCarriedTaskLine(line, sourceDate));
-    const eligibleLines = await new TaskService(this.app, this.fileSystem())
-      .filterSuppressedAutomaticTaskLines(candidateLines);
-    const cappedEligibleLines = capProjectContextTaskLines(
-      eligibleLines,
-      normalizeProjectContextTaskExtractionLimit(this.settings.projectContextTaskExtractionLimit)
+    // Background maintenance creates reviewable suggestions, never canonical tasks
+    // or a second unchecked task copy in tomorrow's diary.
+    const result = await new TaskSuggestionService(this.app, this.fileSystem()).propose(
+      openTaskLines.map(line => this.makeCarriedTaskLine(line, sourceDate)),
+      { sourcePath: sourceFile.path, sourceKind: isProjectContextTaskSource(sourceFile.path, sourceContent) ? "project" : "daily" },
+      { dailyLimit: this.settings.taskSuggestionDailyLimit, paused: this.settings.taskSuggestionsPaused,
+        sourceLimit: this.taskExtractionLimitForSource(sourceFile, sourceContent) }
     );
-    const dailyLines = dedupTaskLines(cappedEligibleLines, parseOpenTasks(targetContent));
-    // Only mirror tasks that were newly added to the target daily note. If the
-    // daily copy already exists, a restart must not repopulate a task that the
-    // user explicitly removed from the canonical task file.
-    const openLines = dedupTaskLines(dailyLines, parseOpenTasks(openContent));
-
-    if (openLines.length > 0) {
-      await this.app.vault.append(openFile, `\n## ${targetDate} 继承自 ${sourceDate}\n\n${openLines.join("\n")}\n`);
-    }
-
-    if (dailyLines.length > 0) {
-      const carryBlock = `\n\n## 待办延续\n\n> 来自 ${sourceDate} 未完成事项\n\n${dailyLines.join("\n")}\n`;
-      await this.app.vault.append(targetFile, carryBlock);
-    }
-
-    return dailyLines.length;
+    return result.added.length;
   }
 
   private parseDailyArchiveJson(text: string): { summary: string; nextSteps: string[] } | null {
     try {
-      const parsed = JSON.parse(stripCodeFences(text)) as Record<string, unknown>;
-      const summary = String(parsed.summary ?? parsed.daily_summary ?? "").trim();
-      const rawNextSteps = parsed.next_steps ?? parsed.nextSteps ?? [];
-      const nextSteps = Array.isArray(rawNextSteps)
-        ? rawNextSteps.map((item) => String(item).trim()).filter(Boolean)
-        : [];
+      const parsed: unknown = JSON.parse(stripCodeFences(text));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+      const value = parsed as Record<string, unknown>;
+      const rawSummary = "summary" in value ? value.summary : value.daily_summary;
+      if (typeof rawSummary !== "string" || !rawSummary.trim()) return null;
+      const summary = rawSummary.trim();
+      const rawNextSteps = "next_steps" in value ? value.next_steps : "nextSteps" in value ? value.nextSteps : [];
+      if (!Array.isArray(rawNextSteps) || rawNextSteps.some(item => typeof item !== "string")) return null;
+      const nextSteps = rawNextSteps.map(item => item.trim()).filter(Boolean);
       return summary || nextSteps.length > 0 ? { summary, nextSteps } : null;
     } catch {
       return null;
     }
   }
 
-  private async generateDailyArchive(file: TFile, date: string): Promise<{ summary: string; nextSteps: string[] }> {
-    const content = await this.app.vault.read(file);
-    if (!this.settings.enableAutoAnalysis || !this.ai.isConfigured() || !hasProAccess(this.settings.licenseSnapshot, new Date(), this.settings.licenseEntitlementToken)) {
+  private async generateDailyArchive(file: TFile, date: string, requireAiSummary = false): Promise<{ summary: string; nextSteps: string[] }> {
+    const source = prepareDailyAnalysisSource(file.path, await this.app.vault.read(file), this.getRoot());
+    const content = source.content;
+    if (requireAiSummary && !content) throw new Error("没有可用于复盘的用户内容；自动聊天和历史 AI 整理不会作为事实来源。");
+    if ((!requireAiSummary && !this.settings.enableAutoAnalysis) || !this.ai.isConfigured() || !hasSettingsProAccess(this.settings)) {
+      if (requireAiSummary) throw new Error("请先配置并启用 AI 模型，原日记未改动。");
       return {
         summary: "自动归档：AI 未启用或未配置，已保留原始日记内容与未完成待办。",
         nextSteps: this.extractOpenTaskLines(content).map((line) => parseTaskLine(line)?.title ?? line)
@@ -2057,7 +2081,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       responseFormat: "json",
       temperature: 0.25,
       messages: [
-        { role: "system", content: buildSystemPrompt(this.settings) },
+        { role: "system", content: buildSystemPrompt(this.settings) + "\n\n" + GENERATED_NOTE_TAG_RULE },
         {
           role: "user",
           content:
@@ -2068,15 +2092,18 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     });
 
     if (!response.ok || !response.text) {
+      if (requireAiSummary) throw new Error(response.error || "AI 总结失败，原日记未改动，可稍后重试。");
       return {
         summary: "自动归档：AI 总结失败，已保留原始日记内容与未完成待办。",
         nextSteps: this.extractOpenTaskLines(content).map((line) => parseTaskLine(line)?.title ?? line)
       };
     }
 
-    return this.parseDailyArchiveJson(response.text) ?? {
-      summary: response.text.trim(),
-      nextSteps: []
+    const archive = this.parseDailyArchiveJson(response.text);
+    if (requireAiSummary && !archive?.summary.trim()) throw new Error("AI 总结格式无效或内容为空，未以占位内容代替复盘。");
+    return {
+      summary: normalizeGeneratedNoteMarkdown(archive?.summary ?? response.text).trim(),
+      nextSteps: (archive?.nextSteps ?? []).map(normalizeGeneratedNoteMarkdown)
     };
   }
 
@@ -2111,11 +2138,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     const dailyAbstract = this.app.vault.getAbstractFileByPath(this.getTodayNotePath(date));
     if (!(dailyAbstract instanceof TFile)) return;
 
-    const canAutoCarryover = hasProAccess(
-      this.settings.licenseSnapshot,
-      new Date(),
-      this.settings.licenseEntitlementToken
-    );
+    const canAutoCarryover = hasSettingsProAccess(this.settings);
     const carriedCount = canAutoCarryover ? await this.carryOpenTasksToDate(dailyAbstract, date, carryToDate) : 0;
     if (!canAutoCarryover) {
       console.log(`[personal-life-system] skipped automatic task carryover for ${date}; Pro is required`);
@@ -2123,7 +2146,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     if (!summaryExists) {
       console.log(`[personal-life-system] skipped automatic AI archive for ${date}; user confirmation is required for AI writeback`);
     }
-    console.log(`[personal-life-system] checked ${date}; carried ${carriedCount} tasks to ${carryToDate}`);
+    console.log(`[personal-life-system] checked ${date}; staged ${carriedCount} task suggestions for ${carryToDate}`);
   }
 
   private async runStartupDailyMaintenance(): Promise<void> {
@@ -2155,7 +2178,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   }
 
   async generateMemoryArtifactsFromDaily(file: TFile): Promise<void> {
-    if (!hasProAccess(this.settings.licenseSnapshot, new Date(), this.settings.licenseEntitlementToken)) return;
+    if (!hasSettingsProAccess(this.settings)) return;
     const content = await this.app.vault.read(file);
     const date = file.basename.match(/\d{4}-\d{2}-\d{2}/)?.[0] ?? formatDate();
     const [year, month] = date.split("-");
@@ -2593,7 +2616,126 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     await showDiarySearch(this.app, this);
   }
 
+  private automaticSelectionButton: HTMLElement | null = null;
+  private automaticSelectionTimer: number | null = null;
+  clearAutomaticSelectionUi(): void {
+    this.automaticSelectionButton?.remove();this.automaticSelectionButton=null;
+    if(this.automaticSelectionTimer!==null)window.clearTimeout(this.automaticSelectionTimer);
+    this.automaticSelectionTimer=null;
+    if(this.aiEditSelectionTimer)window.clearTimeout(this.aiEditSelectionTimer);
+    this.aiEditSelectionTimer=null;this.pendingAiEditDomSelectionSnapshot=null;
+  }
+  private showAutomaticSelectionAction(snapshot: AiEditDomSelectionSnapshot): void {
+    this.automaticSelectionButton?.remove();this.automaticSelectionButton=null;
+    if(this.settings.aiSelectionAutoOpen!==true)return;
+    const view=snapshot.file.extension === "pdf" ? null : this.findMarkdownViewForAiEditTarget(snapshot.target);
+    const target: AiEditTarget | null = snapshot.file.extension === "pdf"
+      ? { kind: "readonly-selection", file: snapshot.file, text: snapshot.text }
+      : view ? this.captureDocumentToolbarSelection(view) : null;
+    if(!target)return;
+    if (this.aiEditPopover?.shouldFollowSelectionInPanel()) this.aiEditPopover.openOrQueue(target, snapshot.anchor);
+    if(this.settings.aiSelectionPresentation==="panel") {
+      void this.openAiEditTargetInResidentPanel(target,snapshot.anchor);return;
+    }
+    const doc=snapshot.target.ownerDocument;
+    const bar=doc.createElement("div");
+    bar.className="lifeos-selection-action"; bar.setAttribute("role","toolbar");
+    bar.setAttribute("aria-label","选区 AI 工具栏");
+    Object.assign(bar.style,{position:"fixed",zIndex:"1000",
+      left:Math.max(8,Math.min(snapshot.anchor.x,(doc.defaultView?.innerWidth||800)-340))+"px",
+      top:Math.max(8,Math.min(snapshot.anchor.y+12,(doc.defaultView?.innerHeight||600)-56))+"px"});
+    bar.onmousedown=event=>event.preventDefault();
+    for(const action of [
+      {label:"问 AI", prompt:"", edit:false},
+      {label:"答题", prompt:"", edit:false, exam:true},
+      {label:"解释", prompt:"解释选中内容，指出关键概念。", edit:false},
+      {label:"润色", prompt:"润色选中内容，保留原意。", edit:true},
+      {label:"更多", prompt:"", edit:false, skills:true}
+    ]) {
+      const button=bar.createEl("button",{text:action.label,attr:{type:"button"}});
+      button.onclick=async()=>{
+        this.clearAutomaticSelectionUi();
+        if(this.app.vault.getAbstractFileByPath(target.file.path)!==target.file)return;
+        await this.openAiEditTargetInResidentPanel(target,snapshot.anchor,action.prompt,action.edit);
+        if(action.exam)this.aiEditPopover?.setStudyMode("direct");
+        if(action.skills)this.aiEditPopover?.expandSkills();
+      };
+    }
+    doc.body.appendChild(bar); this.automaticSelectionButton=bar;
+  }
+
+  private registerDocumentToolbar(): void {
+    const buttons = new Set<HTMLElement>();
+    const refresh = () => {
+      for (const button of buttons) if (!button.isConnected) buttons.delete(button);
+      for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+        const view=leaf.view;
+        if (!(view instanceof MarkdownView) || view.containerEl.querySelector(".lifeos-document-tools")) continue;
+        let captured: AiEditTarget | null = null;
+        const button=view.addAction("sparkles", "Life OS 文档工具", event => {
+          const target=captured || this.captureDocumentToolbarSelection(view); captured=null;
+          const file=view.file;
+          const menu=new Menu();
+          for (const [label,instruction,edit] of [
+            ["AI 侧边栏交流","",false], ["解释选段","解释所选内容，并区分原文和推断。",false],
+            ["润色选段","润色所选文字，保持原意，不添加事实。",true],
+            ["排版选段","仅整理 Markdown 排版，不改变原文含义。",true]
+          ] as const) menu.addItem(item=>item.setTitle(label).setIcon("sparkles").onClick(async()=>{
+            if(!target || target.file!==view.file){new Notice("请先在当前文档中选择一段文字，不会默认发送整篇文档。");return;}
+            await this.openAiEditTargetInResidentPanel(target,this.defaultAiEditAnchor(),instruction,edit);
+          }));
+          menu.addSeparator();
+          menu.addItem(item=>item.setTitle("提炼 / 更新顶部标签").setIcon("tags").onClick(()=>{
+            if(file instanceof TFile && file.extension==="md")new DocumentTagsModal(this.app,this,file).open();
+          }));
+          // The document action lives at the far right of the header.  The
+          // default mouse anchoring can put its menu past the Obsidian leaf's
+          // right edge, hiding the very actions it exposes.  Anchor left from
+          // the trigger in this owning document instead.
+          menu.showAtPosition({ x: event.clientX, y: event.clientY, left: true }, view.containerEl.ownerDocument);
+        });
+        button.addClass("lifeos-document-tools");buttons.add(button);
+        this.registerDomEvent(button,"mousedown",event=>{captured=this.captureDocumentToolbarSelection(view);event.preventDefault();});
+      }
+    };
+    this.registerEvent(this.app.workspace.on("layout-change",refresh));
+    this.registerEvent(this.app.workspace.on("active-leaf-change",refresh));
+    this.registerEvent(this.app.workspace.on("file-open",refresh));
+    this.app.workspace.onLayoutReady(refresh);
+    this.register(()=>{for(const button of buttons)button.remove();buttons.clear();});
+  }
+
+  private captureDocumentToolbarSelection(view: MarkdownView): AiEditTarget | null {
+    const file=view.file;if(!(file instanceof TFile))return null;
+    const selection=view.containerEl.ownerDocument.getSelection();
+    if(view.getMode()==="preview") {
+      if(!selection||selection.isCollapsed||!selection.anchorNode||!selection.focusNode
+        ||!view.contentEl.contains(selection.anchorNode)||!view.contentEl.contains(selection.focusNode))return null;
+      const text=selection.toString();return text.trim()?{kind:"readonly-selection",file,text}:null;
+    }
+    const editor=view.editor,text=editor.getSelection();
+    return text.trim()?{kind:"selection",file,editor,text,from:cloneEditorPosition(editor.getCursor("from")),to:cloneEditorPosition(editor.getCursor("to"))}:null;
+  }
+
   private registerAiEditPopover(): void {
+    this.registerDocumentToolbar();
+    this.register(()=>this.clearAutomaticSelectionUi());
+    this.registerDomEvent(document,"keydown",event=>{if(event.key==="Escape")this.clearAutomaticSelectionUi();});
+    this.registerDomEvent(document,"scroll",()=>this.clearAutomaticSelectionUi(),true);
+    this.addCommand({id:"lifeos-document-tags",name:"提炼当前文档顶部标签",callback:()=>{
+      const file=this.app.workspace.getActiveFile();
+      if(file instanceof TFile && file.extension==="md")new DocumentTagsModal(this.app,this,file).open();
+      else new Notice("请先打开 Markdown 文档。");
+    }});
+    this.addCommand({id:"lifeos-selection-sidebar",name:"将当前选段送到 AI 侧边栏",callback:()=>{
+      const view=this.app.workspace.getActiveViewOfType(MarkdownView);
+      const snapshot = this.captureAiEditDomSelectionSnapshot("manual-command");
+      const target: AiEditTarget | null = snapshot?.file.extension === "pdf"
+        ? { kind: "readonly-selection", file: snapshot.file, text: snapshot.text }
+        : view ? this.captureDocumentToolbarSelection(view) : null;
+      if(target)void this.openAiEditTargetInResidentPanel(target,this.defaultAiEditAnchor());
+      else new Notice("请先在当前文档中选择文字。");
+    }});
     this.addCommand({
       id: "lifeos-open-ai-edit-sidebar",
       name: "打开 AI 修改侧边栏",
@@ -2608,7 +2750,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
 
     this.addCommand({
       id: "lifeos-ai-edit-selection",
-      name: "AI 修改选中文本",
+      name: "AI 助手：解释或修改选中文本",
       editorCallback: (editor, view) => {
         void this.openAiEditForEditorSelection(editor, view.file, this.defaultAiEditAnchor());
       }
@@ -2625,7 +2767,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       if (!editor.getSelection().trim()) return;
       menu.addItem((item) => {
         item
-          .setTitle("AI 修改选中文本")
+          .setTitle("AI 助手：解释或修改选中文本")
           .setIcon("sparkles")
           .onClick(() => void this.openAiEditForEditorSelection(editor, view.file, this.defaultAiEditAnchor()));
       });
@@ -2657,11 +2799,12 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.registerDomEvent(document, "selectionchange", () => this.handleAiEditSelectionChange());
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => {
       this.aiEditPopover?.clearSelectionHighlight();
+      this.clearAutomaticSelectionUi();
     }));
   }
 
   private async handleAiEditMouseUp(event: MouseEvent, phase: "capture" | "bubble" = "bubble"): Promise<void> {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || this.settings.aiSelectionAutoOpen !== true) return;
     if (phase === "capture") this.aiEditDiagnostics.captureMouseUp += 1;
     if (phase === "bubble") this.aiEditDiagnostics.bubbleMouseUp += 1;
     const target = event.target instanceof HTMLElement ? event.target : null;
@@ -2676,6 +2819,11 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       return;
     }
 
+    if(this.settings.aiSelectionPresentation!=="panel") {
+      const snapshot=this.captureAiEditDomSelectionSnapshot("mouseup",target);
+      if(snapshot)this.showAutomaticSelectionAction(snapshot);
+      return;
+    }
     const markdownView = this.findMarkdownViewForAiEditTarget(target);
     if (markdownView?.file instanceof TFile && this.isMarkdownSelectionSurface(target)) {
       const editor = markdownView.editor;
@@ -2762,13 +2910,24 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   }
 
   private handleAiEditSelectionChange(): void {
+    if (this.settings.aiSelectionAutoOpen !== true) {
+      this.clearAutomaticSelectionUi();
+      return;
+    }
     this.aiEditDiagnostics.selectionChange += 1;
     const snapshot = this.captureAiEditDomSelectionSnapshot("selectionchange");
     if (snapshot) {
       this.pendingAiEditDomSelectionSnapshot = snapshot;
       this.aiEditDiagnostics.snapshotCaptured += 1;
+      if(this.automaticSelectionTimer!==null)window.clearTimeout(this.automaticSelectionTimer);
+      this.automaticSelectionTimer=window.setTimeout(()=>{
+        this.automaticSelectionTimer=null;
+        const current=this.captureAiEditDomSelectionSnapshot("settled");
+        if(current?.key===snapshot.key)this.showAutomaticSelectionAction(current);
+      },250);
       this.recordAiEditDiagnostic("selectionchange", snapshot.target, snapshot.text, "captured selection snapshot", snapshot.file.path);
     } else {
+      this.clearAutomaticSelectionUi();
       const selectionText = window.getSelection()?.toString() ?? "";
       this.recordAiEditDiagnostic("selectionchange", this.currentSelectionElement(), selectionText, "received empty/collapsed selection");
     }
@@ -2800,9 +2959,24 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   }
 
   private captureAiEditDomSelectionSnapshot(source: string, fallbackTarget?: HTMLElement | null): AiEditDomSelectionSnapshot | null {
-    const selection = window.getSelection();
+    const selection = (fallbackTarget?.ownerDocument ?? document).getSelection();
     const text = selection?.toString() ?? "";
     if (!selection || selection.isCollapsed || selection.rangeCount === 0 || text.trim().length < 2) return null;
+    const pdfViews: Array<{ file: TFile | null; containerEl: HTMLElement }> = [];
+    this.app.workspace.iterateAllLeaves(leaf => {
+      if (leaf.view.getViewType() !== "pdf") return;
+      const view = leaf.view as unknown as { file?: TFile; containerEl: HTMLElement };
+      if (view.file instanceof TFile) pdfViews.push({ file: view.file, containerEl: view.containerEl });
+    });
+    const pdf = capturePdfTextSelection(pdfViews, selection);
+    if (pdf) {
+      const range = selection.getRangeAt(0), rect = range.getBoundingClientRect();
+      const selectionRects = this.selectionRectsFromRange(range).slice(0, 80);
+      return { file: pdf.file, text: pdf.text, target: pdf.element, source,
+        key: pdf.file.path + ":" + pdf.text.trim(), createdAt: Date.now(),
+        anchor: { x: rect.left + rect.width / 2, y: rect.bottom,
+          avoidRect: this.selectionAvoidRectFromRects(selectionRects), selectionRects } };
+    }
     const range = selection.getRangeAt(0);
     const target = this.currentSelectionElement(range) ?? fallbackTarget ?? null;
     if (!target || this.shouldIgnoreAiEditPopoverTarget(target) || !this.isMarkdownSelectionSurface(target)) return null;
@@ -3070,14 +3244,18 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
 
   private async openAiEditTargetInResidentPanel(
     target: AiEditTarget,
-    anchor: AiEditAnchor
+    anchor: AiEditAnchor,
+    instruction?: string, edit = false
   ): Promise<void> {
     try {
       const leaf = await this.ensureAiEditSidebarResident();
       const containerEl = (leaf.view as { contentEl?: HTMLElement }).contentEl;
       if (!containerEl?.isConnected) throw new Error("AI edit sidebar container is not connected");
-      this.aiEditPopover?.mountToPanel(containerEl, { pin: true });
-      this.aiEditPopover?.openOrQueue(target, anchor);
+      if (!this.aiEditPopover) this.aiEditPopover = new AiEditPopoverController(this.app,this);
+      this.aiEditPopover.mountToPanel(containerEl, { pin: true });
+      const opened=this.aiEditPopover.openOrQueue(target, anchor);
+      if(opened && instruction!==undefined)this.aiEditPopover.prepareInstruction(instruction,edit);
+      else if(!opened && instruction)new Notice("新选区已排队，请先选择处理新选区，再输入本次要求。");
       this.aiEditDiagnostics.opened += 1;
       this.app.workspace.rightSplit?.expand?.();
       this.app.workspace.setActiveLeaf(leaf, { focus: false });
@@ -3091,7 +3269,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
 
   private async openAiEditTarget(target: AiEditTarget, anchor: AiEditAnchor): Promise<void> {
     if (!this.aiEditPopover) this.aiEditPopover = new AiEditPopoverController(this.app, this);
-    if (this.aiEditPopover.shouldFollowSelectionInPanel()) {
+    if (target.kind === "selection" || target.kind === "readonly-selection" || this.aiEditPopover.shouldFollowSelectionInPanel()) {
       await this.openAiEditTargetInResidentPanel(target, anchor);
       return;
     }
@@ -3142,6 +3320,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     const selected = editor.getSelection();
     const from = cloneEditorPosition(editor.getCursor("from"));
     const to = cloneEditorPosition(editor.getCursor("to"));
+    const selectedPath = file.path;
     const key = `${file.path}:${from.line}:${from.ch}:${to.line}:${to.ch}:${selected}`;
     const now = Date.now();
     if (key === this.lastAiEditSelectionKey && now - this.lastAiEditSelectionAt < 1200) return;
@@ -3149,8 +3328,12 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.lastAiEditSelectionAt = now;
     if (this.aiEditSelectionTimer) window.clearTimeout(this.aiEditSelectionTimer);
     this.aiEditSelectionTimer = window.setTimeout(() => {
-      void this.openAiEditForEditorSelection(editor, file, anchor);
       this.aiEditSelectionTimer = null;
+      if (this.settings.aiSelectionAutoOpen !== true) return;
+      const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (!selected.trim() || view?.file !== file || view.editor !== editor || file.path !== selectedPath
+        || editor.getRange(from, to) !== selected || editor.getSelection() !== selected) return;
+      void this.openAiEditTarget({ kind: "selection", file, editor, from, to, text: selected }, anchor);
     }, 110);
   }
 
@@ -3276,6 +3459,8 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.registerEvent(this.app.workspace.on("file-open", () => this.queueLifeOsFileStyling()));
     this.registerEvent(this.app.workspace.on("layout-change", () => this.queueLifeOsFileStyling()));
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.queueLifeOsFileStyling()));
+    this.registerEvent(this.app.workspace.on("css-change", () => this.queueLifeOsFileStyling()));
+    this.register(() => document.querySelectorAll<HTMLElement>(".lifeos-reader").forEach(clearDocumentAppearance));
     this.queueLifeOsFileStyling();
   }
 
@@ -3298,11 +3483,14 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       const isLifeOsFile = file instanceof TFile && (file.path === root || file.path.startsWith(`${root}/`));
       const containers = [view.containerEl].filter((element): element is HTMLElement => element instanceof HTMLElement);
       for (const container of containers) {
-        container.removeClass(...themeClasses);
+        syncThemeClassNames(container, isLifeOsFile ? activeThemeClasses : [], themeClasses);
         if (isLifeOsFile) {
           container.addClass("pls-life-file-leaf", "lifeos-file-leaf");
-          container.addClass(...activeThemeClasses);
+          // Theme classes were diffed above; do not remove/re-add them on layout events.
+          if (file?.extension === "md") applyDocumentAppearance(container, this.settings, this.getBackgroundResourceUrl());
+          else clearDocumentAppearance(container);
         } else {
+          clearDocumentAppearance(container);
           container.removeClass("pls-life-file-leaf", "lifeos-file-leaf");
         }
       }
@@ -3395,9 +3583,10 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     ];
   }
 
-  async activateTasks(): Promise<void> {
+  async activateTasks(projectId?: string): Promise<void> {
     const leaf = this.getLifeOsLeaf();
     await leaf.setViewState({ type: TASKS_VIEW_TYPE, active: true });
+    if (projectId && leaf.view instanceof TaskManagerView) await leaf.view.openProject(projectId);
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
@@ -3438,9 +3627,10 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
-  async activateAiWorkspace(): Promise<void> {
+  async activateAiWorkspace(tab?: "prompts"): Promise<void> {
     const leaf = this.getLifeOsLeaf();
     await leaf.setViewState({ type: AI_WORKSPACE_VIEW_TYPE, active: true });
+    if (tab && leaf.view instanceof AiWorkspaceView) await leaf.view.openTab(tab);
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 

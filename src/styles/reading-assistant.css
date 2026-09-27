@@ -1,0 +1,243 @@
+/* Native Markdown leaf: use theme tokens without applying workbench layout resets to CodeMirror. */
+.lifeos-file-leaf.lifeos-reader {
+  scrollbar-color: var(--lifeos-reader-muted) var(--lifeos-reader-paper);
+  --lifeos-reader-canvas: var(--v3-theme-canvas, var(--background-secondary));
+  --lifeos-reader-paper: var(--v3-theme-surface, var(--background-primary));
+  --lifeos-reader-ink: var(--v3-theme-text, var(--text-normal));
+  --lifeos-reader-muted: var(--v3-theme-muted, var(--text-muted));
+  --lifeos-reader-line: var(--v3-theme-border, var(--background-modifier-border));
+  --text-normal: var(--lifeos-reader-ink); --text-muted: var(--lifeos-reader-muted);
+  --background-primary: var(--lifeos-reader-paper); --background-secondary: var(--lifeos-reader-canvas);
+  background-color: var(--lifeos-reader-canvas); color: var(--lifeos-reader-ink);
+}
+.theme-dark .lifeos-file-leaf.lifeos-reader:not([data-theme-dark="true"]) {
+  --lifeos-reader-canvas: #181c20; --lifeos-reader-paper: #20262b; --lifeos-reader-ink: #eff1ed;
+  --lifeos-reader-muted: #b8c1c4; --lifeos-reader-line: #414b50;
+}
+.lifeos-file-leaf.lifeos-reader > .view-content {
+  background-color: var(--lifeos-reader-canvas);
+  background-image: var(--lifeos-reader-image, none); background-position: center;
+  background-size: cover; background-repeat: no-repeat;
+}
+.lifeos-reader > .view-content::before, .lifeos-reader > .view-content::after { content: none; }
+.lifeos-reader :is(.markdown-reading-view, .markdown-source-view) { background: transparent; }
+.lifeos-reader :is(.markdown-preview-view, .markdown-source-view.mod-cm6 .cm-scroller) {
+  background-color: var(--lifeos-reader-paper); color: var(--lifeos-reader-ink);
+  border: 1px solid var(--lifeos-reader-line); border-radius: 12px;
+  margin: 16px auto; width: calc(100% - 32px); max-width: 1120px; height: calc(100% - 32px);
+  box-shadow: 0 6px 24px #00000009;
+}
+.lifeos-reader :is(.markdown-preview-sizer, .cm-sizer) { padding: 28px 32px 44px; }
+.lifeos-reader :is(.inline-title, .cm-content, .metadata-container) { color: var(--lifeos-reader-ink); }
+.lifeos-reader .metadata-container { margin-bottom: 24px; }
+.lifeos-reader .metadata-container :is(input, textarea) { color: inherit; }
+.lifeos-reader :is(.markdown-preview-view, .cm-content) { font-size: var(--font-text-size); line-height: var(--line-height-normal, 1.65); }
+.lifeos-reader .markdown-preview-view :is(p, ul, ol) { overflow-wrap: anywhere; }
+.lifeos-reader :is(.cm-gutters, .markdown-preview-pusher) { background: transparent; }
+.lifeos-reader-image :is(.markdown-preview-view, .markdown-source-view.mod-cm6 .cm-scroller) { box-shadow: 0 8px 32px #00000026; }
+@media (max-width: 600px) {
+  .lifeos-reader :is(.markdown-preview-view, .markdown-source-view.mod-cm6 .cm-scroller) { width: calc(100% - 16px); height: calc(100% - 16px); margin: 8px auto; border-radius: 8px; }
+  .lifeos-reader :is(.markdown-preview-sizer, .cm-sizer) { padding: 18px 16px 32px; }
+}
+
+/* Skill selection and detail inspection share a stable, keyboard-accessible card layout. */
+.lifeos-v3 .lifeos-skill-picker { display: grid; gap: 12px; width: 100%; }
+.lifeos-v3 .lifeos-settings-skill-category { padding: 12px; border: 1px solid var(--v3-line); border-radius: 8px; }
+.lifeos-v3 .lifeos-settings-skill-category > summary { font-weight: 650; cursor: pointer; margin-bottom: 8px; }
+.lifeos-v3 .lifeos-settings-skill-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr)); gap: 10px; margin-top: 10px; }
+.lifeos-v3 .lifeos-settings-skill-option { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border: 1px solid var(--v3-line); border-radius: 8px; background: var(--v3-surface); }
+.lifeos-v3 .lifeos-settings-skill-copy { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 6px 8px; flex: 1; min-width: 0; cursor: pointer; }
+.lifeos-v3 .lifeos-settings-skill-copy input { margin: 3px 0 0; }
+.lifeos-v3 .lifeos-settings-skill-copy strong { overflow-wrap: anywhere; }
+.lifeos-v3 .lifeos-settings-skill-desc { grid-column: 2; color: var(--v3-muted); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.lifeos-v3 .lifeos-settings-skill-option.is-active { border-color: var(--v3-accent); box-shadow: inset 3px 0 var(--v3-accent); }
+.lifeos-v3 .lifeos-settings-skill-option > button { flex-shrink: 0; }
+.lifeos-v3 .lifeos-skill-picker [hidden], .lifeos-v3 .lifeos-reader-setting [hidden] { display: none !important; }
+.lifeos-v3 .lifeos-skill-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 14px; background: var(--v3-raised); border-radius: 8px; font-size: 13px; }
+.lifeos-v3 .lifeos-skill-detail { display: grid; gap: 12px; align-content: start; }
+.lifeos-reader .metadata-property[data-property-key="lifeos_review_tags"] { display: none; }
+.lifeos-v3 .lifeos-reader-setting { gap: 10px; }
+.lifeos-v3 .lifeos-reader-setting-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* The old unscoped popover stylesheet was dropped during V3 migration. Explicitly style both mounts. */
+.lifeos-ai-edit-popover.lifeos-v3 {
+  position: fixed; left: var(--lifeos-ai-edit-left, 16px); top: var(--lifeos-ai-edit-top, 16px);
+  z-index: var(--layer-popover, 100); display: flex; flex-direction: column;
+  width: min(540px, calc(100vw - 32px)); max-height: min(760px, calc(100dvh - 32px));
+  border: 1px solid var(--v3-line); border-radius: 12px; background: var(--v3-surface);
+  box-shadow: 0 14px 42px #0003; overflow: hidden;
+}
+.lifeos-ai-edit-popover.lifeos-v3.is-selection-prompt { width: min(380px, calc(100vw - 32px)); }
+.lifeos-ai-edit-popover.lifeos-v3.is-panel { position: static; width: 100%; max-height: none; box-shadow: none; }
+.lifeos-v3 :is(.lifeos-ai-edit-popover-header, .lifeos-ai-edit-selection-prompt-header) { display: flex; gap: 10px; align-items: flex-start; padding: 12px; }
+.lifeos-v3 :is(.lifeos-ai-edit-popover-heading, .lifeos-ai-edit-selection-prompt-copy) { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.lifeos-v3 :is(.lifeos-ai-edit-popover-heading, .lifeos-ai-edit-selection-prompt-copy) span { color: var(--v3-muted); font-size: 12px; overflow-wrap: anywhere; }
+.lifeos-v3 :is(.lifeos-ai-edit-actions, .lifeos-ai-edit-tab-bar, .lifeos-ai-edit-selection-prompt-actions) { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--v3-line); flex-shrink: 0; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-tab-bar { background: var(--v3-raised); color: var(--v3-text); }
+.lifeos-v3 .lifeos-ai-edit-selection-prompt-hint { padding: 0 12px 12px; font-size: 12px; color: var(--v3-muted); }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-popover-body { overflow: auto; min-height: 0; flex: 1; }
+.lifeos-v3 .lifeos-ai-edit-context { color: var(--v3-muted); font-size: 12px; overflow-wrap: anywhere; }
+.lifeos-v3 .lifeos-ai-edit-preview { min-height: 100px; overflow-wrap: anywhere; user-select: text; }
+.lifeos-v3 .lifeos-ai-edit-preview pre { overflow: auto; max-width: 100%; }
+.lifeos-v3 :is(.lifeos-ai-edit-skill-list, .lifeos-ai-edit-answer-context-modes, .lifeos-ai-edit-answer-modes) { display: flex; flex-wrap: wrap; gap: 6px; }
+.lifeos-v3 .lifeos-ai-edit-skill-groups { display: grid; gap: 10px; max-height: 240px; overflow: auto; }
+.lifeos-v3 .lifeos-ai-edit-answer-toolbar { display: grid; gap: 8px; }
+.lifeos-v3 .lifeos-ai-edit-popover-close { flex-shrink: 0; min-width: 36px; }
+.lifeos-ai-edit-popover.lifeos-v3 button { white-space: normal; overflow-wrap: anywhere; height: auto; min-height: 36px; }
+.lifeos-ai-edit-popover.lifeos-v3 textarea { min-height: 80px; resize: vertical; }
+.lifeos-v3 .lifeos-ai-edit-action-primary { background: var(--v3-accent); color: var(--v3-surface); }
+
+/* Selection assistant round20: compact toolbar and narrow-leaf layout. */
+.lifeos-selection-action { display:flex; flex-wrap:wrap; gap:4px; padding:6px; max-width:calc(100vw - 16px); background:var(--background-primary); color:var(--text-normal); border:1px solid var(--background-modifier-border); border-radius:10px; box-shadow:0 4px 18px #0002; }
+.lifeos-selection-action button { white-space:nowrap; min-height:30px; padding:4px 8px; }
+.lifeos-ai-edit-popover.lifeos-v3.is-panel { height:100%; max-height:100%; min-height:0; min-width:0; border-radius:10px; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-popover-body { display:flex; flex-direction:column; gap:12px; padding:12px; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-preview { order:2; min-height:150px; flex:1 0 auto; padding:12px; background:var(--v3-raised); border-radius:8px; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-context { order:0; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-answer-toolbar { order:1; display:flex; flex-direction:column; gap:8px; min-width:0; padding:8px; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-answer-copy { display:grid; gap:4px; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-answer-copy span { white-space:normal; font-size:12px; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-skill-panel { order:3; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-command { order:4; width:100%; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-answer-context-hint { flex-basis:100%; font-size:12px; white-space:normal; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-study-modes { display:flex; flex-wrap:wrap; gap:6px; }
+.lifeos-ai-edit-popover.lifeos-v3 [aria-pressed="true"] { background:var(--background-modifier-hover); outline:1px solid var(--interactive-accent); }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-skill-panel input { width:100%; margin:8px 0; }
+.lifeos-ai-edit-popover.lifeos-v3 [hidden] { display:none !important; }
+
+/* Round21: answer first; compact controls adjacent to composer. */
+.lifeos-ai-edit-popover.lifeos-v3.is-panel .lifeos-ai-edit-popover-body {
+  overflow:auto; gap:10px; align-items:stretch; overscroll-behavior:contain;
+}
+.lifeos-ai-edit-popover.lifeos-v3.is-panel .lifeos-ai-edit-preview {
+  order:1; flex:1 1 0; min-height:60px; overflow:auto; overscroll-behavior:contain;
+}
+.lifeos-ai-edit-popover.lifeos-v3.is-panel .lifeos-ai-edit-answer-toolbar {
+  order:2; flex:0 0 auto; display:block; width:100%; margin:0; padding:0;
+  border:0; box-shadow:none; background:transparent; text-align:left;
+  max-height:180px; overflow:auto;
+}
+.lifeos-ai-edit-popover.lifeos-v3.is-panel .lifeos-ai-edit-answer-copy { display:none; }
+.lifeos-ai-edit-popover.lifeos-v3.is-panel .lifeos-ai-edit-answer-copy:has(.lifeos-ai-study-modes) { display:grid; gap:6px; }
+.lifeos-ai-edit-popover.lifeos-v3.is-panel .lifeos-ai-edit-answer-copy > span { display:none; }
+.lifeos-ai-edit-popover.lifeos-v3.is-panel .lifeos-ai-answer-settings {
+  width:100%; margin:0; padding:0; border:0; background:transparent; text-align:left;
+}
+.lifeos-ai-edit-popover.lifeos-v3.is-panel .lifeos-ai-answer-settings summary { padding:6px 0; cursor:pointer; color:var(--v3-muted); font-size:12px; }
+.lifeos-ai-edit-popover.lifeos-v3.is-panel :is(.lifeos-ai-edit-answer-context-modes,.lifeos-ai-edit-answer-modes) {
+  justify-content:flex-start; align-items:center; margin:0; padding:4px 0; border:0; border-radius:0; background:transparent;
+}
+.lifeos-ai-edit-popover.lifeos-v3.is-panel .lifeos-ai-edit-skill-panel { flex:0 0 auto; margin:0; }
+.lifeos-ai-edit-popover.lifeos-v3.is-panel .lifeos-ai-edit-skill-groups { max-height:140px; }
+.lifeos-ai-edit-popover.lifeos-v3.is-panel .lifeos-ai-edit-command { flex:0 0 auto; min-height:64px; max-height:120px; margin:0; }
+@media(max-height:650px) {
+ .lifeos-ai-edit-popover.lifeos-v3.is-panel .lifeos-ai-edit-answer-toolbar { max-height:100px; }
+ .lifeos-ai-edit-popover.lifeos-v3.is-panel .lifeos-ai-edit-skill-groups { max-height:80px; }
+}
+
+
+/* Explicit V3 conversation geometry: never constrain a bubble to the viewport height. */
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-preview.is-answer {
+  display: flex; flex-direction: column; align-items: stretch; gap: 16px;
+}
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-chat-message {
+  display: block; flex: 0 0 auto; min-width: 0; width: 100%;
+  height: auto; max-height: none; box-sizing: border-box;
+}
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-chat-role { margin-bottom: 6px; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-chat-content {
+  display: flow-root; height: auto; max-height: none; min-width: 0; max-width: 100%;
+  box-sizing: border-box; overflow-wrap: anywhere; word-break: normal;
+}
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-chat-content :is(pre, table) {
+  display: block; max-width: 100%; overflow-x: auto;
+}
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-chat-content :is(img, video, svg) { max-width: 100%; }
+
+/* Round27: persistent source quote, explicit state, spacious searchable Skill dropdown. */
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-current-selection {
+  order:0; flex:0 0 auto; min-width:0; padding:10px 12px;
+  border:1px solid var(--interactive-accent); border-left:4px solid var(--interactive-accent);
+  border-radius:8px; background:var(--background-secondary); color:var(--text-normal);
+}
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-current-selection summary {
+  font-weight:700; cursor:pointer; overflow-wrap:anywhere;
+}
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-current-selection blockquote {
+  max-height:110px; overflow:auto; margin:8px 0 0; padding:0; border:0;
+  white-space:pre-wrap; overflow-wrap:anywhere; font-weight:600; color:var(--text-normal);
+}
+.lifeos-ai-edit-popover.lifeos-v3 button:is(.is-active,[aria-pressed="true"]) {
+  background:var(--interactive-accent); color:var(--text-on-accent);
+  border-color:var(--interactive-accent); font-weight:700;
+  box-shadow:inset 0 -3px 0 rgba(0,0,0,.22);
+}
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-skill-summary {
+  min-height:48px; padding:10px 12px; gap:8px; flex-wrap:wrap; cursor:pointer;
+  border:1px solid var(--background-modifier-border); border-radius:8px;
+}
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-skill-panel[open] {
+  padding:10px; border:1px solid var(--interactive-accent); border-radius:10px;
+  background:var(--background-primary);
+}
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-skill-panel input { min-height:40px; }
+.lifeos-ai-edit-popover.lifeos-v3.is-panel .lifeos-ai-edit-skill-groups {
+  max-height:min(320px,35vh); overflow:auto; overscroll-behavior:contain;
+}
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-skill-list { display:grid; grid-template-columns:minmax(0,1fr); gap:8px; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-skill-chip {
+  display:flex; flex-direction:column; align-items:flex-start; text-align:left;
+  width:100%; min-height:56px; height:auto; padding:10px 12px; white-space:normal; gap:4px;
+}
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-skill-option-name { font-weight:700; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-skill-option-description {
+  font-size:12px; line-height:1.5; overflow-wrap:anywhere;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+}
+.lifeos-ai-edit-popover.lifeos-v3 :is(.lifeos-ai-edit-skill-panel,.lifeos-ai-edit-skill-groups,.lifeos-ai-edit-skill-category,.lifeos-ai-edit-skill-list,.lifeos-ai-edit-skill-chip,.lifeos-skill-option-description) {
+  min-width:0; max-width:100%; box-sizing:border-box;
+}
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-skill-option-description { white-space:normal; width:100%; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-skill-summary { display:grid; grid-template-columns:minmax(0,1fr); }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-skill-current { min-width:0; justify-content:flex-start; flex-wrap:wrap; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-skill-current-chip { max-width:100%; white-space:normal; overflow-wrap:anywhere; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-context,
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-context > span {
+  display:block; min-width:0; max-width:100%; white-space:normal; overflow-wrap:anywhere;
+}
+
+/* Round28: compact controls, nonshrinking context, answer gets remaining space. */
+.lifeos-ai-edit-popover.lifeos-v3.is-panel .lifeos-ai-edit-popover-body > :not(.lifeos-ai-edit-preview) { flex-shrink:0; }
+.lifeos-ai-edit-popover.lifeos-v3.is-panel .lifeos-ai-edit-context { display:none; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-current-selection { padding:6px 10px; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-current-selection summary { font-size:12px; font-weight:600; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-skill-summary { min-height:34px; padding:6px 8px; display:flex; flex-wrap:wrap; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-skill-panel[open] { padding:6px; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-skill-list { display:flex; flex-wrap:wrap; gap:6px; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-skill-chip {
+  width:auto; min-height:30px; height:auto; padding:5px 9px; display:inline-flex;
+  flex-direction:row; font-size:12px; line-height:1.5;
+}
+.lifeos-ai-edit-popover.lifeos-v3.is-panel .lifeos-ai-edit-skill-groups { max-height:min(200px,24vh); }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-skill-hint { display:none; }
+.lifeos-ai-edit-popover.lifeos-v3.is-panel .lifeos-ai-edit-preview { min-height:120px; }
+.lifeos-v3 .lifeos-chat-skill-list-expanded { display:flex; flex-wrap:wrap; gap:6px; }
+.lifeos-v3 .lifeos-chat-skill-option { width:auto; min-height:32px; padding:2px 4px; flex:0 1 auto; }
+.lifeos-v3 .lifeos-chat-skill-select { min-height:28px; padding:3px 6px; font-size:12px; }
+.lifeos-v3 .lifeos-skill-category-desc { display:none; }
+.lifeos-resource-batch-list { max-height:38vh; overflow:auto; display:grid; gap:6px; }
+.lifeos-resource-batch-list label { display:flex; gap:8px; align-items:center; overflow-wrap:anywhere; }
+.lifeos-resource-batch-controls { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0; }
+
+@media(pointer:coarse) {
+ .lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-skill-chip, .lifeos-v3 .lifeos-chat-skill-select { min-height:44px; }
+}
+.lifeos-v3 .lifeos-chat-skill-option { display:flex; align-items:center; gap:3px; box-sizing:border-box; }
+.lifeos-v3 .lifeos-chat-skill-select { display:flex; align-items:center; gap:5px; height:28px; }
+.lifeos-v3 .lifeos-chat-skill-manage { min-height:28px; height:28px; width:26px; padding:2px; }
+.lifeos-v3 .lifeos-chat-skill-option svg { width:14px; height:14px; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-current-selection { min-height:0; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-current-selection summary { min-height:0; height:auto; margin:0; padding:0; line-height:1.5; }
+@media(pointer:coarse) {
+ .lifeos-v3 .lifeos-chat-skill-select, .lifeos-v3 .lifeos-chat-skill-manage { min-height:44px; height:auto; }
+}

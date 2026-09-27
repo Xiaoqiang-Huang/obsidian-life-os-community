@@ -122,7 +122,7 @@ export class ContextEngine {
       userMessage: input.userMessage,
       modeUsed: mode,
       maxChars,
-      sections: [
+      sections: await this.metadata.prepareSections([
         ...this.evidenceSections(retrieval.evidence, 100, "检索证据"),
         ...currentNoteSections,
         ...urlSections,
@@ -133,7 +133,7 @@ export class ContextEngine {
         ...graphSections,
         ...coreSections,
         ...summarySections
-      ],
+      ]),
       warnings: [...planningWarnings, ...retrieval.warnings]
     });
     return { ...composed, retrievalTrace: retrieval.trace };
@@ -717,7 +717,7 @@ export class ContextEngine {
     if (!this.policy.isAllowedPath(file.path)) return [];
     let content = "";
     try {
-      content = String(await (this.app as unknown as { vault: { read: (file: unknown) => Promise<string> } }).vault.read(file));
+      content = await this.metadata.readFile(file.path);
     } catch {
       return [];
     }
@@ -728,7 +728,7 @@ export class ContextEngine {
 
     return [{
       title: `Current note: ${title}`,
-      content: [clean, linkedContext].filter(Boolean).join("\n\n"),
+      content: clean,
       priority: 75,
       source: file.path,
       sourceInfo: {
@@ -737,7 +737,7 @@ export class ContextEngine {
         type: "current-note",
         excerpt: clean.slice(0, 240)
       }
-    }];
+    }, ...linkedContext];
   }
 
   private async urlSections(userMessage: string, fetchUrl?: (url: string) => Promise<string>): Promise<ContextSection[]> {
@@ -806,6 +806,8 @@ export class ContextEngine {
             `检索时间：${grounding.searchedAt}`,
             `网页标题：${result.title}`,
             `网页地址：${result.url}`,
+            `读取状态：${result.fetched ? "已读取正文" : result.readStatus === "failed" ? "正文读取失败，仅搜索摘要" : "仅搜索摘要"}`,
+            result.readWarning ? `读取说明：${result.readWarning}` : "",
             result.snippet ? `搜索摘要：${result.snippet}` : "",
             result.content ? `网页正文摘录：\n${result.content}` : "网页正文未展开，仅使用搜索摘要。",
             index === 0 && grounding.warnings.length > 0 ? `检索说明：${grounding.warnings.join("；")}` : ""
@@ -820,7 +822,7 @@ export class ContextEngine {
               path: result.url,
               title: result.title,
               type: "url" as const,
-              excerpt: (result.snippet || result.content || result.source).slice(0, 240),
+              excerpt: (result.content || result.snippet || result.source).slice(0, 240),
               updatedAt: Date.parse(grounding.searchedAt) || undefined,
               trust: result.fetched ? 0.78 : 0.62
             },
@@ -944,7 +946,7 @@ export class ContextEngine {
     }) as { path: string; name?: string; basename?: string };
   }
 
-  private async currentNoteLinkedContext(sourcePath: string): Promise<string> {
+  private async currentNoteLinkedContext(sourcePath: string): Promise<ContextSection[]> {
     const links = (this.app as unknown as { metadataCache?: { resolvedLinks?: Record<string, Record<string, number>> } }).metadataCache?.resolvedLinks ?? {};
     const linkedPaths = new Set<string>();
     for (const path of Object.keys(links[sourcePath] ?? {})) linkedPaths.add(path);
@@ -952,22 +954,23 @@ export class ContextEngine {
       if (Number(destinations[sourcePath] ?? 0) > 0) linkedPaths.add(path);
     }
 
-    const parts: string[] = [];
+    const parts: ContextSection[] = [];
     for (const path of Array.from(linkedPaths).slice(0, 4)) {
       if (!this.policy.isAllowedPath(path)) continue;
       const file = (this.app as unknown as { vault?: { getAbstractFileByPath?: (path: string) => unknown; read?: (file: unknown) => Promise<string> } }).vault?.getAbstractFileByPath?.(path);
       if (!file || typeof file !== "object") continue;
       try {
-        const markdown = String(await (this.app as unknown as { vault: { read: (file: unknown) => Promise<string> } }).vault.read(file));
+        const markdown = await this.metadata.readFile(path);
         if (!this.policy.isAllowedFrontmatter(parseFrontmatterLocal(markdown))) continue;
         const excerpt = this.cleanExcerpt(markdown, 450);
-        if (excerpt) parts.push(`### ${path}\n${excerpt}`);
+        if (excerpt) parts.push({ title: `Linked note: ${path}`, content: excerpt, priority: 65, source: path,
+          sourceInfo: { path, title: path, type: "knowledge", excerpt } });
       } catch {
         // Ignore individual linked-note read failures so current-note context can still be used.
       }
     }
 
-    return parts.length > 0 ? `Linked note context\n${parts.join("\n\n")}` : "";
+    return parts;
   }
 }
 

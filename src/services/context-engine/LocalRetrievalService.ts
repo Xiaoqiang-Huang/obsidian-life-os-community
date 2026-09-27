@@ -43,7 +43,7 @@ export class LocalRetrievalService {
       evidence.push({
         content: this.excerpt(match.markdown, plan.keywords),
         score: match.score,
-        source: this.sourceFor(match.candidate.item, match.markdown)
+        source: this.metadata.decorateSource(this.sourceFor(match.candidate.item, match.markdown))
       });
     }
 
@@ -55,7 +55,7 @@ export class LocalRetrievalService {
       evidence.push({
         content: this.excerpt(markdown, plan.keywords),
         score: candidate.score,
-        source: this.sourceFor(candidate.item, markdown)
+        source: this.metadata.decorateSource(this.sourceFor(candidate.item, markdown))
       });
     }
     return evidence;

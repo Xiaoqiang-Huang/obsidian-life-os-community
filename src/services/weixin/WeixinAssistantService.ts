@@ -1,3 +1,7 @@
+import { isTaskResumeRequest } from "../agent/AgentResume";
+import { AgentSessionService, parseSessionCommand } from "../AgentSessionService";
+import { mayAutoApplyAgentWrite } from "../agent/AgentPermissionPolicy";
+import { resolveVisionSettings } from "../../settings";
 import { App, TFile, requestUrl } from "obsidian";
 import { type AiMessage, AiClient, buildSystemPrompt } from "../../ai";
 import type {
@@ -6,7 +10,7 @@ import type {
   PersonalLifeSystemSettings
 } from "../../settings";
 import type { ChatMessage, LifeOSProject } from "../../types";
-import { hasProAccess } from "../../licensing/entitlement";
+import { hasSettingsProAccess } from "../../licensing/entitlement";
 import { today } from "../../utils/dates";
 import { ensureFile, ensureFolder, readFile } from "../../utils/vault";
 import { applyWritebackItems, type WritebackItem } from "../../writeback-preview";
@@ -94,7 +98,8 @@ import {
   formatWeixinPlainTextReply,
   formatWeixinMediaContext,
   getWeixinImageContentParts,
-  weixinConversationKey,
+  weixinSessionKey as weixinConversationKey,
+  weixinConversationKey as weixinPhysicalConversationKey,
   weixinSenderKey,
   parseWeixinCommand,
   parseWeixinLifeOSAction,
@@ -157,6 +162,7 @@ interface WeixinWritebackProposal {
 
 export interface WeixinAssistantServiceOptions {
   saveSettings: () => Promise<void>;
+  getSettings?: () => PersonalLifeSystemSettings;
   hasWriteEntitlement?: () => boolean;
   sendProactiveText?: (
     accountId: string,
@@ -202,39 +208,45 @@ export class WeixinModelRequestError extends Error {
 
 
 export class WeixinAssistantService {
+  private readonly initialSettings: PersonalLifeSystemSettings;
+  private get settings(): PersonalLifeSystemSettings { return this.options.getSettings?.() ?? this.initialSettings; }
   private readonly fs: FileSystemService;
   private readonly projects: ProjectService;
   private readonly reminders: WeixinReminderService;
   private readonly dailyJournal: WeixinDailyJournalService;
   private readonly conversationState: WeixinConversationStateService;
+  private readonly sessions: AgentSessionService;
   private readonly inboundQueue: WeixinInboundQueueService;
   private readonly agent: LifeOSAgentService;
   private readonly pendingImages = new WeixinPendingImageStore(MAX_PENDING_IMAGES, PENDING_IMAGE_TTL_MS);
   private readonly messageLocks = new Map<string, Promise<WeixinAssistantResponse>>();
-  private textModelCache: { key: string; model?: string } | null = null;
 
   constructor(
     private app: App,
-    private settings: PersonalLifeSystemSettings,
+    settings: PersonalLifeSystemSettings,
     private ai: AiClient,
     private options: WeixinAssistantServiceOptions,
     agent?: LifeOSAgentService
   ) {
+    this.initialSettings = settings;
     this.fs = new FileSystemService(app, settings.rootFolder, settings.directoryLanguage);
     this.projects = new ProjectService(app, this.fs);
     this.reminders = new WeixinReminderService(app, this.fs);
     this.dailyJournal = new WeixinDailyJournalService(app, this.fs, settings);
+    this.sessions = new AgentSessionService({
+      read: async scope => readFile(this.app, this.fs.path("Chat", "Weixin", "Sessions", `${this.stableHash(scope)}.json`)),
+      write: async (scope, content) => {
+        const file = await ensureFile(this.app, this.fs.path("Chat", "Weixin", "Sessions", `${this.stableHash(scope)}.json`), "");
+        await this.app.vault.modify(file, content);
+      }
+    });
     this.conversationState = new WeixinConversationStateService(app, this.fs);
     this.inboundQueue = new WeixinInboundQueueService(app, this.fs);
     this.agent = agent ?? new LifeOSAgentService(
       app,
       () => settings,
       ai,
-      () => hasProAccess(
-        settings.licenseSnapshot,
-        new Date(),
-        settings.licenseEntitlementToken
-      ),
+      () => hasSettingsProAccess(settings),
       () => this.options.saveSettings()
     );
   }
@@ -280,9 +292,13 @@ export class WeixinAssistantService {
       allowedGroups: this.settings.weixinAllowedGroups
     }, request);
     if (!access.allowed) return request;
-    const durableRequest = await this.conversationState.prepareInbound(request);
-    await this.inboundQueue.stage(durableRequest);
-    return durableRequest;
+    const existing = await this.inboundQueue.existingRequest(request);
+    if (existing) return this.conversationState.hydratePersistedMedia(existing);
+    const session = await this.sessions.current(this.sessionScope(request));
+    const pinned = { ...request, agentSessionId: request.agentSessionId || session.id, agentSessionTitle: request.agentSessionTitle || session.title };
+    const durableRequest = await this.conversationState.prepareInbound(pinned);
+    const staged = await this.inboundQueue.stage(durableRequest);
+    return { ...durableRequest, agentSessionId: staged.request.agentSessionId || "legacy", agentSessionTitle: staged.request.agentSessionTitle };
   }
 
   private async handleDurableMessage(request: WeixinInboundRequest): Promise<WeixinAssistantResponse> {
@@ -338,6 +354,19 @@ export class WeixinAssistantService {
   }
 
   private async processAuthorizedMessage(request: WeixinInboundRequest): Promise<WeixinAssistantResponse> {
+    if (isTaskResumeRequest(request.content)) {
+      const owned = await this.sessions.list(this.sessionScope(request));
+      const identities = owned.map(session => ({ session, id: `weixin:${weixinConversationKey({ ...request, agentSessionId: session.id })}` }));
+      const project = await this.resolveProject(request);
+      const found = await this.agent.findResumableTask(request.content, identities.map(s => s.id), "weixin", project?.id || "", request.accountId || "default");
+      if (!found.state) return { reply: found.message };
+      const selected = identities.find(s => s.id === found.state!.sessionId)!;
+      await this.sessions.command(this.sessionScope(request), request.messageId + ":resume", {action:"switch", value:selected.session.id});
+      await this.inboundQueue.bindResumedSession(request, selected.session.id, selected.session.title);
+      request = { ...request, agentSessionId: selected.session.id, agentSessionTitle: selected.session.title };
+    }
+    const sessionCommand = parseSessionCommand(request.content);
+    if (sessionCommand) return { reply: await this.sessions.command(this.sessionScope(request), request.messageId, sessionCommand) };
     // Persist only traffic that has passed the Life OS access policy. Pairing
     // probes and rejected group traffic must not become hidden Vault content.
     const proactiveRouteRef = request.isGroup ? "" : await this.ensureReminderRoute(request);
@@ -669,7 +698,7 @@ export class WeixinAssistantService {
     });
     const response = await this.agent.complete(prepared, {
       model: hasVisionImage
-        ? this.settings.visionAiModel.trim() || undefined
+        ? resolveVisionSettings(this.settings)?.aiModel || undefined
         : await this.resolveWeixinTextModel(),
       reasoningEffort: executionPlan.reasoningEffort,
       temperature: 0.35,
@@ -892,6 +921,7 @@ export class WeixinAssistantService {
         "- “小P，帮我解这道题”或“用花生十三回答”",
         "需要核对的写入会直接询问你，回复“确认”或“取消”即可，不必输入命令。",
         "图片可先单独发送，再发一句文字说明用途；Life OS 会自动合并处理。",
+        "会话管理：新建一个会话，行测复习；查看会话列表；切换到第二个；当前会话改名为行测。",
         "微信里点名的 Skill 会在当前会话的相关追问中沿用，但不会改变电脑端已经选择的 Skill；切换话题后自动回到中性方法。",
         "已授权私聊中的普通用户输入会进入当日日记证据；启用日终总结后，Life OS 会在次日 00:00 整理刚结束的一天并主动发回微信。"
       ].join("\n") };
@@ -958,14 +988,7 @@ export class WeixinAssistantService {
       return { reply: `当前会话已绑定到项目：${project.name}` };
     }
     if (name === "new") {
-      this.clearPendingImagesForRequest(request);
-      await this.conversationState.clearImages(request);
-      const archivedPath = await this.archiveConversation(request);
-      return {
-        reply: archivedPath
-          ? `已开始新的远程会话；上一段对话已归档到：${archivedPath}\n项目绑定保持不变。`
-          : "已开始新的远程会话；当前没有需要归档的旧对话，项目绑定保持不变。"
-      };
+      return { reply: await this.sessions.command(this.sessionScope(request), request.messageId, { action: "new", value: args.join(" ") }) };
     }
     if (name === "approve" || name === "deny") {
       const id = args[0] || "";
@@ -1024,6 +1047,14 @@ export class WeixinAssistantService {
     return this.resolveWritebackProposal(request, selected.proposal.id, decision.decision === "approve");
   }
 
+  private matchesProposalSession(request: WeixinInboundRequest, key: string): boolean {
+    if (key === weixinConversationKey(request)) return true;
+    // Only the original sender (checked by callers), in the legacy logical session,
+    // may resolve a pre-upgrade group proposal. New sessions never inherit it.
+    return request.isGroup && (!request.agentSessionId || request.agentSessionId === "legacy")
+      && key === weixinPhysicalConversationKey(request);
+  }
+
   private async pendingProposals(
     request: WeixinInboundRequest
   ): Promise<Array<{ proposal: WeixinWritebackProposal; file: TFile }>> {
@@ -1036,7 +1067,7 @@ export class WeixinAssistantService {
       try {
         const proposal = JSON.parse(await this.app.vault.read(file)) as WeixinWritebackProposal;
         if (proposal.status !== "pending") continue;
-        if (proposal.senderKey !== senderKey || proposal.conversationKey !== conversationKey) continue;
+        if (proposal.senderKey !== senderKey || !this.matchesProposalSession(request, proposal.conversationKey)) continue;
         if (!proposal.expiresAt || Date.parse(proposal.expiresAt) <= Date.now()) continue;
         result.push({ proposal, file });
       } catch {
@@ -1088,7 +1119,7 @@ export class WeixinAssistantService {
         reasoningEffort: "low",
         temperature: 0,
         model: imageParts.length > 0
-          ? this.settings.visionAiModel.trim() || undefined
+          ? resolveVisionSettings(this.settings)?.aiModel || undefined
           : await this.resolveWeixinTextModel(),
         messages: [
           {
@@ -1330,7 +1361,7 @@ export class WeixinAssistantService {
     try {
       response = await this.ai.complete({
         model: imageParts.length > 0
-          ? this.settings.visionAiModel.trim() || undefined
+          ? resolveVisionSettings(this.settings)?.aiModel || undefined
           : await this.resolveWeixinTextModel(),
         reasoningEffort: "low",
         temperature: 0,
@@ -1699,14 +1730,17 @@ export class WeixinAssistantService {
     options: { forceConfirm?: boolean } = {}
   ): Promise<WeixinAssistantResponse> {
     if (!this.canWriteToLifeOS()) return this.writeEntitlementBlockedResponse();
+    if (this.settings.weixinPermissionMode === "read-only") return { reply: "当前权限为只读，未执行写入。", writebackStatus: "blocked" };
     const executablePayload = this.withMutationOperationId(request, payload);
     const isApprovedPrivate = !request.isGroup
       && this.settings.weixinApprovedSenders.some((sender) => sender.key === weixinSenderKey(request));
     const explicitTypedAction = parseWeixinLifeOSAction(request.content);
-    const canAutoApply = !options.forceConfirm && isApprovedPrivate && (
-      this.settings.weixinPermissionMode === "explicit-auto"
-      || (this.settings.weixinPermissionMode === "confirm" && Boolean(explicitTypedAction))
-    );
+    const canAutoApply = mayAutoApplyAgentWrite({
+      mode: this.settings.weixinPermissionMode,
+      explicitIntent: Boolean(explicitTypedAction) || this.isExplicitWriteRequest(request.content),
+      forceConfirmation: options.forceConfirm,
+      trustedPrivate: isApprovedPrivate
+    });
     if (canAutoApply) {
       const detail = await this.executeProposalPayload(executablePayload);
       return { reply: `${summary}\n已完成。${detail ? `\n${detail}` : ""}`, writebackStatus: "applied" };
@@ -1909,7 +1943,7 @@ export class WeixinAssistantService {
     const base = baseText.trim();
     if (images.length === 0) return base;
     const response = await this.ai.complete({
-      model: this.settings.visionAiModel.trim() || undefined,
+      model: resolveVisionSettings(this.settings)?.aiModel || undefined,
       reasoningEffort: this.settings.aiReasoningEffort,
       temperature: 0.2,
       messages: [
@@ -2459,30 +2493,7 @@ export class WeixinAssistantService {
    * text model always wins; otherwise the normal configured model is retained.
    */
   private async resolveWeixinTextModel(): Promise<string | undefined> {
-    const explicit = this.settings.weixinTextAiModel.trim();
-    if (explicit) return explicit;
-    const configured = this.settings.aiModel.trim();
-    if (!configured || !VISION_MODEL_PATTERN.test(configured)) return undefined;
-    const key = `${this.settings.aiBaseUrl}\u001f${configured}`;
-    if (this.textModelCache?.key === key) return this.textModelCache.model;
-
-    const canonical = (value: string) => value
-      .trim()
-      .toLowerCase()
-      .split("/")
-      .pop()!
-      .replace(/(?:[._-](?:vision|vl|image|multimodal|ocr))(?:[._-](?:exp|experimental|preview))?/giu, "")
-      .replace(/[._-]+$/u, "");
-    const target = canonical(configured);
-    let resolved: string | undefined;
-    try {
-      const models = await this.ai.listModels();
-      resolved = models.find((model) => !VISION_MODEL_PATTERN.test(model) && canonical(model) === target);
-    } catch {
-      resolved = undefined;
-    }
-    this.textModelCache = { key, model: resolved };
-    return resolved;
+    return this.settings.weixinTextAiModel.trim() || undefined;
   }
 
   private async resolveProject(request: WeixinInboundRequest): Promise<LifeOSProject | null> {
@@ -2570,6 +2581,10 @@ export class WeixinAssistantService {
     return selected;
   }
 
+  private sessionScope(request: WeixinInboundRequest): string {
+    return JSON.stringify(["weixin", request.accountId || "default", request.conversationId, request.threadId, request.senderId]);
+  }
+
   private async loadConversation(request: WeixinInboundRequest): Promise<ChatMessage[]> {
     const content = await readFile(this.app, await this.ensureConversationPath(request));
     return content ? parseChatMarkdown(content, this.settings.assistantName) as ChatMessage[] : [];
@@ -2586,7 +2601,7 @@ export class WeixinAssistantService {
     const base = serializeChatMarkdown({
       date: today(),
       assistantName: this.settings.assistantName,
-      title: this.conversationTitle(request, project),
+      title: request.agentSessionTitle && request.agentSessionTitle !== "原有会话" ? request.agentSessionTitle : this.conversationTitle(request, project),
       source: "weixin",
       channel: "weixin",
       accountId: request.accountId,
@@ -2638,6 +2653,7 @@ export class WeixinAssistantService {
   private async ensureConversationPath(request: WeixinInboundRequest): Promise<string> {
     const currentPath = this.conversationPath(request);
     if (this.app.vault.getAbstractFileByPath(currentPath) instanceof TFile) return currentPath;
+    if (request.isGroup || (request.agentSessionId && request.agentSessionId !== "legacy")) return currentPath;
     const legacyPaths = [this.legacyConversationPath(request), ...this.oldOpenClawConversationPaths(request)];
     for (const legacyPath of legacyPaths) {
       const legacy = this.app.vault.getAbstractFileByPath(legacyPath);
@@ -2695,9 +2711,11 @@ export class WeixinAssistantService {
     if (!item) {
       return { status: "blocked", note: "写入目标不明确或不在 Life OS 安全目录内，未执行写入。" };
     }
-    const canAutoApply = !request.isGroup
-      && this.settings.weixinApprovedSenders.some((sender) => sender.key === weixinSenderKey(request))
-      && this.isExplicitWriteRequest(request.content);
+    const canAutoApply = mayAutoApplyAgentWrite({
+      mode: this.settings.weixinPermissionMode,
+      explicitIntent: this.isExplicitWriteRequest(request.content),
+      trustedPrivate: !request.isGroup && this.settings.weixinApprovedSenders.some((sender) => sender.key === weixinSenderKey(request))
+    });
     if (canAutoApply) {
       const detail = await this.executeProposalPayload({ item });
       return { status: "applied", note: detail };
@@ -2806,6 +2824,7 @@ export class WeixinAssistantService {
   ): Promise<WeixinAssistantResponse> {
     const normalizedId = id.trim().toUpperCase();
     if (!/^WB-\d{6}$/u.test(normalizedId)) return { reply: "待写入编号格式不正确。" };
+    if (approve && this.settings.weixinPermissionMode === "read-only") return { reply: "当前权限为只读，未执行写入。", writebackStatus: "blocked" };
     if (approve && !this.canWriteToLifeOS()) return this.writeEntitlementBlockedResponse();
     const path = this.proposalPath(normalizedId);
     const file = this.app.vault.getAbstractFileByPath(path);
@@ -2817,7 +2836,7 @@ export class WeixinAssistantService {
       return { reply: "待写入记录损坏，已停止处理。" };
     }
     if (proposal.senderKey !== weixinSenderKey(request)) return { reply: "该写入请求不属于当前账号。" };
-    if (proposal.conversationKey !== weixinConversationKey(request)) return { reply: "该写入请求不属于当前会话。请回到生成它的微信会话确认。" };
+    if (!this.matchesProposalSession(request, proposal.conversationKey)) return { reply: "该写入请求不属于当前会话。请回到生成它的微信会话确认。" };
     if (proposal.status !== "pending") return { reply: `该写入请求已${proposal.status === "approved" ? "确认" : "拒绝"}。` };
     if (!proposal.expiresAt || Date.parse(proposal.expiresAt) <= Date.now()) {
       proposal.status = "denied";
@@ -2848,11 +2867,7 @@ export class WeixinAssistantService {
   private canWriteToLifeOS(): boolean {
     try {
       if (this.options.hasWriteEntitlement) return this.options.hasWriteEntitlement() === true;
-      return hasProAccess(
-        this.settings.licenseSnapshot,
-        new Date(),
-        this.settings.licenseEntitlementToken
-      );
+      return hasSettingsProAccess(this.settings);
     } catch {
       return false;
     }

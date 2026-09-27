@@ -134,6 +134,7 @@ export class LlmWikiIntakeService {
       try {
         const draft = await this.compiler.compileSourceToDraft({
           sourceId: savedSource.id,
+          sourcePath: savedSource.path,
           title: input.title,
           rawContent: input.content,
           privacyLevel,

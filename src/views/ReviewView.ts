@@ -111,6 +111,7 @@ export class ReviewView extends ItemView {
       main.addClass("lifeos-review-main");
 
     createHeroHeader(main, {
+        app: this.app,
       kicker: "成长看板",
       title: streak > 0 ? `你已经连续记录 ${streak} 天` : "从今天开始看见成长轨迹",
       description: "日记、任务、打卡和复盘会逐渐形成一条可回看的成长轨迹。",
@@ -150,6 +151,7 @@ export class ReviewView extends ItemView {
 
   private renderLoadingState(main: HTMLElement): void {
     createHeroHeader(main, {
+        app: this.app,
       kicker: "成长看板",
       title: "正在整理复盘数据",
       description: "先打开页面，统计、热力图和复盘列表会在后台加载。",

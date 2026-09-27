@@ -1,0 +1,64 @@
+/* Project document slice only. The main thread owns stylesheet assembly. */
+.lifeos-v3 .lifeos-project-document-list {
+  min-width: 0;
+  text-align: left;
+}
+.lifeos-v3 .lifeos-project-document-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--v3-line, var(--background-modifier-border));
+}
+.lifeos-v3 .lifeos-project-document-open.lifeos-button {
+  flex: 1 1 180px;
+  min-width: 0;
+  max-width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+  height: auto;
+}
+.lifeos-v3 .lifeos-project-document-open .lifeos-v2-button-label {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.lifeos-v3 .lifeos-project-document-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 6px;
+}
+.lifeos-v3 .lifeos-project-document-path {
+  text-align: left;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+}
+.lifeos-v3 .lifeos-project-document-editor {
+  display: block;
+  width: 100%;
+  min-height: 260px;
+  max-height: 55vh;
+  resize: vertical;
+  box-sizing: border-box;
+  text-align: left;
+  font-family: var(--font-monospace);
+}
+.lifeos-v3 .lifeos-project-document-action-modal input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+}
+@media (max-width: 600px) {
+  .lifeos-v3 .lifeos-project-document-row { flex-wrap: wrap; align-items: flex-start; }
+  .lifeos-v3 .lifeos-project-document-open.lifeos-button { flex-basis: 100%; }
+  .lifeos-v3 .lifeos-project-document-actions { flex: 1 1 100%; }
+  .lifeos-v3 .lifeos-project-document-editor { min-height: 180px; }
+}
+
+.lifeos-v3 .lifeos-project-goal-input { width:100%; min-height:140px; resize:vertical; }
+.lifeos-v3 .lifeos-project-goal-text { display:block; white-space:pre-wrap; overflow-wrap:anywhere; }

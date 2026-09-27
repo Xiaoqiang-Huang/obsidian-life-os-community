@@ -1,7 +1,12 @@
-import { App, Modal, Notice, TFile } from "obsidian";
+import { LifeOSModal as Modal } from "./components/LifeOSModal";
+import { deliverWriteback, WritebackPartialError } from "./services/writeback-delivery";
+import { canUndoWriteback } from "./services/writeback-undo";
+import { WritebackReceiptModal } from "./modals/WritebackReceiptModal";
+import { App, Notice, TFile } from "obsidian";
 import { createButton } from "./components/Button";
 import { createModalShell } from "./components/ModalShell";
 import { ensureFile } from "./utils";
+import { applyCanonicalTaskWriteback, prepareTaskWritebackItems } from "./services/task-writeback";
 
 export type WritebackKind = "append" | "replace" | "task" | "memory" | "daily-section";
 
@@ -12,6 +17,8 @@ export interface WritebackItem {
   content: string;
   targetPath: string;
   sourcePath?: string;
+  /** Snapshot approved by the user; null means the file did not exist. */
+  expectedOriginal?: string | null;
   checked: boolean;
 }
 
@@ -23,39 +30,21 @@ export interface WritebackPreviewOptions {
   onConfirm: (items: WritebackItem[]) => Promise<void>;
 }
 
-export function openWritebackPreview(
+export async function openWritebackPreview(
   app: App,
   options: WritebackPreviewOptions
 ): Promise<WritebackItem[]> {
+  const items = await prepareTaskWritebackItems(app, options.items);
   return new Promise((resolve) => {
-    new WritebackPreviewModal(app, options, resolve).open();
+    new WritebackPreviewModal(app, { ...options, items }, resolve).open();
   });
 }
 
 export async function appendWritebackItems(app: App, items: WritebackItem[]): Promise<void> {
-  for (const item of items) {
-    const file = await ensureFile(app, item.targetPath, "");
-    await app.vault.append(file, item.content);
-  }
+  await deliverWriteback(app, items, true);
 }
-
 export async function applyWritebackItems(app: App, items: WritebackItem[]): Promise<void> {
-  for (const item of items) {
-    const existing = app.vault.getAbstractFileByPath(item.targetPath);
-    if (item.kind === "replace") {
-      if (existing instanceof TFile) {
-        await app.vault.modify(existing, item.content);
-      } else {
-        await ensureFile(app, item.targetPath, item.content);
-      }
-      continue;
-    }
-
-    const file = existing instanceof TFile
-      ? existing
-      : await ensureFile(app, item.targetPath, "");
-    await app.vault.append(file, item.content);
-  }
+  await deliverWriteback(app, items);
 }
 
 class WritebackPreviewModal extends Modal {
@@ -65,6 +54,7 @@ class WritebackPreviewModal extends Modal {
     textarea: HTMLTextAreaElement;
   }> = [];
   private hasResolved = false;
+  private written = new Map<string, WritebackItem>();
   private isConfirming = false;
   private confirmButtonEl: HTMLButtonElement | null = null;
 
@@ -99,9 +89,14 @@ class WritebackPreviewModal extends Modal {
 
   onClose(): void {
     if (!this.hasResolved) {
-      this.resolve([]);
+      this.resolve([...this.written.values()]);
       this.hasResolved = true;
     }
+  }
+
+  close(): void {
+    if (this.isConfirming) { new Notice("正在核对写入结果，请稍候；尚未报告成功。"); return; }
+    super.close();
   }
 
   private renderItem(parent: HTMLElement, item: WritebackItem): void {
@@ -146,8 +141,18 @@ class WritebackPreviewModal extends Modal {
     if (this.confirmButtonEl) this.confirmButtonEl.disabled = true;
     try {
       await this.options.onConfirm(selected);
+      this.isConfirming = false;
       this.finish(selected);
     } catch (error) {
+      if (error instanceof WritebackPartialError) {
+        const completed = new Set(error.receipt.targets.filter(t => t.status !== "failed").map(t => t.id));
+        for (const row of this.rows) if (completed.has(row.item.id)) {
+          this.written.set(row.item.id, { ...row.item, content: row.textarea.value });
+          row.checkbox.checked = false; row.checkbox.disabled = true; row.textarea.disabled = true;
+          row.textarea.setAttribute("aria-label", "此项已写入，重试时不会重复追加");
+        }
+        if (this.confirmButtonEl) this.confirmButtonEl.setText("重试未写入项");
+      }
       const message = error instanceof Error ? error.message : String(error);
       new Notice(`写入失败：${message}`, 7000);
       this.isConfirming = false;
@@ -156,10 +161,15 @@ class WritebackPreviewModal extends Modal {
   }
 
   private finish(items: WritebackItem[]): void {
+    if (this.isConfirming) return;
+    const showReceipt = !this.hasResolved;
     if (!this.hasResolved) {
-      this.resolve(items);
+      for (const item of items) this.written.set(item.id, item);
+      this.resolve([...this.written.values()]);
       this.hasResolved = true;
     }
     this.close();
+    const completed = [...this.written.values()];
+    if (showReceipt && completed.some(item => canUndoWriteback(this.app, item.id, item.targetPath))) new WritebackReceiptModal(this.app, completed).open();
   }
 }

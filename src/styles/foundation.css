@@ -1,0 +1,128 @@
+/* V3 semantic surfaces. Layout is independent from the selected material. */
+.lifeos-v3 {
+  --v3-canvas: var(--v3-theme-canvas, #f7f7f3); --v3-surface: var(--v3-theme-surface, #fffefa);
+  --v3-raised: var(--v3-theme-surfaceRaised, #efefe8); --v3-ink: var(--v3-theme-text, #272e2a);
+  --v3-muted: var(--v3-theme-muted, #62685f); --v3-line: var(--v3-theme-border, #dedfd6);
+  --v3-accent: var(--v3-theme-accent, #496653); --v3-gap: 16px; --v3-radius: 10px;
+  --v3-control: 36px; --v3-pad: 20px; --v3-shadow: 0 8px 24px #1720170d;
+  --text-normal: var(--v3-ink); --text-muted: var(--v3-muted); --text-faint: var(--v3-muted);
+  --background-primary: var(--v3-surface); --background-secondary: var(--v3-canvas);
+  --background-modifier-border: var(--v3-line); --interactive-accent: var(--v3-accent);
+  --input-shadow: none; --input-shadow-hover: none;
+  scrollbar-color: var(--v3-muted) var(--v3-canvas);
+  --lifeos-text: var(--v3-ink); --lifeos-muted: var(--v3-muted); --lifeos-accent: var(--v3-accent);
+  --lifeos-surface: var(--v3-surface); --lifeos-border: var(--v3-line);
+  color: var(--v3-ink); background: var(--v3-canvas); font: 14px/1.55 var(--font-interface, system-ui, sans-serif);
+  text-align: start; letter-spacing: normal; min-width: 0; max-width: 100%; isolation: isolate;
+  animation: none; transition: none; transform: none; filter: none; backdrop-filter: none;
+}
+.lifeos-v3[data-density="compact"] { --v3-gap: 12px; --v3-pad: 16px; --v3-control: 32px; }
+.lifeos-v3[data-appearance="cool-slate"] { --v3-radius: 7px; }
+.theme-dark .lifeos-v3:not([data-appearance="theme"]) {
+  --v3-canvas: #181c20; --v3-surface: #20262b; --v3-raised: #293037; --v3-ink: #eff1ed;
+  --v3-muted: #b8c1c4; --v3-line: #414b50; --v3-accent: #96b8a3;
+}
+.lifeos-v3 *, .lifeos-v3 *::before, .lifeos-v3 *::after { box-sizing: border-box; }
+.lifeos-v3 .lifeos-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 100%; }
+.lifeos-v3 .lifeos-empty-actions > button { flex: 0 1 auto; max-width: 100%; height: auto; white-space: normal; }
+.lifeos-v3 .lifeos-empty-actions .lifeos-v2-button-label { white-space: normal; overflow-wrap: anywhere; }
+.lifeos-root.lifeos-v3::before, .lifeos-root.lifeos-v3::after { content: none; }
+.lifeos-v3 :where(div, span, p, a, label) { font-family: inherit; font-size: inherit; line-height: inherit; }
+.lifeos-v3 :where(div, section, aside, main, nav, header, footer) { min-width: 0; min-height: 0; height: auto; max-height: none; max-width: 100%; overflow: visible; flex-shrink: 1; grid-area: auto; grid-auto-flow: row; grid-auto-columns: auto; grid-auto-rows: auto; }
+.lifeos-v3 :where(p, h1, h2, h3, h4, label) { white-space: normal; overflow-wrap: anywhere; overflow: visible; text-overflow: clip; -webkit-line-clamp: unset; }
+.lifeos-v3 :where(h1, h2, h3, h4, p) { color: inherit; margin: 0; }
+.lifeos-v3 h1 { font-size: 26px; line-height: 1.25; font-weight: 700; letter-spacing: -.025em; }
+.lifeos-v3 h2 { font-size: 18px; line-height: 1.4; font-weight: 650; }
+.lifeos-v3 h3 { font-size: 15px; line-height: 1.4; font-weight: 650; }
+.lifeos-v3 :where(p + p) { margin-top: 8px; }
+.lifeos-v3 :where(a) { color: var(--v3-accent); text-underline-offset: 3px; overflow-wrap: anywhere; }
+.lifeos-v3 :where(button, input, select, textarea, summary) {
+  font: inherit; color: var(--v3-ink); letter-spacing: normal; text-transform: none;
+  box-shadow: none; filter: none; backdrop-filter: none; transform: none; animation: none;
+}
+.lifeos-v3 :where(button, summary) { cursor: pointer; touch-action: manipulation; }
+.lifeos-v3 button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  width: auto; min-width: 0; height: auto; min-height: var(--v3-control); max-width: 100%; flex: 0 0 auto;
+  padding: 6px 10px; margin: 0; border: 1px solid var(--v3-line); border-radius: 7px;
+  background: var(--v3-surface); color: var(--v3-ink); font-size: 13px; line-height: 1.25; font-weight: 550;
+  white-space: nowrap; overflow: visible; text-overflow: clip; box-shadow: none;
+  transition: none; /* Theme selection paints atomically; do not blend old/new palettes. */
+}
+.lifeos-v3 :where(button:hover) { background: var(--v3-raised); }
+.lifeos-v3 :where(button:active) { border-color: var(--v3-accent); }
+.lifeos-v3 button:is(.lifeos-button-primary, .is-primary) { color: var(--v3-surface); background: var(--v3-ink); border-color: var(--v3-ink); }
+.lifeos-v3 button:is(.lifeos-button-primary, .is-primary):hover { opacity: .9; background: var(--v3-ink); }
+.lifeos-v3 button:is(.lifeos-button-primary, .is-primary) :where(span, svg) { color: inherit; -webkit-text-fill-color: currentColor; }
+.lifeos-v3 :where(button:disabled) { opacity: .6; cursor: not-allowed; }
+.lifeos-v3 :where(button:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible) {
+  outline: 2px solid var(--v3-accent); outline-offset: 3px;
+}
+.lifeos-v3 :where(svg) { width: 18px; height: 18px; flex: 0 0 auto; vertical-align: middle; stroke-width: 1.7px; }
+.lifeos-v3 :where(.lifeos-button-icon, .lifeos-v2-button-icon, .lifeos-status-icon) { display: inline-flex; align-items: center; flex: none; }
+.lifeos-v3 :where(.lifeos-v2-button-label) { color: inherit; font-size: inherit; line-height: inherit; }
+.lifeos-v3 button > .lifeos-v2-button-label {
+  min-width: 0; white-space: normal; overflow-wrap: anywhere;
+}
+.lifeos-v3 :where(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), select, textarea) {
+  min-height: var(--v3-control); height: auto; min-width: 0; width: 100%; max-width: 100%; padding: 7px 10px;
+  border: 1px solid var(--v3-line); border-radius: 7px; background: var(--v3-surface); color: var(--v3-ink);
+  font-size: 14px; line-height: 1.5; margin: 0;
+}
+.lifeos-v3 :where(textarea) { resize: vertical; }
+.lifeos-v3 :is(input[type="checkbox"], input[type="radio"]) { width: 18px; height: 18px; min-width: 18px; min-height: 18px; max-width: 18px; max-height: 18px; margin: 0; flex: none; accent-color: var(--v3-accent); }
+.lifeos-v3 :where(input::placeholder, textarea::placeholder) { color: var(--v3-muted); opacity: 1; }
+.lifeos-v3 :where(.lifeos-card, .lifeos-panel, .lifeos-v2-card, .lifeos-subtle-card, .lifeos-board-column, .lifeos-settings-card) {
+  background: var(--v3-surface); color: var(--v3-ink); border: 1px solid var(--v3-line); border-radius: var(--v3-radius);
+  padding: var(--v3-pad); margin: 0; box-shadow: none; backdrop-filter: none; filter: none; animation: none; transform: none;
+}
+.lifeos-v3 :where(.lifeos-kicker, .lifeos-muted, .lifeos-muted-text, .lifeos-setting-description, .lifeos-inline-status, .lifeos-path) { color: var(--v3-muted); font-size: 12px; overflow-wrap: anywhere; }
+.lifeos-v3 :where(.lifeos-kicker) { font-weight: 550; letter-spacing: .02em; }
+.lifeos-v3 :where(.lifeos-actions, .lifeos-toolbar, .lifeos-hero-actions, .lifeos-recommendation-actions, .lifeos-page-actions) { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.lifeos-v3 :where(.lifeos-form-field, .lifeos-field) { display: grid; align-content: start; gap: 8px; margin-block: 12px; }
+.lifeos-v3 :where(.lifeos-empty-state) { padding: 24px; min-height: 0; height: auto; max-height: none; display: grid; gap: 10px; box-shadow: none; text-align: center; background: none; border: 1px dashed var(--v3-line); border-radius: 8px; }
+.lifeos-v3 :where(.lifeos-empty-state-title) { font-size: 18px; }
+.lifeos-v3 :where(.lifeos-empty-state-description) { font-size: 14px; color: var(--v3-muted); }
+.lifeos-v3 .lifeos-empty-state-icon { color: var(--v3-muted); margin: 0 auto; background: none; }
+.lifeos-v3 :where(.lifeos-card)::before, .lifeos-v3 :where(.lifeos-card)::after { content: none; }
+.lifeos-v3 :where(pre) { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
+.lifeos-v3 :where(table) { max-width: 100%; }
+.lifeos-v3 :where(.lifeos-toast, [role="alert"]) { color: var(--v3-ink); background: var(--v3-raised); border-radius: 6px; overflow-wrap: anywhere; }
+.lifeos-v3 :where(.lifeos-save-receipt) { border-inline-start: 3px solid var(--v3-accent); padding: 8px 12px; background: var(--v3-raised); }
+/* Preserve hidden as an accessibility invariant even against third-party host themes. */
+.lifeos-v3 [hidden], .lifeos-v3 .is-user-hidden, .lifeos-v3 .is-empty.lifeos-nav-section { display: none !important; }
+
+.modal.lifeos-v3 { width: min(760px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 40px); padding: 0; overflow: hidden; border: 1px solid var(--v3-line); border-radius: 12px; box-shadow: 0 24px 64px #0003; background: var(--v3-surface); }
+.modal.lifeos-v3 .modal-close-button { position: absolute; top: 8px; right: 8px; left: auto; inset-inline-end: 8px; width: 36px; height: 36px; padding: 8px; margin: 0; display: grid; place-items: center; z-index: 5; color: var(--v3-muted); }
+.modal.lifeos-v3 { scrollbar-gutter: auto; }
+/* One surface: the native host owns the border, radius and shadow. The custom
+   shell only supplies content. Leave native backdrop / focus management alone. */
+.modal.lifeos-v3 .modal-content.lifeos-modal-shell {
+  border: 0; border-radius: 0; box-shadow: none; background: transparent;
+  backdrop-filter: none; filter: none; color: var(--v3-ink);
+  --lifeos-text: var(--v3-ink); --lifeos-muted: var(--v3-muted); --text-normal: var(--v3-ink);
+}
+.modal.lifeos-v3 .lifeos-capture-target-label { color: inherit; }
+.modal.lifeos-v3.lifeos-v3-shell-host > .modal-header,
+.modal.lifeos-v3.lifeos-v3-shell-host > .modal-header .modal-header-actions { display: contents; }
+.modal.lifeos-v3.lifeos-v3-shell-host > .modal-header .modal-title { display: none; }
+.modal.lifeos-v3.lifeos-v3-shell-host::before,
+.modal.lifeos-v3.lifeos-v3-shell-host::after,
+.modal.lifeos-v3 .lifeos-modal-shell::before,
+.modal.lifeos-v3 .lifeos-modal-shell::after { content: none; }
+.lifeos-v3 :where(.modal-content, .lifeos-modal-shell) { display: flex; flex-direction: column; min-height: 0; width: 100%; max-height: calc(100dvh - 40px); margin: 0; padding: 0; overflow: hidden; }
+.lifeos-v3 :where(.lifeos-modal-header) { flex: none; display: flex; align-items: start; gap: 12px; padding: 20px 52px 16px 20px; border-bottom: 1px solid var(--v3-line); }
+.lifeos-v3 :where(.lifeos-modal-header p) { font-size: 13px; color: var(--v3-muted); margin-top: 4px; }
+.lifeos-v3 :where(.lifeos-modal-body) { flex: 1 1 auto; min-height: 0; padding: 20px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.lifeos-v3 :where(.lifeos-modal-footer) { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--v3-line); background: var(--v3-surface); }
+.lifeos-v3 :where(.lifeos-writeback-card, .lifeos-suggestion-row) { border: 1px solid var(--v3-line); padding: 12px; margin-block: 8px; border-radius: 7px; background: var(--v3-surface); }
+.lifeos-v3 :where(.lifeos-writeback-header) { display: flex; align-items: start; gap: 8px; margin-bottom: 8px; }
+.lifeos-v3 .modal-content.lifeos-v3-plain-modal { display: block; padding: 44px 20px 20px; overflow: auto; }
+.lifeos-v3 .lifeos-navigation-pin-row { display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--v3-line); padding: 6px 0; }
+.lifeos-v3 .lifeos-navigation-pin-row label { display: flex; align-items: center; gap: 8px; flex: 1; min-height: 44px; }
+@media (prefers-reduced-motion: reduce) { .lifeos-v3 *, .lifeos-v3 *::before, .lifeos-v3 *::after { animation: none; transition: none; scroll-behavior: auto; } }
+.lifeos-v3 .is-settings-section-hidden { display: none !important; }
+.lifeos-v3 .lifeos-badge { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 6px; background: var(--v3-raised); color: color-mix(in srgb, var(--v3-muted) 90%, var(--v3-ink)); border-radius: 4px; font-size: 12px; }
+.lifeos-v3 .lifeos-card-title > span:first-child { color: var(--v3-accent); }
+.modal.lifeos-v3, .lifeos-v3 :where(.modal-content, .lifeos-modal-shell) { max-height: calc(var(--lifeos-visual-viewport-height, 100dvh) - 24px); }
+.modal.lifeos-v3 { margin-bottom: var(--lifeos-keyboard-inset, 0px); }

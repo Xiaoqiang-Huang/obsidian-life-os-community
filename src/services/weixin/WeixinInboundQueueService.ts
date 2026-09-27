@@ -43,6 +43,17 @@ export class WeixinInboundQueueService {
 
   constructor(private app: App, private fs: FileSystemService) {}
 
+  /** Resolve durable binding before attachment preparation can mutate any session. */
+  async existingRequest(request: WeixinInboundRequest): Promise<WeixinInboundRequest | null> {
+    const entry = await this.read(this.pathFor(request));
+    if (!entry) return null;
+    const previous = entry.request;
+    if (previous.messageId !== request.messageId || previous.accountId !== request.accountId
+      || previous.senderId !== request.senderId || previous.conversationId !== request.conversationId
+      || previous.threadId !== request.threadId) throw new Error("微信消息编号与已有收件记录冲突，已停止处理。");
+    return { ...previous, agentSessionId: previous.agentSessionId || "legacy" };
+  }
+
   async stage(request: WeixinInboundRequest): Promise<WeixinInboundQueueEntry> {
     const path = this.pathFor(request);
     const previous = this.queues.get(path) || Promise.resolve();
@@ -66,6 +77,13 @@ export class WeixinInboundQueueService {
     } finally {
       if (this.queues.get(path) === tracked) this.queues.delete(path);
     }
+  }
+
+  async bindResumedSession(request: WeixinInboundRequest, sessionId: string, title: string): Promise<void> {
+    await this.existingRequest(request); // Validate physical owner before changing the logical binding.
+    await this.update(request, entry => {
+      entry.request.agentSessionId = sessionId; entry.request.agentSessionTitle = title;
+    });
   }
 
   async markProcessing(request: WeixinInboundRequest): Promise<void> {
@@ -231,6 +249,8 @@ export class WeixinInboundQueueService {
       accountId: String(record.accountId || "default").slice(0, 240),
       conversationId: String(record.conversationId || "").slice(0, 300),
       threadId: String(record.threadId || "").slice(0, 300),
+      agentSessionId: String(record.agentSessionId || "").slice(0, 100) || undefined,
+      agentSessionTitle: String(record.agentSessionTitle || "").slice(0, 80) || undefined,
       senderId: String(record.senderId || "").slice(0, 240),
       senderName: String(record.senderName || "").slice(0, 160),
       isGroup: record.isGroup === true,

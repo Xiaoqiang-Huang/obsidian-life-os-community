@@ -1,3 +1,4 @@
+import { decodeProjectGoal } from "./project-goal";
 import type { LifeOSProject, LifeOSProjectStatus, LifeOSProjectSummary, LifeOSProjectType, LifeOSTask } from "../types";
 
 export interface ProjectOverviewForAiOptions {
@@ -33,7 +34,7 @@ export function parseProjectIndex(markdown: string): LifeOSProject[] {
       name: projectMatch[1].trim(),
       type: normalizeProjectType(meta.type),
       status: normalizeProjectStatus(meta.status),
-      goal: meta.goal || undefined
+      goal: meta.goal ? decodeProjectGoal(meta.goal) : undefined
     });
   }
 
@@ -47,7 +48,7 @@ export function formatProjectForIndex(project: LifeOSProject): string {
     `  - type: ${project.type}`,
     `  - status: ${project.status}`
   ];
-  if (project.goal) lines.push(`  - goal: ${project.goal}`);
+  if (project.goal) lines.push(`  - goal: ${JSON.stringify(project.goal)}`);
   return `${lines.join("\n")}\n`;
 }
 

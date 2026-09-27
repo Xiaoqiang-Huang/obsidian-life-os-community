@@ -1,4 +1,5 @@
-import { Modal, type App } from "obsidian";
+import { LifeOSModal as Modal } from "../components/LifeOSModal";
+import { type App } from "obsidian";
 import type { IPlugin } from "../plugin-api";
 import { getXingceStatistics } from "./data";
 

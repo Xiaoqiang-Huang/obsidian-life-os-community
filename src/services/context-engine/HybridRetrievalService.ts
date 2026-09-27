@@ -123,10 +123,14 @@ export class HybridRetrievalService {
     const bestScore = fused[0]?.score ?? 0;
     const qualified = fused.filter((entry) => entry.score >= Math.max(0.055, bestScore * 0.32));
     const selected = this.selectDiverse(qualified, this.clamp(input.maxResults ?? 10, 1, MAX_RESULTS));
-    const evidence = selected.map(({ chunk, score }) => ({
+    const citableSelected: RankedChunk[] = [];
+    for (const entry of selected) {
+      if (await this.metadata.readCitableSource(entry.chunk.path)) citableSelected.push(entry);
+    }
+    const evidence = citableSelected.map(({ chunk, score }) => ({
       content: chunk.content,
       score,
-      source: {
+      source: this.metadata.decorateSource({
         path: chunk.path,
         title: chunk.title,
         type: this.sourceType(chunk.path),
@@ -138,7 +142,7 @@ export class HybridRetrievalService {
         updatedAt: chunk.mtime,
         score,
         trust: this.sourceTrust(chunk.path)
-      }
+      })
     }));
 
     return {
@@ -181,7 +185,8 @@ export class HybridRetrievalService {
       const batch = changed.slice(offset, offset + 16);
       const indexed = await Promise.all(batch.map(async (item) => {
         const markdown = await this.metadata.readFile(item.path);
-        const chunks = this.chunker.chunk(item.path, item.title, markdown).map((chunk) => this.indexChunk(chunk, item.mtime));
+        const safeItem = this.metadata.citableInventoryItem(item);
+        const chunks = this.chunker.chunk(item.path, safeItem.title, markdown).map((chunk) => this.indexChunk(chunk, item.mtime));
         return { item, chunks };
       }));
       for (const { item, chunks } of indexed) {

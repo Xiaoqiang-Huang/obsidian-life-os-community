@@ -1,4 +1,5 @@
-import { App, Component, Modal, Notice, TFile } from "obsidian";
+import { LifeOSModal as Modal } from "../components/LifeOSModal";
+import { App, Component, Notice, TFile } from "obsidian";
 import type { IPlugin } from "../plugin-api";
 import { LIFEOS_MEMORY_CATEGORIES, FileSystemService } from "../services/FileSystemService";
 import { MemoryService } from "../services/MemoryService";

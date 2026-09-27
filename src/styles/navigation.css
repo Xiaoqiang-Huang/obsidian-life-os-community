@@ -1,0 +1,47 @@
+.lifeos-root.lifeos-v3 { width: 100%; min-width: 0; min-height: 100%; padding: 0; margin: 0; }
+.lifeos-v3 .lifeos-shell { display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: stretch; min-height: var(--lifeos-pane-viewport-height, 100%); max-width: 100%; gap: 0; padding: 0; background: none; }
+.lifeos-v3 .lifeos-main { display: flex; flex-direction: column; gap: var(--v3-gap); min-width: 0; max-width: 100%; padding: 24px; margin: 0; overflow: visible; }
+.lifeos-v3 .lifeos-sidebar { display: flex; flex-direction: column; gap: 20px; width: auto; min-width: 0; padding: 20px 12px; border: 0; border-right: 1px solid var(--v3-line); border-radius: 0; box-shadow: none; background: var(--v3-raised); backdrop-filter: none; position: relative; overflow: visible; }
+.lifeos-v3 .lifeos-brand { display: flex; align-items: center; gap: 9px; border: 0; padding: 0 8px; margin: 0; background: none; box-shadow: none; border-radius: 0; }
+.lifeos-v3 .lifeos-brand-icon { display: flex; align-items: center; justify-content: center; background: none; color: var(--v3-accent); width: 24px; height: 32px; border-radius: 0; }
+.lifeos-v3 .lifeos-brand > :last-child { min-width: 0; flex: 1; }
+.lifeos-v3 .lifeos-brand-title { font-size: 18px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lifeos-v3 .lifeos-brand-subtitle { font-size: 11px; color: var(--v3-muted); }
+.lifeos-v3 .lifeos-sidebar-main { flex: 1; padding: 0; overflow: visible; }
+.lifeos-v3 .lifeos-nav { display: flex; flex-direction: column; gap: 24px; }
+.lifeos-v3 .lifeos-nav-section { display: grid; gap: 4px; margin: 0; }
+.lifeos-v3 .lifeos-nav-section-label { font-size: 11px; color: var(--v3-muted); padding: 0 10px 4px; }
+.lifeos-v3 button.lifeos-nav-item { width: 100%; min-height: 38px; justify-content: start; padding: 8px 10px; gap: 10px; background: none; border: 0; border-radius: 6px; color: var(--v3-muted); text-align: start; box-shadow: none; }
+.lifeos-v3 .lifeos-nav-item::before, .lifeos-v3 .lifeos-nav-item::after { content: none; }
+.lifeos-v3 button.lifeos-nav-item.is-active { background: var(--v3-surface); color: var(--v3-ink); box-shadow: 0 1px 3px #0000000a; font-weight: 650; }
+.lifeos-v3 button.lifeos-nav-item:hover { background: var(--v3-surface); color: var(--v3-ink); }
+.lifeos-v3 .lifeos-nav-icon { display: flex; width: 18px; height: 18px; align-items: center; color: inherit; background: none; }
+.lifeos-v3 .lifeos-nav-copy { display: block; min-width: 0; }
+.lifeos-v3 .lifeos-nav-label { display: block; font-size: 13px; color: inherit; overflow: hidden; text-overflow: ellipsis; }
+.lifeos-v3 .lifeos-nav-hint { display: none; }
+.lifeos-v3 .lifeos-sidebar-footer { padding: 0; margin: 0; border: 0; background: none; }
+.lifeos-v3 .lifeos-sidebar-bottom { display: grid; gap: 4px; }
+.lifeos-v3 .lifeos-sidebar-note { border: 0; background: none; padding: 12px 10px 0; margin: 12px 0 0; border-top: 1px solid var(--v3-line); border-radius: 0; }
+.lifeos-v3 .lifeos-sidebar-note-title, .lifeos-v3 .lifeos-sidebar-note-copy { font-size: 11px; color: var(--v3-muted); }
+.lifeos-v3 .lifeos-desktop-more > summary { color: var(--v3-muted); padding: 8px 10px; font-size: 13px; }
+.lifeos-v3 .lifeos-secondary-nav { display: grid; gap: 4px; padding-top: 4px; }
+.lifeos-v3 .lifeos-mobile-nav { display: none; }
+.lifeos-v3 :where(.lifeos-hero, .lifeos-page-header, .lifeos-task-page-header) { display: flex; flex-direction: row; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; padding: 0 0 18px; margin: 0; background: none; border: 0; border-bottom: 1px solid var(--v3-line); border-radius: 0; box-shadow: none; min-height: 0; }
+.lifeos-v3 :where(.lifeos-hero-copy, .lifeos-hero-side) { min-width: 0; }
+.lifeos-v3 :where(.lifeos-hero-title-row) { display: flex; gap: 8px; align-items: center; }
+.lifeos-v3 :where(.lifeos-hero-icon) { display: inline-flex; width: 24px; height: 28px; padding: 0; background: none; color: var(--v3-accent); }
+.lifeos-v3 :where(.lifeos-hero-copy p, .lifeos-page-header p) { margin-top: 6px; font-size: 13px; color: var(--v3-muted); max-width: 62ch; }
+.lifeos-v3 :where(.lifeos-hero-side) { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.lifeos-v3 :where(.lifeos-date-pill) { font-size: 12px; font-weight: 500; background: none; border: 0; box-shadow: none; padding: 0; color: var(--v3-muted); }
+.lifeos-v3 .lifeos-hero-copy { flex: 1 1 260px; display: grid; gap: 4px; }
+.lifeos-v3 .lifeos-hero-side { flex: 0 1 auto; display: flex; gap: 10px; align-items: center; }
+.lifeos-v3 .lifeos-hero-actions { width: auto; flex-direction: row; display: flex; flex-wrap: wrap; }
+.lifeos-v3 .lifeos-page-more { position: relative; }
+.lifeos-v3 .lifeos-page-more > summary { min-height: var(--v3-control); display: flex; align-items: center; padding: 6px 10px; }
+.lifeos-v3 .lifeos-page-more-menu { position: absolute; right: 0; top: 100%; z-index: 40; display: grid; gap: 4px; width: max-content; max-width: min(300px, 80vw); padding: 8px; border: 1px solid var(--v3-line); background: var(--v3-surface); border-radius: 8px; box-shadow: 0 8px 28px #0002; }
+.lifeos-v3 details:not([open]) > :not(summary) { display: none; }
+
+.lifeos-v3 .lifeos-sidebar-main { flex: 0 0 auto; }
+.lifeos-v3 button.lifeos-nav-item.is-active { background: color-mix(in srgb,var(--v3-accent) 15%,var(--v3-surface)); box-shadow: inset 3px 0 var(--v3-accent); font-weight: 750; }
+
+.lifeos-v3 .lifeos-sidebar-bottom { padding: 0; margin: 0; border: 0; }

@@ -1,6 +1,6 @@
 import type { App, TFile } from "obsidian";
-import { ContextSourcePolicyService } from "./ContextSourcePolicyService";
-import type { ContextInventoryItem } from "./types";
+import { ContextSourcePolicyService, prepareCitableMarkdown, type CitableMarkdown } from "./ContextSourcePolicyService";
+import type { ContextInventoryItem, ContextSection, ContextSource } from "./types";
 
 type FileLike = TFile & {
   path: string;
@@ -65,8 +65,9 @@ export class ObsidianMetadataService {
   private readonly app: AppLike;
   private readonly policy: ContextSourcePolicyService;
   private readonly documentCache: Map<string, CachedMarkdownDocument>;
+  private readonly evidenceDecisions = new Map<string, CitableMarkdown>();
 
-  constructor(app: App, rootFolder: string, policy = new ContextSourcePolicyService(rootFolder)) {
+  constructor(app: App, private readonly rootFolder: string, policy = new ContextSourcePolicyService(rootFolder)) {
     this.app = app as unknown as AppLike;
     this.policy = policy;
     const appKey = app as unknown as object;
@@ -88,7 +89,7 @@ export class ObsidianMetadataService {
 
       const parsed = await this.metadataForFile(file);
       if (!parsed) continue;
-      if (!this.policy.isAllowedFrontmatter(parsed.frontmatter)) continue;
+      if (!this.policy.isAllowedFrontmatter(parsed.frontmatter) && !await this.readCitableSource(file.path)) continue;
 
       inventory.push({
         path: file.path,
@@ -114,23 +115,75 @@ export class ObsidianMetadataService {
       const mtime = file.stat?.mtime ?? 0;
       const cached = this.documentCache.get(file.path);
       if (cached && cached.mtime === mtime) {
-        return this.policy.isAllowedFrontmatter(cached.metadata.frontmatter) ? cached.markdown : "";
+        return this.citableText(file.path, cached.markdown);
       }
       const markdown = await this.app.vault.read(file);
       const parsed = this.parseMarkdown(markdown);
       this.documentCache.set(file.path, { mtime, markdown, metadata: parsed });
-      return this.policy.isAllowedFrontmatter(parsed.frontmatter) ? markdown : "";
+      return this.citableText(file.path, markdown);
     } catch {
       return "";
     }
+  }
+
+  private citableText(path: string, markdown: string): string {
+    const decision = prepareCitableMarkdown(path, markdown, { rootFolder: this.rootFolder });
+    this.evidenceDecisions.set(path, decision);
+    return decision.allowed ? decision.markdown : "";
+  }
+
+  /** Revalidate provider/local paths against the actual Vault, never provider metadata. */
+  async readCitableSource(path: string): Promise<CitableMarkdown | null> {
+    const markdown = await this.readFile(path);
+    if (!markdown.trim()) return null;
+    return this.evidenceDecisions.get(path) ?? null;
+  }
+
+  decorateSource(source: ContextSource): ContextSource {
+    return { ...source, evidenceOrigin: this.evidenceDecisions.get(source.path)?.origin ?? "note" };
+  }
+
+  /** Call after readFile: graph/index metadata must not quote headings/tags inside masked chat blocks. */
+  citableInventoryItem(item: ContextInventoryItem): ContextInventoryItem {
+    const decision = this.evidenceDecisions.get(item.path);
+    if (!decision?.allowed) return item;
+    const parsed = this.parseMarkdown(decision.markdown);
+    return { ...item, ...parsed, title: parsed.headings[0] ?? item.path.split("/").pop()!.replace(/\.md$/iu, ""),
+      links: parsed.links.filter(path => this.policy.isAllowedPath(path.endsWith(".md") ? path : `${path}.md`)),
+      backlinks: item.backlinks.filter(path => this.policy.isAllowedPath(path)) };
+  }
+
+  /** Last shared boundary before [S] allocation. Context-only data never acquires a citation. */
+  async prepareSections(sections: ContextSection[]): Promise<ContextSection[]> {
+    const decisions = new Map<string, Promise<CitableMarkdown | null>>();
+    const result: ContextSection[] = [];
+    for (const section of sections) {
+      const path = section.sourceInfo?.path ?? section.source;
+      if (!path || section.kind === "diagnostic" || section.kind === "context" || /^https?:\/\//iu.test(path)) {
+        result.push(section);
+        continue;
+      }
+      if (!this.policy.isAllowedPath(path)) continue;
+      const file = this.app.vault.getAbstractFileByPath?.(path);
+      // Catalogs and synthesized navigation have no document to cite.
+      if (!file) { result.push({ ...section, kind: "context", sourceInfo: undefined }); continue; }
+      if (!decisions.has(path)) decisions.set(path, this.readCitableSource(path));
+      const decision = await decisions.get(path);
+      if (!decision?.allowed) continue;
+      const content = prepareCitableMarkdown(path, section.content, { rootFolder: this.rootFolder });
+      if (!content.allowed) continue;
+      const source = section.sourceInfo ?? { path, title: file.basename ?? path, type: "knowledge" as const };
+      result.push({ ...section, content: content.markdown, sourceInfo: { ...source, evidenceOrigin: decision.origin } });
+    }
+    return result;
   }
 
   async getActiveFile(): Promise<FileLike | null> {
     const file = this.app.workspace?.getActiveFile?.() ?? null;
     if (!file || !this.policy.isAllowedPath(file.path)) return null;
     const metadata = await this.metadataForFile(file);
-    if (!metadata || !this.policy.isAllowedFrontmatter(metadata.frontmatter)) return null;
-    return file;
+    if (!metadata) return null;
+    return await this.readCitableSource(file.path) ? file : null;
   }
 
   private async metadataForFile(file: FileLike): Promise<ParsedMarkdownMetadata | null> {

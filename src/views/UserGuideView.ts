@@ -5,9 +5,10 @@ import { createHeroHeader } from "../components/HeroHeader";
 import { createLifeOSShell } from "../components/LifeOSComponent";
 import { USER_GUIDE_VIEW_TYPE } from "../constants";
 import type PersonalLifeSystemPlugin from "../main";
+import { FirstRunModal } from "../modals/FirstRunModal";
 
 const HIGHLIGHTS = [
-  { label: "万能入口", value: "丢给 AI", copy: "想法、任务、日记、资料、错题、复盘和问题都可以先发给 AI 助手。" },
+  { label: "从小事开始", value: "先记一句", copy: "不需要模型或网络即可记录、找回、打开来源。AI 是可选的整理和执行帮手。" },
   { label: "自动处理", value: "识别 / 拆解 / 归类", copy: "AI 会判断内容该变成任务、日记、知识、记忆还是复盘建议。" },
   { label: "写入权限", value: "你来选择", copy: "默认不写入；可保留预览确认，也可只对当前明确目标启用自动写入。" },
   { label: "本地优先", value: "Markdown", copy: "确认后的内容保存在当前 Vault，便于查看、备份和迁移。" }
@@ -21,7 +22,7 @@ const FEATURE_GROUPS = [
     items: [
       { title: "随手输入", icon: "send", copy: "一句话、长文本、资料链接、今天发生的事、计划和困惑都可以直接发给 AI。" },
       { title: "上下文理解", icon: "scan-text", copy: "AI 会检索相关的日记、任务、记忆、知识库和复盘；回答中的 [S1] 等标记可在“上下文来源”中打开原文核对。" },
-      { title: "统一快捷设置", icon: "sliders-horizontal", copy: "模式、项目、模型、Skill、联网、推理、上下文、AI 回复、记入、白板、长度和风格在一行集中展示；两个及以上选项统一使用下拉框，添加文件紧挨在发送按钮上方。" },
+      { title: "统一快捷设置", icon: "sliders-horizontal", copy: "低频参数收进输入区“会话选项”。历史与来源位于会话头部；更多菜单可打开记忆、Skill 与提示词。手机使用“今天 / AI / 任务 / 更多”，全部功能仍可到达。" },
       { title: "可控联网", icon: "globe-2", copy: "“联网”下拉框默认自动，只在需要最新信息时搜索，也可手动开启或关闭；每个网页都是可单独打开的引用来源。" },
       { title: "划词不打扰", icon: "mouse-pointer-2", copy: "选中文字只显示用途选择，不会自动分析；只有点击 AI 修改或围绕选区提问后才进入完整工具。" },
       { title: "可选中与复制", icon: "copy", copy: "聊天正文可以直接拖选，也可一键复制整条消息；在聊天气泡内选字不会弹出 AI 修改。" },
@@ -36,7 +37,7 @@ const FEATURE_GROUPS = [
     icon: "route",
     copy: "AI 处理后，内容会进入合适的 Life OS 模块，而不是混成一团聊天记录。",
     items: [
-      { title: "任务", icon: "check-square", copy: "可执行事项会被拆成行动清单，完成后自动归档。" },
+      { title: "任务", icon: "check-square", copy: "后台提取先进入候选建议，默认单次 3 条、所有来源每天合计 5 条，可暂停或调整；只有确认后才成为任务。" },
       { title: "日记", icon: "book-open", copy: "当天发生的事、状态和想法可以沉淀到今日日记。" },
       { title: "知识库", icon: "library", copy: "资料、读书笔记、错题和方法论可以整理成可复用知识。" },
       { title: "记忆", icon: "brain", copy: "长期稳定的信息会进入记忆候选，确认后再沉淀。" }
@@ -64,7 +65,7 @@ const WORKFLOWS = [
   {
     title: "最简单用法",
     icon: "sun",
-    steps: ["把原始内容发给 AI 助手", "在执行过程中核对检索和生成状态", "按需预览确认，或对唯一明确目标自动写入", "回到今日行动查看结果"]
+    steps: ["记一句并保存到本地", "根据保存凭证找回刚才的记录", "打开来源核对，或撤销未修改的记录", "需要整理时再配置 AI；不配置也能使用任务和日记"]
   },
   {
     title: "学习 / 备考",
@@ -84,7 +85,7 @@ const WORKFLOWS = [
   {
     title: "微信远程使用",
     icon: "message-circle",
-    steps: ["在设置中开启微信连接并扫码；需要更多 Bot 时继续点击添加微信账号", "首次私聊获取配对码并回到设置批准", "先配置视觉模型再直接发送图片，或用 /skill <名称> <问题> 调用指定 Skill", "用 /lifeos use <项目名> 绑定项目后开始提问", "回复公式会自动转成微信可读普通算式；写入仍按权限确认"]
+    steps: ["保持桌面插件和连接服务在线，在设置中扫码并批准配对", "直接用自然语言提问；明确的项目查询可自动检索，歧义时才澄清", "视觉模型支持多图；换话题不默认沿用旧图片，指代失效会请你重新发送", "需要固定项目时可使用 /lifeos use；Skill 也可按名称明确选择", "写入按共同权限核对；断网或本地服务离线不等于消息已保存，恢复后检查凭证再重试"]
   }
 ];
 
@@ -108,17 +109,19 @@ export class UserGuideView extends ItemView {
     main.addClass("lifeos-guide-view");
 
     createHeroHeader(main, {
+        app: this.app,
       kicker: "使用手册",
-      title: "把任何内容丢给 AI 助手",
-      description: "Life OS 的核心用法是先把想法、任务、日记、资料、错题、复盘和问题交给 AI 助手处理。AI 会帮你识别、拆解和归类；写入默认关闭，你可以选择预览确认，或只对当前唯一明确目标自动写入。",
+      title: "先记录，再推进一件小事",
+      description: "从本地记录开始，需要时再让 AI 找资料、整理或执行。保存结果可核对，自动建议先进入候选，不会直接挤满任务清单。",
       icon: "book-open-check",
       actions: [
-        { label: "问 Life OS", icon: "send", primary: true, onClick: () => void this.plugin.activateChat("我有一段内容想让你帮我处理。") },
+        { label: "体验本地记录", icon: "notebook-pen", primary: true, onClick: () => new FirstRunModal(this.app, this.plugin).open() },
         { label: "打开今日行动", icon: "layout-dashboard", onClick: () => void this.plugin.activateDashboard() }
       ]
     });
 
     this.renderHighlights(main);
+    this.renderMigration(main);
     this.renderFeatureMap(main);
     this.renderWorkflows(main);
     this.renderDataAndPro(main);
@@ -134,11 +137,27 @@ export class UserGuideView extends ItemView {
     }
   }
 
+  private renderMigration(parent: HTMLElement): void {
+    const section = parent.createEl("details", { cls: "lifeos-panel" });
+    section.createEl("summary", { text: "升级后，原来的功能在哪里？" });
+    const list = section.createEl("dl");
+    for (const [oldName, location] of [
+      ["项目上下文", "项目 → 概览 / 任务 / 资料 / AI 会话；更多中保留过程树、交接与提示词。"],
+      ["知识库", "资料库仍使用原文件；任务页项目文档默认收起，计数只对应可打开的文档。"],
+      ["Skill、提示词、记忆", "AI 助手 → 更多 → 能力与模板 / 记忆与偏好，旧命令也保留。"],
+      ["学习打卡、复盘和日历", "日记与回顾，或更多页面入口；打卡项目可自定义，不要求考公。"],
+      ["授权和价格", "设置 → Pro 授权。旧入口、已有权益、价格规则不因布局改版改变。"],
+      ["找不到某个页面", "更多中搜索，或设置 → 产品体验调整固定与隐藏。隐藏不会删除数据，也不代表暂停后台功能。"],
+      ["自动任务变少了", "后台提取先进入任务候选；默认每次 3 条、所有来源每天 5 条。设置中可调整或暂停，不自动删除已有任务。"],
+      ["主题与数据兼容", "保留原主题配置，暖白/冷灰可切换。没有搬动原文件；回退前应备份整个 Vault 和插件配置，不能只覆盖旧 main.js。"]
+    ]) { list.createEl("dt", { text: oldName }); list.createEl("dd", { text: location }); }
+  }
+
   private renderFeatureMap(parent: HTMLElement): void {
     const section = parent.createDiv({ cls: "lifeos-guide-section" });
     const title = section.createDiv({ cls: "lifeos-section-heading" });
-    title.createEl("h2", { text: "AI 助手是总入口" });
-    title.createEl("p", { text: "模块仍然存在，但用户不需要先学习模块。先把内容交给 AI，再由 AI 帮你流向合适的位置。" });
+    title.createEl("h2", { text: "按当前需要选择工具" });
+    title.createEl("p", { text: "今天看重点，任务管行动，项目聚合资料。AI 可协助处理，不是访问本地记录的前提。" });
 
     const grid = section.createDiv({ cls: "lifeos-guide-feature-grid" });
     for (const group of FEATURE_GROUPS) {

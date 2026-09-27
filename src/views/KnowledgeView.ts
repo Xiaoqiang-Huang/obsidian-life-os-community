@@ -1,4 +1,8 @@
-import { App, ItemView, Modal, Notice, TFile, TFolder, WorkspaceLeaf, requestUrl, setIcon, type TAbstractFile } from "obsidian";
+import { ResourceBatchModal } from "../modals/ResourceBatchModal";
+import { LifeOSModal as Modal } from "../components/LifeOSModal";
+import { isManagedKnowledgePath } from "../services/knowledge-document-scope";
+import { readPageSession, savePageSession, savePageScroll, restorePageScroll } from "../utils/page-session-state";
+import { App, ItemView, Notice, TFile, TFolder, WorkspaceLeaf, parseYaml, requestUrl, setIcon, type TAbstractFile } from "obsidian";
 import { createButton } from "../components/Button";
 import { createCard } from "../components/Card";
 import { createEmptyState } from "../components/EmptyState";
@@ -8,6 +12,8 @@ import { createModalShell } from "../components/ModalShell";
 import { KNOWLEDGE_VIEW_TYPE } from "../constants";
 import { requireProFeature } from "../licensing/entitlement";
 import { ImportProjectDocumentsModal } from "../modals/ImportProjectDocumentsModal";
+import { LlmWikiUpdateModal } from "../modals/LlmWikiUpdateModal";
+import { KnowledgeFileActionModal } from "../modals/KnowledgeFileActionModal";
 import type PersonalLifeSystemPlugin from "../main";
 import { DisplayFormatService } from "../services/DisplayFormatService";
 import {
@@ -42,6 +48,8 @@ import {
 } from "../utils/import-file-selection";
 import { renderMarkdownDisplay } from "../utils/markdown-render";
 import { renderStableView } from "../utils/stable-view-refresh";
+import { disposeLifeOSResponsiveShells } from "../utils/responsive-shell";
+import { readVaultSnapshot, throwIfReadAborted, withReadSignal } from "../utils/vault-read-cache";
 import { ensureFile, ensureFolder } from "../utils/vault";
 import { openWritebackPreview, type WritebackItem } from "../writeback-preview";
 
@@ -179,7 +187,13 @@ export class KnowledgeView extends ItemView {
   private renderRequestRevision = 0;
   private preserveScrollOnNextRender = true;
   private vaultRefreshSuppression = 0;
-  private managedKnowledgeDocumentCache = new Map<string, { mtime: number; size: number; document: ManagedKnowledgeDocument }>();
+  private managedKnowledgeDocumentCache = new Map<string, { file: TFile; mtime: number; size: number; document: ManagedKnowledgeDocument }>();
+  private closed = false;
+  private readController: AbortController | null = null;
+  private knowledgeScope = "";
+  private knowledgeQuery = "";
+  private knowledgeCategory = "";
+  private knowledgeVisibleLimit = 30;
 
   constructor(leaf: WorkspaceLeaf, private plugin: PersonalLifeSystemPlugin) {
     super(leaf);
@@ -194,27 +208,45 @@ export class KnowledgeView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
-    await this.render(false);
+    const saved = readPageSession<{ query: string; category: string; limit: number; expanded: string[] }>(this.app.vault, this.plugin.getRoot(), "knowledge");
+    if (saved) { this.knowledgeQuery = saved.query; this.knowledgeCategory = saved.category; this.knowledgeVisibleLimit = saved.limit; this.expandedKnowledgeSections = new Set(saved.expanded); }
+    this.knowledgeScope = JSON.stringify([this.plugin.getRoot(), this.plugin.settings.directoryLanguage]);
+    this.closed = false;
     const refresh = (file: TAbstractFile): void => this.handleVaultFileChange(file);
     this.registerEvent(this.app.vault.on("create", refresh));
     this.registerEvent(this.app.vault.on("modify", refresh));
     this.registerEvent(this.app.vault.on("delete", refresh));
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
-      this.managedKnowledgeDocumentCache.delete(oldPath.replace(/\\/g, "/"));
       this.handleVaultFileChange(file, oldPath);
     }));
+    await this.render(false);
+    restorePageScroll(this.app.vault, this.plugin.getRoot(), "knowledge", this.contentEl, () => !this.closed);
+    if (!this.closed) this.registerDomEvent(this.contentEl, "scroll", () => savePageScroll(this.app.vault, this.plugin.getRoot(), "knowledge", this.contentEl));
   }
 
   async onClose(): Promise<void> {
+    savePageScroll(this.app.vault, this.plugin.getRoot(), "knowledge", this.contentEl);
+    savePageSession(this.app.vault, this.plugin.getRoot(), "knowledge", { query: this.knowledgeQuery, category: this.knowledgeCategory, limit: this.knowledgeVisibleLimit, expanded: [...this.expandedKnowledgeSections] });
+    this.closed = true;
+    this.renderQueued = false;
+    this.readController?.abort();
+    this.managedKnowledgeDocumentCache.clear();
     if (this.refreshTimer !== null) window.clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
     this.renderRequestRevision += 1;
   }
 
   private handleVaultFileChange(file: TAbstractFile, oldPath?: string): void {
-    this.managedKnowledgeDocumentCache.delete(file.path.replace(/\\/g, "/"));
-    if (this.vaultRefreshSuppression > 0) return;
+    for (const path of [file.path, oldPath].filter((path): path is string => Boolean(path))) {
+      const normalized = path.replace(/\\/g, "/").replace(/\/+$/g, "");
+      for (const key of this.managedKnowledgeDocumentCache.keys()) {
+        if (key === normalized || key.startsWith(`${normalized}/`)) this.managedKnowledgeDocumentCache.delete(key);
+      }
+    }
+    if (this.closed || this.vaultRefreshSuppression > 0) return;
     if (this.shouldRefreshForFile(file) || (oldPath ? this.shouldRefreshForFile(oldPath) : false)) {
+      // Invalidate now, not after the debounce: a disk read can settle meanwhile.
+      this.readController?.abort();
       this.scheduleVaultRefresh();
     }
   }
@@ -232,7 +264,7 @@ export class KnowledgeView extends ItemView {
     const fs = new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage);
     const roots = [fs.path("Knowledge"), fs.path("Projects")]
       .map((entry) => entry.replace(/\\/g, "/").replace(/\/+$/g, ""));
-    return roots.some((root) => path === root || path.startsWith(`${root}/`));
+    return roots.some((root) => path === root || path.startsWith(`${root}/`) || root.startsWith(`${path}/`));
   }
 
   private async withVaultRefreshSuppressed<T>(operation: () => Promise<T>): Promise<T> {
@@ -245,6 +277,8 @@ export class KnowledgeView extends ItemView {
   }
 
   private async render(preserveScroll = true): Promise<void> {
+    if (this.closed) return;
+    this.readController?.abort();
     if (this.refreshTimer !== null) {
       window.clearTimeout(this.refreshTimer);
       this.refreshTimer = null;
@@ -255,7 +289,7 @@ export class KnowledgeView extends ItemView {
     if (this.renderPromise) return this.renderPromise;
 
     const run = async (): Promise<void> => {
-      while (this.renderQueued) {
+      while (this.renderQueued && !this.closed) {
         this.renderQueued = false;
         const revision = this.renderRequestRevision;
         const shouldPreserveScroll = this.preserveScrollOnNextRender;
@@ -269,32 +303,89 @@ export class KnowledgeView extends ItemView {
   }
 
   private async renderPass(revision: number, preserveScroll: boolean): Promise<void> {
-    await this.plugin.ensureBaseStructure();
     const container = this.containerEl.children[1] as HTMLElement | undefined;
     if (!container) return;
-    await renderStableView(container, async (staging) => {
-      const main = createLifeOSShell(staging, this.plugin, "knowledge");
-      main.addClass("lifeos-knowledge-main");
+    const controller = new AbortController();
+    const { signal } = controller;
+    this.readController = controller;
+    const isCurrent = (): boolean => revision === this.renderRequestRevision && !signal.aborted && !this.closed;
+    container.setAttr("aria-busy", "true");
+    const retry = container.querySelector<HTMLButtonElement>(".lifeos-knowledge-load-error button");
+    if (retry) retry.disabled = true;
+    try {
       const fs = new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage);
+      const scope = JSON.stringify([this.plugin.getRoot(), this.plugin.settings.directoryLanguage]);
+      if (scope !== this.knowledgeScope) {
+        this.knowledgeScope = scope;
+        this.managedKnowledgeDocumentCache.clear();
+        this.knowledgeQuery = "";
+        this.knowledgeCategory = "";
+        this.knowledgeVisibleLimit = 30;
+      }
+      if (container.querySelector<HTMLElement>(".lifeos-knowledge-main")?.dataset.lifeosKnowledgeScope !== scope) {
+        const staging = container.ownerDocument.createElement("div");
+        const main = createLifeOSShell(staging, this.plugin, "knowledge");
+        main.addClass("lifeos-knowledge-main");
+        main.dataset.lifeosKnowledgeScope = scope;
+        main.createDiv({ cls: "lifeos-panel lifeos-knowledge-loading", text: "正在读取知识文档与整理队列…", attr: { role: "status" } });
+        disposeLifeOSResponsiveShells(container);
+        container.replaceChildren(...Array.from(staging.childNodes));
+      }
+      await withReadSignal(this.withVaultRefreshSuppressed(() => this.plugin.ensureBaseStructure()), signal);
+      throwIfReadAborted(signal);
+      await renderStableView(container, async (staging) => {
+        const main = createLifeOSShell(staging, this.plugin, "knowledge");
+        main.addClass("lifeos-knowledge-main");
+        main.dataset.lifeosKnowledgeScope = scope;
 
-      createHeroHeader(main, {
-        kicker: "知识库",
-        title: "把资料整理成可复用的知识",
-        description: "学习资料、读书笔记和错题知识点都可以先放在这里，再逐步连接到任务和复盘。",
-        icon: "library",
-        actions: [
-          { label: "导入资料", icon: "upload-cloud", primary: true, onClick: () => void this.openKnowledgeImportHub(fs) },
-          { label: "新建知识笔记", icon: "plus", onClick: () => void this.createKnowledgeNote(fs) },
-          { label: "打开知识库目录", icon: "file-text", onClick: () => void this.openIndex(fs) },
-          { label: "AI 批量整理", icon: "sparkles", onClick: () => void this.organizeShortLlmWikiSources() }
-        ]
-      });
+        createHeroHeader(main, {
+        app: this.app,
+          kicker: "知识库",
+          title: "资料库",
+          description: "学习资料、读书笔记和错题知识点都可以先放在这里，再逐步连接到任务和复盘。",
+          icon: "library",
+          actions: [
+            { label: "导入资料", icon: "upload-cloud", primary: true, onClick: () => void this.openKnowledgeImportHub(fs) },
+            { label: "新建知识笔记", icon: "plus", onClick: () => void this.createKnowledgeNote(fs) },
+            { label: "打开知识库目录", icon: "file-text", onClick: () => void this.openIndex(fs) },
+            { label: "AI 批量整理", icon: "sparkles", onClick: () => void this.organizeShortLlmWikiSources() }
+          ]
+        });
 
-      await this.renderKnowledgeWorkspace(main, fs);
-    }, {
-      preserveScroll,
-      isCurrent: () => revision === this.renderRequestRevision
-    });
+        await this.renderKnowledgeWorkspace(main, fs, signal);
+      }, { preserveScroll, isCurrent });
+    } catch (error) {
+      if (!isCurrent()) return;
+      // Stop sibling reads in the failed metadata batch. Never cache a failure
+      // as a successfully read empty document or replace the last good page.
+      controller.abort();
+      this.renderKnowledgeLoadError(container, error);
+    } finally {
+      if (this.readController === controller) {
+        this.readController = null;
+        container.removeAttribute("aria-busy");
+        const button = container.querySelector<HTMLButtonElement>(".lifeos-knowledge-load-error button");
+        if (button) button.disabled = false;
+      }
+    }
+  }
+
+  private renderKnowledgeLoadError(container: HTMLElement, error: unknown): void {
+    let main = container.querySelector<HTMLElement>(".lifeos-knowledge-main");
+    const hadContent = Boolean(main?.querySelector(".lifeos-knowledge-workspace"));
+    if (!main) {
+      main = createLifeOSShell(container, this.plugin, "knowledge");
+      main.addClass("lifeos-knowledge-main");
+    }
+    main.querySelector(".lifeos-knowledge-loading")?.remove();
+    main.querySelector(".lifeos-knowledge-load-error")?.remove();
+    const notice = main.createDiv({ cls: "lifeos-panel lifeos-knowledge-load-error lifeos-knowledge-doc-header", attr: { role: "alert" } });
+    main.prepend(notice);
+    const copy = notice.createDiv({ cls: "lifeos-knowledge-doc-header-copy" });
+    copy.createEl("strong", { text: hadContent ? "知识库更新失败，仍显示上次成功读取的内容" : "知识库暂时无法读取" });
+    copy.createEl("p", { text: `读取失败不会计为零篇，也不会清空或覆盖资料。${error instanceof Error ? error.message : String(error)}` });
+    // Read current settings/scope on retry. Never capture an old FileSystemService.
+    createButton(notice, "重试", () => void this.render(true), { icon: "refresh-cw" });
   }
 
   private async renderLlmWikiPanel(parent: HTMLElement, fs: FileSystemService): Promise<void> {
@@ -760,10 +851,12 @@ export class KnowledgeView extends ItemView {
   private async readLlmWikiSourceForCompile(file: TFile, batchId: string, depth: LlmWikiCompileDepth): Promise<CompileLlmWikiSourceInput> {
     const markdown = await this.app.vault.read(file);
     const frontmatter = this.parseLlmWikiFrontmatter(markdown);
-    const rawContent = stripKeywordLinksSection(this.stripLlmWikiFrontmatter(markdown)).trim();
+    // Preserve source provenance for the compiler's evidence policy; stripping it here loses consent.
+    const rawContent = stripKeywordLinksSection(markdown).trim();
     const policy = this.normalizeLlmWikiSourcePolicy(frontmatter);
     return {
       sourceId: frontmatter.id || file.basename,
+      sourcePath: file.path,
       title: frontmatter.title || file.basename,
       rawContent,
       privacyLevel: policy.privacyLevel,
@@ -885,27 +978,35 @@ export class KnowledgeView extends ItemView {
       .length;
   }
 
-  private async countPendingLlmWikiDraftFiles(fs: FileSystemService): Promise<number> {
-    return (await new LlmWikiQueueService(this.app, fs).listPendingDrafts()).length;
+  private async countPendingLlmWikiDraftFiles(fs: FileSystemService, signal?: AbortSignal): Promise<number> {
+    return (await new LlmWikiQueueService(this.app, fs).listPendingDrafts(undefined, signal)).length;
   }
 
-  private async collectPendingLlmWikiDraftFiles(fs: FileSystemService, limit?: number): Promise<TFile[]> {
-    return new LlmWikiQueueService(this.app, fs).listPendingDrafts(limit);
+  private async collectPendingLlmWikiDraftFiles(fs: FileSystemService, limit?: number, signal?: AbortSignal): Promise<TFile[]> {
+    return new LlmWikiQueueService(this.app, fs).listPendingDrafts(limit, signal);
   }
 
-  private async renderKnowledgeWorkspace(parent: HTMLElement, fs: FileSystemService): Promise<void> {
+  private async renderKnowledgeWorkspace(parent: HTMLElement, fs: FileSystemService, signal?: AbortSignal): Promise<void> {
     const workspace = parent.createDiv({ cls: "lifeos-knowledge-workspace" });
     const primary = workspace.createDiv({ cls: "lifeos-knowledge-primary" });
     const side = workspace.createDiv({ cls: "lifeos-knowledge-side-stack" });
 
-    await this.renderKnowledgeLibrary(primary, fs);
-    await this.renderKnowledgeDocuments(primary, fs);
-    await this.renderRecent(primary, fs);
+    const syncDocumentControls = await this.renderKnowledgeDocuments(primary, fs, signal);
+    const processing = primary.createEl("details", { cls: "lifeos-library-processing" });
+    processing.createEl("summary", { text: "待整理与最近使用" });
+    const processingBody = processing.createDiv();
+    await this.renderKnowledgeLibrary(processingBody, fs, signal);
+    throwIfReadAborted(signal);
+    await this.renderRecent(processingBody, fs, signal);
 
     this.renderKnowledgeImportPanel(side, fs);
     this.renderKnowledgeMapPanel(side, fs);
-    await this.renderKnowledgeReusePanel(side, fs);
-    await this.renderKnowledgeOverview(side, fs);
+    await this.renderKnowledgeReusePanel(side, fs, signal);
+    await this.renderKnowledgeOverview(side, fs, signal);
+    throwIfReadAborted(signal);
+    // The still-mounted page stays interactive during the later reads. Apply
+    // its newest filters/pagination at commit, not the ones from read start.
+    syncDocumentControls();
   }
 
   private renderKnowledgeCategoryGrid(parent: HTMLElement, fs: FileSystemService): void {
@@ -915,7 +1016,7 @@ export class KnowledgeView extends ItemView {
     this.entryCard(entries, fs, "mistakes");
   }
 
-  private async renderKnowledgeOverview(parent: HTMLElement, fs: FileSystemService): Promise<void> {
+  private async renderKnowledgeOverview(parent: HTMLElement, fs: FileSystemService, signal?: AbortSignal): Promise<void> {
     const card = createCard(parent, "lifeos-panel lifeos-knowledge-overview");
     const head = card.createDiv({ cls: "lifeos-card-title" });
     setIcon(head.createSpan(), "layout-dashboard");
@@ -925,7 +1026,7 @@ export class KnowledgeView extends ItemView {
     });
 
     const stats = card.createDiv({ cls: "lifeos-llmwiki-stats lifeos-knowledge-overview-stats" });
-    this.llmWikiStat(stats, "Draft 待确认", await this.countPendingLlmWikiDraftFiles(fs));
+    this.llmWikiStat(stats, "Draft 待确认", await this.countPendingLlmWikiDraftFiles(fs, signal));
     this.llmWikiStat(stats, "Raw 待整理", this.countFiles(fs.path("Knowledge", "LLMWiki", "Raw", "Inbox")));
     this.llmWikiStat(stats, "长资料", this.countLongSources(fs.path("Knowledge", "LLMWiki", "Raw", "Inbox")));
     this.llmWikiStat(stats, "正式知识", this.countFormalWikiFiles(fs));
@@ -952,6 +1053,11 @@ export class KnowledgeView extends ItemView {
     this.importTile(grid, "Web Clipper 收件箱", "抓取网页正文和图片，先进收件箱", "link", () => void this.openKnowledgeImportHub(fs));
     this.importTile(grid, "粘贴文本", "保存片段或读书摘录", "clipboard", () => void this.openNewKnowledgeSourceModal(fs));
     this.importTile(grid, "项目文档", "归入指定项目资料库", "folder-input", () => void this.openKnowledgeImportHub(fs));
+    this.importTile(grid, "项目知识更新", "多来源提案、审核与持久撤销", "git-merge", () => {
+      if (!this.ensureLlmWikiEnabled() || !requireProFeature(this.plugin, "aiWriteback")) return;
+      new LlmWikiUpdateModal(this.app, this.plugin.settings, this.plugin.ai,
+        () => this.ensureLlmWikiEnabled() && requireProFeature(this.plugin, "aiWriteback")).open();
+    });
   }
 
   private importTile(parent: HTMLElement, title: string, description: string, icon: string, onClick: () => void): void {
@@ -968,8 +1074,9 @@ export class KnowledgeView extends ItemView {
     const head = card.createDiv({ cls: "lifeos-card-title" });
     setIcon(head.createSpan(), "map");
     head.createSpan({ text: "知识地图" });
+    card.createEl("p", { cls: "lifeos-muted", text: "以下是 Wiki 与分类子目录的数量，不是全部文档总数。点击分类可查看原文。" });
     const list = card.createDiv({ cls: "lifeos-knowledge-map-list" });
-    this.mapRow(list, "正式知识", String(this.countFormalWikiFiles(fs)), () => void this.openFolderIndex(fs, ["LLMWiki", "Wiki"], "LLM Wiki Wiki", {
+    this.mapRow(list, "Wiki 正式知识", String(this.countFormalWikiFiles(fs)), () => void this.openFolderIndex(fs, ["LLMWiki", "Wiki"], "LLM Wiki Wiki", {
       excludeFolders: ["Drafts", "Batches", "Raw", "Trash"]
     }));
     this.mapRow(list, "学习资料", String(this.countFiles(fs.path("Knowledge", "Materials"))), () => void this.openFolderIndex(fs, "Materials", "学习资料"));
@@ -984,19 +1091,19 @@ export class KnowledgeView extends ItemView {
     row.createSpan({ cls: "lifeos-badge", text: count });
   }
 
-  private async renderKnowledgeReusePanel(parent: HTMLElement, fs: FileSystemService): Promise<void> {
+  private async renderKnowledgeReusePanel(parent: HTMLElement, fs: FileSystemService, signal?: AbortSignal): Promise<void> {
     const card = createCard(parent, "lifeos-panel lifeos-knowledge-reuse-panel");
     const head = card.createDiv({ cls: "lifeos-card-title" });
     setIcon(head.createSpan(), "sparkles");
     head.createSpan({ text: "AI 可复用状态" });
     const stats = card.createDiv({ cls: "lifeos-knowledge-reuse-grid" });
     this.llmWikiStat(stats, "正式知识", this.countFormalWikiFiles(fs));
-    this.llmWikiStat(stats, "待确认", await this.countPendingLlmWikiDraftFiles(fs));
+    this.llmWikiStat(stats, "待确认", await this.countPendingLlmWikiDraftFiles(fs, signal));
     this.llmWikiStat(stats, "Raw", this.countFiles(fs.path("Knowledge", "LLMWiki", "Raw", "Inbox")));
     this.llmWikiStat(stats, "批次", this.countFiles(fs.path("Knowledge", "LLMWiki", "Wiki", "Batches")));
   }
 
-  private async renderKnowledgeLibrary(parent: HTMLElement, fs: FileSystemService): Promise<void> {
+  private async renderKnowledgeLibrary(parent: HTMLElement, fs: FileSystemService, signal?: AbortSignal): Promise<void> {
     const card = createCard(parent, "lifeos-panel lifeos-knowledge-library");
     const head = card.createDiv({ cls: "lifeos-knowledge-library-head" });
     const copy = head.createDiv();
@@ -1010,7 +1117,7 @@ export class KnowledgeView extends ItemView {
     createButton(actions, "导入资料", () => void this.openKnowledgeImportHub(fs), { primary: true, icon: "upload-cloud" });
     createButton(actions, "打开目录", () => void this.openIndex(fs), { icon: "folder-open" });
 
-    const sections = await this.collectKnowledgePipelineSections(fs);
+    const sections = await this.collectKnowledgePipelineSections(fs, signal);
     const totalPending = sections.reduce((sum, section) => sum + section.items.length, 0);
     if (totalPending === 0) {
       createEmptyState(card, {
@@ -1093,9 +1200,9 @@ export class KnowledgeView extends ItemView {
     createButton(rowActions, "打开", () => void this.app.workspace.getLeaf(false).openFile(item.file), { icon: "file-text" });
   }
 
-  private async collectKnowledgePipelineSections(fs: FileSystemService): Promise<KnowledgePipelineSection[]> {
-    const rawItems = await this.collectFilesFromKnowledgeSection(fs, ["Knowledge", "LLMWiki", "Raw", "Inbox"], "raw", "待整理", "资料收件箱，刚保存但还没有整理成草稿。", 20);
-    const draftItems = await this.collectPendingDraftKnowledgeItems(fs, 20);
+  private async collectKnowledgePipelineSections(fs: FileSystemService, signal?: AbortSignal): Promise<KnowledgePipelineSection[]> {
+    const rawItems = await this.collectFilesFromKnowledgeSection(fs, ["Knowledge", "LLMWiki", "Raw", "Inbox"], "raw", "待整理", "资料收件箱，刚保存但还没有整理成草稿。", 20, signal);
+    const draftItems = await this.collectPendingDraftKnowledgeItems(fs, 20, signal);
     const readyRaw = rawItems;
     const reviewItems: KnowledgeLibraryItem[] = [];
     const readyDrafts = draftItems;
@@ -1131,11 +1238,11 @@ export class KnowledgeView extends ItemView {
     ];
   }
 
-  private async collectPendingDraftKnowledgeItems(fs: FileSystemService, limit?: number): Promise<KnowledgeLibraryItem[]> {
+  private async collectPendingDraftKnowledgeItems(fs: FileSystemService, limit?: number, signal?: AbortSignal): Promise<KnowledgeLibraryItem[]> {
     const formatter = new DisplayFormatService();
     const items: KnowledgeLibraryItem[] = [];
-    for (const file of await this.collectPendingLlmWikiDraftFiles(fs, limit)) {
-      const content = await this.app.vault.read(file);
+    for (const file of await this.collectPendingLlmWikiDraftFiles(fs, limit, signal)) {
+      const content = await this.readKnowledgeSnapshot(file.path, signal);
       const blocks = await formatter.formatKnowledgeSnippetForDisplay(content, file.path);
       items.push({
         file,
@@ -1156,7 +1263,8 @@ export class KnowledgeView extends ItemView {
     kind: KnowledgeLibraryKind,
     badge: string,
     subtitle: string,
-    limit?: number
+    limit?: number,
+    signal?: AbortSignal
   ): Promise<KnowledgeLibraryItem[]> {
     const prefix = `${fs.path(...parts).replace(/\\/g, "/").replace(/\/+$/g, "")}/`;
     const formalSeedFiles = new Set([
@@ -1188,7 +1296,7 @@ export class KnowledgeView extends ItemView {
     const formatter = new DisplayFormatService();
     const items: KnowledgeLibraryItem[] = [];
     for (const file of files) {
-      const content = await this.app.vault.read(file);
+      const content = await this.readKnowledgeSnapshot(file.path, signal);
       const requiresReview = false;
       const blocks = await formatter.formatKnowledgeSnippetForDisplay(content, file.path);
       items.push({
@@ -1281,29 +1389,30 @@ export class KnowledgeView extends ItemView {
       .sort((a, b) => b.stat.mtime - a.stat.mtime)[0] ?? null;
   }
 
-  private async renderKnowledgeDocuments(parent: HTMLElement, fs: FileSystemService): Promise<void> {
-    const documents = await this.collectManagedKnowledgeDocuments(fs);
+  private async renderKnowledgeDocuments(parent: HTMLElement, fs: FileSystemService, signal?: AbortSignal): Promise<() => void> {
+    const scope = this.knowledgeScope;
+    const documents = await this.collectManagedKnowledgeDocuments(fs, signal);
+    throwIfReadAborted(signal);
     const card = createCard(parent, "lifeos-panel lifeos-knowledge-doc-manager");
     const header = card.createDiv({ cls: "lifeos-knowledge-doc-header" });
     const headerCopy = header.createDiv({ cls: "lifeos-knowledge-doc-header-copy" });
     const title = headerCopy.createDiv({ cls: "lifeos-card-title" });
     setIcon(title.createSpan(), "files");
-    title.createSpan({ text: "知识文档" });
+    title.createSpan({ text: "资料文档（含项目资料）" });
     const count = title.createSpan({ cls: "lifeos-badge", text: String(documents.length) });
-    headerCopy.createEl("p", { text: "集中查看、搜索和管理已经进入知识库的文档；待整理资料仍保留在上方流水线。" });
+    headerCopy.createEl("p", { text: "统一管理资料库与项目文档，使用同一份文件，不复制内容；可按分类筛选项目资料。" });
     const actions = header.createDiv({ cls: "lifeos-knowledge-doc-actions" });
-    createButton(actions, "新建知识笔记", () => void this.createKnowledgeNote(fs), { primary: true, icon: "plus" });
-    createButton(actions, "导入资料", () => void this.openKnowledgeImportHub(fs), { icon: "upload-cloud" });
     createButton(actions, "打开知识库目录", () => void this.openIndex(fs), { icon: "folder-open" });
+    createButton(actions, "批量管理", () => { if (requireProFeature(this.plugin, "knowledgeManagement")) new ResourceBatchModal(this.app, documents.map(d => d.file), fs.path("Knowledge"), () => void this.render(), path => isManagedKnowledgePath(path, fs)).open(); }, { icon: "list-checks" });
 
     const toolbar = card.createDiv({ cls: "lifeos-knowledge-doc-toolbar" });
     const search = toolbar.createEl("input", {
       cls: "lifeos-knowledge-doc-search",
-      attr: { type: "search", placeholder: "搜索标题、正文、分类或来源", "aria-label": "搜索知识文档" }
+      attr: { type: "search", placeholder: "搜索标题、正文、分类或来源", "aria-label": "搜索知识文档", "data-lifeos-focus-key": "knowledge-search" }
     });
     const category = toolbar.createEl("select", {
       cls: "lifeos-knowledge-doc-category",
-      attr: { "aria-label": "按分类筛选知识文档" }
+      attr: { "aria-label": "按分类筛选知识文档", "data-lifeos-focus-key": "knowledge-category" }
     });
     category.createEl("option", { value: "", text: "全部分类" });
     for (const label of Array.from(new Set(documents.map((document) => document.category))).sort((a, b) => a.localeCompare(b, "zh-CN"))) {
@@ -1312,7 +1421,6 @@ export class KnowledgeView extends ItemView {
 
     const list = card.createDiv({ cls: "lifeos-knowledge-doc-scroll" });
     list.setAttr("data-lifeos-scroll-key", "knowledge-documents");
-    let visibleLimit = 120;
     const renderList = (): void => {
       list.empty();
       const query = search.value.trim().toLocaleLowerCase();
@@ -1334,27 +1442,28 @@ export class KnowledgeView extends ItemView {
         return;
       }
 
-      for (const document of filtered.slice(0, visibleLimit)) {
+      for (const document of filtered.slice(0, this.knowledgeVisibleLimit)) {
         const row = list.createDiv({
           cls: "lifeos-knowledge-doc-item",
           attr: { role: "button", tabindex: "0", "data-lifeos-knowledge-path": document.file.path }
         });
+        row.style.textAlign = "left";
         const copy = row.createDiv({ cls: "lifeos-knowledge-doc-copy" });
         const rowTitle = copy.createDiv({ cls: "lifeos-knowledge-doc-title" });
-        rowTitle.createSpan({ text: document.title });
+        rowTitle.style.justifyContent = "flex-start";
+        rowTitle.createSpan({ text: document.file.name, attr: { title: document.file.path } });
         rowTitle.createSpan({ cls: "lifeos-badge", text: document.category });
         copy.createDiv({ cls: "lifeos-knowledge-doc-excerpt", text: document.snippet || "暂无正文摘要，可打开查看。" });
         const meta = copy.createDiv({ cls: "lifeos-knowledge-doc-meta" });
         meta.createSpan({ text: new Date(document.file.stat.mtime).toLocaleString() });
         if (document.source) meta.createSpan({ text: `来源：${document.source}` });
-        meta.createSpan({ text: document.file.path });
         const rowActions = row.createDiv({ cls: "lifeos-knowledge-doc-item-actions" });
         createButton(rowActions, "打开", () => void this.openManagedKnowledgeFile(document.file), { ghost: true, icon: "external-link" })
-          .setAttr("aria-label", `打开 ${document.title}`);
+          .setAttr("aria-label", `打开 ${document.file.name}`);
         createButton(rowActions, "重命名", () => void this.renameManagedKnowledgeFile(document.file), { ghost: true, icon: "pencil" })
-          .setAttr("aria-label", `重命名 ${document.title}`);
-        createButton(rowActions, "移除", () => void this.trashManagedKnowledgeFile(document.file), { ghost: true, icon: "trash-2" })
-          .setAttr("aria-label", `移除 ${document.title}`);
+          .setAttr("aria-label", `重命名 ${document.file.name}`);
+        createButton(rowActions, "移入回收站", () => void this.trashManagedKnowledgeFile(document.file), { ghost: true, icon: "trash-2" })
+          .setAttr("aria-label", `移入回收站 ${document.file.name}`);
         row.onclick = (event) => {
           if (this.isKnowledgeRowActionEvent(event)) return;
           void this.openManagedKnowledgeFile(document.file);
@@ -1365,26 +1474,37 @@ export class KnowledgeView extends ItemView {
           void this.openManagedKnowledgeFile(document.file);
         };
       }
-      if (filtered.length > visibleLimit) {
+      if (filtered.length > this.knowledgeVisibleLimit) {
         const more = list.createDiv({ cls: "lifeos-knowledge-doc-more" });
-        createButton(more, `再显示 ${Math.min(120, filtered.length - visibleLimit)} 篇`, () => {
-          visibleLimit += 120;
+        createButton(more, `再显示 ${Math.min(30, filtered.length - this.knowledgeVisibleLimit)} 篇`, () => {
+          this.knowledgeVisibleLimit += 30;
           renderList();
         }, { ghost: true, icon: "chevrons-down" });
       }
     };
     search.addEventListener("input", () => {
-      visibleLimit = 120;
+      if (scope !== this.knowledgeScope) return;
+      this.knowledgeQuery = search.value;
+      this.knowledgeVisibleLimit = 30;
       renderList();
     });
     category.addEventListener("change", () => {
-      visibleLimit = 120;
+      if (scope !== this.knowledgeScope) return;
+      this.knowledgeCategory = category.value;
+      this.knowledgeVisibleLimit = 30;
       renderList();
     });
-    renderList();
+    return () => {
+      search.value = this.knowledgeQuery;
+      if (this.knowledgeCategory && !Array.from(category.options).some(option => option.value === this.knowledgeCategory)) {
+        category.createEl("option", { value: this.knowledgeCategory, text: this.knowledgeCategory });
+      }
+      category.value = this.knowledgeCategory;
+      renderList();
+    };
   }
 
-  private async collectManagedKnowledgeDocuments(fs: FileSystemService): Promise<ManagedKnowledgeDocument[]> {
+  private async collectManagedKnowledgeDocuments(fs: FileSystemService, signal?: AbortSignal): Promise<ManagedKnowledgeDocument[]> {
     const knowledgeRoot = fs.path("Knowledge").replace(/\\/g, "/").replace(/\/+$/g, "");
     const excludedRoots = [
       fs.path("Knowledge", "LLMWiki", "Raw"),
@@ -1398,7 +1518,7 @@ export class KnowledgeView extends ItemView {
     const files = this.app.vault.getMarkdownFiles()
       .filter((file) => {
         const path = file.path.replace(/\\/g, "/");
-        if (!path.startsWith(`${knowledgeRoot}/`) || file.basename === "index") return false;
+        if (!isManagedKnowledgePath(path, fs)) return false;
         if (this.removedRecentKnowledgePaths.has(path)) return false;
         return !excludedRoots.some((root) => path === root || path.startsWith(`${root}/`));
       })
@@ -1408,26 +1528,42 @@ export class KnowledgeView extends ItemView {
     // Large knowledge bases previously produced a visible freeze (and, on
     // lower-memory devices, could make the Obsidian webview go black).
     const documents: ManagedKnowledgeDocument[] = [];
+    const paths = new Set(files.map(file => file.path.replace(/\\/g, "/")));
+    for (const path of this.managedKnowledgeDocumentCache.keys()) if (!paths.has(path)) this.managedKnowledgeDocumentCache.delete(path);
     const batchSize = 24;
     for (let offset = 0; offset < files.length; offset += batchSize) {
+      throwIfReadAborted(signal);
       const batch = files.slice(offset, offset + batchSize);
-      documents.push(...await Promise.all(batch.map((file) => this.describeManagedKnowledgeDocument(file, fs))));
+      const described = await Promise.all(batch.map(async file => {
+        const content = await this.readKnowledgeSnapshot(file.path, signal);
+        if (/^---[\s\S]*?\ntype:\s*ai-workspace-session\s*$/imu.test(content)) return null;
+        return this.describeManagedKnowledgeDocument(file, fs, signal);
+      }));
+      documents.push(...described.filter((item): item is ManagedKnowledgeDocument => item !== null));
     }
+    throwIfReadAborted(signal);
     return documents;
   }
 
-  private async describeManagedKnowledgeDocument(file: TFile, fs: FileSystemService): Promise<ManagedKnowledgeDocument> {
+  private async describeManagedKnowledgeDocument(file: TFile, fs: FileSystemService, signal?: AbortSignal): Promise<ManagedKnowledgeDocument> {
+    throwIfReadAborted(signal);
     const normalizedPath = file.path.replace(/\\/g, "/");
     const cached = this.managedKnowledgeDocumentCache.get(normalizedPath);
-    if (cached && cached.mtime === file.stat.mtime && cached.size === file.stat.size) return cached.document;
-
-    let content = "";
-    try {
-      content = await this.app.vault.cachedRead(file);
-    } catch {
-      // Keep the file visible even if a concurrent write temporarily prevents reading it.
+    if (cached && cached.file === file && cached.mtime === file.stat.mtime && cached.size === file.stat.size) {
+      this.managedKnowledgeDocumentCache.delete(normalizedPath);
+      this.managedKnowledgeDocumentCache.set(normalizedPath, cached);
+      return cached.document;
     }
-    const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+    this.managedKnowledgeDocumentCache.delete(normalizedPath);
+    const content = await this.readKnowledgeSnapshot(normalizedPath, signal);
+    throwIfReadAborted(signal);
+    // Parse the same snapshot as the body: Obsidian's metadata index may still
+    // describe the previous revision when its Vault modify event arrives.
+    const yaml = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u)?.[1];
+    let parsed: unknown;
+    try { parsed = yaml === undefined ? undefined : parseYaml(yaml); }
+    catch (error) { throw new Error(`无法解析 ${normalizedPath} 的属性：${error instanceof Error ? error.message : String(error)}`); }
+    const frontmatter = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
     const heading = content.match(/^#\s+(.+)$/mu)?.[1]?.trim();
     const title = String(frontmatter?.title ?? heading ?? file.basename).replace(/^['"]|['"]$/g, "").trim() || file.basename;
     const category = this.managedKnowledgeCategory(file.path, fs);
@@ -1451,11 +1587,31 @@ export class KnowledgeView extends ItemView {
       snippet,
       searchText: `${title}\n${category}\n${source}\n${file.path}\n${content}`.toLocaleLowerCase()
     };
-    this.managedKnowledgeDocumentCache.set(normalizedPath, { mtime: file.stat.mtime, size: file.stat.size, document });
+    // This view cache includes full search text, so bound it independently of
+    // the plugin's raw snapshot cache. Large documents remain searchable but
+    // are not retained here between renders.
+    if (document.searchText.length <= 1024 * 1024) {
+      this.managedKnowledgeDocumentCache.set(normalizedPath, { file, mtime: file.stat.mtime, size: file.stat.size, document });
+      let characters = Array.from(this.managedKnowledgeDocumentCache.values()).reduce((sum, entry) => sum + entry.document.searchText.length, 0);
+      while (this.managedKnowledgeDocumentCache.size > 256 || characters > 4 * 1024 * 1024) {
+        const [key, entry] = this.managedKnowledgeDocumentCache.entries().next().value!;
+        this.managedKnowledgeDocumentCache.delete(key);
+        characters -= entry.document.searchText.length;
+      }
+    }
     return document;
   }
 
+  private async readKnowledgeSnapshot(path: string, signal?: AbortSignal): Promise<string> {
+    try { return await readVaultSnapshot(this.app, path, signal); }
+    catch (error) {
+      throwIfReadAborted(signal);
+      throw new Error(`无法读取 ${path}：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   private managedKnowledgeCategory(path: string, fs: FileSystemService): string {
+    if (path.startsWith(fs.path("Projects") + "/")) return "项目资料";
     const normalized = path.replace(/\\/g, "/");
     for (const kind of ["materials", "books", "mistakes"] as KnowledgeCategoryKind[]) {
       const meta = KNOWLEDGE_CATEGORY_META[kind];
@@ -1467,7 +1623,7 @@ export class KnowledgeView extends ItemView {
     return "知识笔记";
   }
 
-  private async renderRecent(parent: HTMLElement, fs: FileSystemService): Promise<void> {
+  private async renderRecent(parent: HTMLElement, fs: FileSystemService, signal?: AbortSignal): Promise<void> {
     const card = createCard(parent, "lifeos-panel lifeos-knowledge-recent lifeos-knowledge-recent-full");
     const sectionHead = card.createDiv({ cls: "lifeos-knowledge-section-head" });
     const head = sectionHead.createDiv({ cls: "lifeos-card-title" });
@@ -1486,7 +1642,7 @@ export class KnowledgeView extends ItemView {
       .filter((file) => {
         const path = file.path.replace(/\\/g, "/");
         return path.startsWith(prefix)
-          && file.basename !== "index"
+          && isManagedKnowledgePath(path, fs)
           && !this.removedRecentKnowledgePaths.has(path)
           && !this.isUnderAnyNormalizedPrefix(this.normalizeLlmWikiPath(path), excludedPrefixes);
       })
@@ -1509,7 +1665,7 @@ export class KnowledgeView extends ItemView {
     this.renderKnowledgeSectionToggle(sectionActions, "recent", files.length, KNOWLEDGE_RECENT_COLLAPSED_LIMIT);
     const visibleFiles = this.knowledgeVisibleItems("recent", files, KNOWLEDGE_RECENT_COLLAPSED_LIMIT);
     for (const file of visibleFiles) {
-      const content = await this.app.vault.read(file);
+      const content = await this.readKnowledgeSnapshot(file.path, signal);
       const blocks = await new DisplayFormatService().formatKnowledgeSnippetForDisplay(content, file.path);
       const row = card.createDiv({ cls: "lifeos-history-item lifeos-knowledge-row lifeos-knowledge-managed-row" });
       row.setAttr("role", "button");
@@ -1551,16 +1707,36 @@ export class KnowledgeView extends ItemView {
 
   private async renameManagedKnowledgeFile(file: TFile): Promise<void> {
     if (!requireProFeature(this.plugin, "knowledgeManagement")) return;
-    const nextTitle = window.prompt("新的资料标题", file.basename);
-    const trimmed = nextTitle?.trim();
-    if (!trimmed || trimmed === file.basename) return;
+    const oldPath = file.path;
+    const root = this.plugin.getRoot();
+    const language = this.plugin.settings.directoryLanguage;
+    const fs = new FileSystemService(this.app, root, language);
+    const assertSource = (): void => {
+      if (this.closed || root !== this.plugin.getRoot() || language !== this.plugin.settings.directoryLanguage
+        || !(file instanceof TFile) || file.path !== oldPath || this.app.vault.getAbstractFileByPath(oldPath) !== file
+        || file.extension !== "md" || oldPath.split(/[\\/]/u).some(part => !part || part === "." || part === "..")
+        || !isManagedKnowledgePath(oldPath, fs) || this.removedRecentKnowledgePaths.has(oldPath.replace(/\\/g, "/"))) {
+        throw new Error("资料已移动、失效或不在当前知识管理范围，请重新打开列表。");
+      }
+    };
     try {
-      const nextPath = this.uniqueManagedKnowledgeRenamePath(file, trimmed);
-      await this.withVaultRefreshSuppressed(() => this.app.fileManager.renameFile(file, nextPath));
-      this.managedKnowledgeDocumentCache.delete(file.path.replace(/\\/g, "/"));
-      new Notice("资料已重命名。", 4000);
-      await this.render(true);
-      this.focusKnowledgeItem(nextPath);
+      assertSource();
+      new KnowledgeFileActionModal(this.app, file, "rename", async name => {
+        if (!requireProFeature(this.plugin, "knowledgeManagement")) throw new Error("当前无知识管理权限，未修改文件。");
+        assertSource();
+        const trimmed = name.trim().replace(/\.md$/iu, "").trim();
+        if (!trimmed) throw new Error("请输入新文件名。");
+        if (trimmed === file.basename) return;
+        const nextPath = this.uniqueManagedKnowledgeRenamePath(file, trimmed);
+        if (!isManagedKnowledgePath(nextPath, fs)) throw new Error("新文件名属于索引或内部资料，请使用其他名称。");
+        await this.withVaultRefreshSuppressed(() => this.app.fileManager.renameFile(file, nextPath));
+        // renameFile mutates TFile.path in place; evict the captured OLD key.
+        this.managedKnowledgeDocumentCache.delete(oldPath.replace(/\\/g, "/"));
+        this.managedKnowledgeDocumentCache.delete(nextPath.replace(/\\/g, "/"));
+        new Notice("资料已重命名。", 4000);
+        try { await this.render(true); this.focusKnowledgeItem(nextPath); }
+        catch { new Notice("重命名已完成，但列表刷新失败，请重新打开知识库。", 7000); }
+      }).open();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       new Notice(`重命名资料失败：${message}`, 7000);
@@ -1581,15 +1757,31 @@ export class KnowledgeView extends ItemView {
 
   private async trashManagedKnowledgeFile(file: TFile): Promise<void> {
     if (!requireProFeature(this.plugin, "knowledgeManagement")) return;
-    if (!window.confirm(`确认将「${file.basename}」移到 Obsidian 回收站吗？`)) return;
+    const oldPath = file.path;
+    const root = this.plugin.getRoot();
+    const language = this.plugin.settings.directoryLanguage;
+    const fs = new FileSystemService(this.app, root, language);
+    const assertSource = (): void => {
+      if (this.closed || root !== this.plugin.getRoot() || language !== this.plugin.settings.directoryLanguage
+        || !(file instanceof TFile) || file.path !== oldPath || this.app.vault.getAbstractFileByPath(oldPath) !== file
+        || file.extension !== "md" || oldPath.split(/[\\/]/u).some(part => !part || part === "." || part === "..")
+        || !isManagedKnowledgePath(oldPath, fs) || this.removedRecentKnowledgePaths.has(oldPath.replace(/\\/g, "/"))) {
+        throw new Error("资料已移动、失效或不在当前知识管理范围，请重新打开列表。");
+      }
+    };
     try {
-      this.removedRecentKnowledgePaths.add(file.path.replace(/\\/g, "/"));
-      await this.withVaultRefreshSuppressed(() => this.app.vault.trash(file, true));
-      this.managedKnowledgeDocumentCache.delete(file.path.replace(/\\/g, "/"));
-      new Notice("资料已移到 Obsidian 回收站。", 4000);
-      await this.render(true);
+      assertSource();
+      new KnowledgeFileActionModal(this.app, file, "trash", async () => {
+        if (!requireProFeature(this.plugin, "knowledgeManagement")) throw new Error("当前无知识管理权限，未移除文件。");
+        assertSource();
+        await this.withVaultRefreshSuppressed(() => this.app.vault.trash(file, true));
+        this.removedRecentKnowledgePaths.add(oldPath.replace(/\\/g, "/"));
+        this.managedKnowledgeDocumentCache.delete(oldPath.replace(/\\/g, "/"));
+        new Notice("资料已移到 Obsidian 回收站。", 4000);
+        try { await this.render(true); }
+        catch { new Notice("移入回收站已完成，但列表刷新失败，请重新打开知识库。", 7000); }
+      }).open();
     } catch (error) {
-      this.removedRecentKnowledgePaths.delete(file.path.replace(/\\/g, "/"));
       const message = error instanceof Error ? error.message : String(error);
       new Notice(`移除资料失败：${message}`, 7000);
     }

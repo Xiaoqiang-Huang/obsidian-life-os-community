@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.20 - 2026-09-27 (pre-release candidate)
+
+### Added
+
+- Unified Agent sessions and bounded multi-step execution across desktop and selection assistant entry points.
+- Improved PDF/page reading, source evidence, cancellation, request budgets, and resumable task checkpoints.
+- Added device/account authorization client and account-management UI for backends supporting the new account endpoints.
+
+### Changed
+
+- Refined compact navigation, selected-text assistant, document intake, and project/knowledge workflows.
+
+### Validation and limitations
+
+- TypeScript check and production build pass for this frozen community source tree. Generated CSS contract and UI behavior checks pass; isolated Chromium theme/reader matrix passes 228/228 cases. These checks do not replace an Obsidian host acceptance run.
+- The private full-suite harness run against this public export reported 691 pass / 37 fail. The failures include checks for private-only scripts, browser extension, templates and delivery files absent from the public repository. This is not a clean full-suite result, so 0.3.20 is published as a pre-release rather than a stable update.
+- Account sign-in and device management depend on the separately deployed account service. This release does not represent a new production payment-flow verification. Agent experience and user manual implementation plans are not included as shipped functionality.
+
 ## 0.3.19 - 2026-09-06
 
 ### Added

@@ -1,11 +1,13 @@
 import { App, type TFile } from "obsidian";
 import type { LifeOSTask } from "../types";
 import { parseTaskLine } from "../utils/markdown";
-import { ensureFile, ensureFolder, readFile } from "../utils/vault";
+import { TaskWriteDraft, withTaskWrite, waitForTaskWrites, recoverTaskWrites, type TaskWriteReceipt } from "./task-write-coordinator";
+import { dedupTaskLines, parseOpenTasks } from "../tasks/task-actions";
 import { FileSystemService } from "./FileSystemService";
 import { carryoverOpenTasks, completeTaskMarkdown, deleteTaskMarkdown, undoTaskMarkdown } from "./lifeos-logic";
 import { randomId } from "../utils/ids";
 import { formatDate, formatTime } from "../utils/dates";
+import { readVaultSnapshot, throwIfReadAborted } from "../utils/vault-read-cache";
 import {
   appendTaskDeletionMarkers,
   filterSuppressedTaskLines,
@@ -22,6 +24,7 @@ const DELETED_TASK_INDEX_FALLBACK = [
 ].join("\n");
 
 export interface TaskBatchResult {
+  receipt?: TaskWriteReceipt;
   succeeded: number;
   failed: Array<{ task: LifeOSTask; reason: string }>;
 }
@@ -52,26 +55,46 @@ export interface TaskBatchUpdate {
 }
 
 export class TaskService {
-  constructor(private app: App, private fs: FileSystemService) {}
+  constructor(private app: App, private fs: FileSystemService, private transaction?: TaskWriteDraft) {}
 
-  async loadOpenTasks(): Promise<LifeOSTask[]> {
-    return this.readTasks("open.md", "open").then((tasks) => tasks.filter((task) => !task.isDone));
+  private get tx(): TaskWriteDraft {
+    if (!this.transaction) throw new Error("任务写入必须先进入协调层。");
+    return this.transaction;
   }
 
-  async loadDoneTasks(): Promise<LifeOSTask[]> {
-    return this.readTasks("done.md", "done");
+  private async write<T>(operation: string, run: (service: TaskService) => Promise<T>): Promise<T> {
+    const result = await withTaskWrite(this.app, this.fs.path("Tasks"), operation,
+      draft => run(new TaskService(this.app, this.fs, draft)));
+    if (result.value && typeof result.value === "object" && "succeeded" in result.value) {
+      Object.assign(result.value, { receipt: result.receipt });
+    }
+    return result.value;
   }
 
-  async loadAllTasks(): Promise<LifeOSTask[]> {
-    const [open, done] = await Promise.all([this.readTasks("open.md", "open"), this.readTasks("done.md", "done")]);
+  async recoverPendingWrites(signal?: AbortSignal): Promise<void> {
+    await recoverTaskWrites(this.app, this.fs.path("Tasks"), signal);
+  }
+
+  async loadOpenTasks(signal?: AbortSignal): Promise<LifeOSTask[]> {
+    return this.readTasks("open.md", "open", signal).then((tasks) => tasks.filter((task) => !task.isDone));
+  }
+
+  async loadDoneTasks(signal?: AbortSignal): Promise<LifeOSTask[]> {
+    return this.readTasks("done.md", "done", signal);
+  }
+
+  async loadAllTasks(signal?: AbortSignal): Promise<LifeOSTask[]> {
+    const [open, done] = await Promise.all([this.readTasks("open.md", "open", signal), this.readTasks("done.md", "done", signal)]);
     return [...open, ...done];
   }
 
   async completeTask(task: LifeOSTask): Promise<string> {
-    const openFile = await ensureFile(this.app, this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
-    const doneFile = await ensureFile(this.app, this.fs.path("Tasks", "done.md"), DONE_TASKS_FALLBACK);
-    const openContent = await this.app.vault.read(openFile);
-    const doneContent = await this.app.vault.read(doneFile);
+    if (!this.transaction) return this.write("complete-task", service => service.completeTask(task));
+    const openFile = await this.tx.file(this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
+    const doneFile = await this.tx.file(this.fs.path("Tasks", "done.md"), DONE_TASKS_FALLBACK);
+    const openContent = await this.tx.read(openFile);
+    const doneContent = await this.tx.read(doneFile);
+    this.requireCurrentTask(openContent, task.line);
     const result = completeTaskMarkdown(
       openContent,
       doneContent,
@@ -82,36 +105,38 @@ export class TaskService {
       throw new Error("待办已变化或已不存在，请重新查看待办后操作。");
     }
     await this.recordDeletedTaskLines([task.line]);
-    await this.app.vault.modify(openFile, result.openContent);
-    await this.app.vault.modify(doneFile, result.doneContent);
+    await this.tx.modify(openFile, result.openContent);
+    await this.tx.modify(doneFile, result.doneContent);
     return result.doneLine;
   }
 
   async moveTaskToLane(task: LifeOSTask, lane: TaskLane, _activeDate = formatDate()): Promise<string> {
+    if (!this.transaction) return this.write("move-task", service => service.moveTaskToLane(task, lane, _activeDate));
     if (lane === "done") {
       if (task.source === "done" || task.isDone) return task.line;
       return this.completeTask(task);
     }
 
     if (task.source === "open" && !task.isDone) {
-      const openFile = await ensureFile(this.app, this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
-      const lines = (await this.app.vault.read(openFile)).split(/\r?\n/u);
+      const openFile = await this.tx.file(this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
+      const lines = (await this.tx.read(openFile)).split(/\r?\n/u);
       const index = this.findTaskLineIndex(lines, task.line);
       if (index < 0) throw new Error("待办已变化或已不存在，请重新查看待办后操作。");
       const nextLine = this.applyLaneToLine(lines[index], lane);
       if (nextLine !== lines[index]) {
         lines[index] = nextLine;
-        await this.app.vault.modify(openFile, lines.join("\n"));
+        await this.tx.modify(openFile, lines.join("\n"));
       }
       await this.unsuppressTaskLine(nextLine);
       return nextLine;
     }
 
-    const openFile = await ensureFile(this.app, this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
-    const doneFile = await ensureFile(this.app, this.fs.path("Tasks", "done.md"), DONE_TASKS_FALLBACK);
-    const openContent = await this.app.vault.read(openFile);
-    const doneContent = await this.app.vault.read(doneFile);
+    const openFile = await this.tx.file(this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
+    const doneFile = await this.tx.file(this.fs.path("Tasks", "done.md"), DONE_TASKS_FALLBACK);
+    const openContent = await this.tx.read(openFile);
+    const doneContent = await this.tx.read(doneFile);
     const restored = undoTaskMarkdown(openContent, doneContent, task.line);
+    this.requireCurrentTask(doneContent, task.line);
     if (restored.doneContent === doneContent) {
       throw new Error("已完成任务已变化或已不存在，请重新查看待办后操作。");
     }
@@ -120,8 +145,8 @@ export class TaskService {
     if (restoredIndex < 0) throw new Error("任务已恢复，但无法设置目标分组，请重新加载后再试。");
     const nextLine = this.applyLaneToLine(openLines[restoredIndex], lane);
     openLines[restoredIndex] = nextLine;
-    await this.app.vault.modify(openFile, openLines.join("\n"));
-    await this.app.vault.modify(doneFile, restored.doneContent);
+    await this.tx.modify(openFile, openLines.join("\n"));
+    await this.tx.modify(doneFile, restored.doneContent);
     await this.unsuppressTaskLine(nextLine);
     return nextLine;
   }
@@ -135,9 +160,10 @@ export class TaskService {
     source?: string;
     note?: string;
   }): Promise<string> {
+    if (!this.transaction) return this.write("create-task", service => service.createTask(data));
     const title = data.title.trim();
     if (!title) throw new Error("任务标题不能为空");
-    const file = await ensureFile(this.app, this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
+    const file = await this.tx.file(this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
     const tags = ["#pls/task"];
     if (data.category?.trim()) tags.push(`#${data.category.trim().replace(/\s+/g, "-")}`);
     if (data.priority?.trim() && data.priority.trim() !== "普通") tags.push(`#priority/${data.priority.trim()}`);
@@ -146,7 +172,7 @@ export class TaskService {
     const source = data.source?.trim() ? ` source:${data.source.trim()}` : "";
     const note = data.note?.trim() ? `\n  - note: ${data.note.trim().replace(/\r?\n/g, " ")}` : "";
     const line = `- [ ] ${title} ${tags.join(" ")}${project}${due}${source} ^${randomId("task")}${note}\n`;
-    await this.app.vault.append(file, line);
+    await this.tx.append(file, line);
     await this.unsuppressTaskLine(line);
     return line;
   }
@@ -162,10 +188,11 @@ export class TaskService {
     task: LifeOSTask,
     data: { title: string; dueDate?: string }
   ): Promise<string> {
+    if (!this.transaction) return this.write("update-task", service => service.updateTask(task, data));
     const title = data.title.trim();
     if (!title) throw new Error("任务标题不能为空");
     const file = await this.taskFile(task.source);
-    const content = await this.app.vault.read(file);
+    const content = await this.tx.read(file);
     const lines = content.split(/\r?\n/u);
     const index = this.findTaskLineIndex(lines, task.line);
     if (index < 0) throw new Error("待办已变化或已不存在，请重新查看待办后操作。");
@@ -186,7 +213,7 @@ export class TaskService {
     const nextLine = `- [${checkbox}] ${title}${metadata ? ` ${metadata}` : ""}${due}${blockId ? ` ${blockId}` : ""}`;
     lines[index] = nextLine;
     await this.recordDeletedTaskLines([sourceLine]);
-    await this.app.vault.modify(file, lines.join("\n"));
+    await this.tx.modify(file, lines.join("\n"));
     await this.unsuppressTaskLine(nextLine);
     return nextLine;
   }
@@ -196,44 +223,63 @@ export class TaskService {
   }
 
   async deleteTask(task: LifeOSTask): Promise<void> {
+    if (!this.transaction) return this.write("delete-task", service => service.deleteTask(task));
     const file = await this.taskFile(task.source);
-    const content = await this.app.vault.read(file);
+    const content = await this.tx.read(file);
+    this.requireCurrentTask(content, task.line);
     const result = deleteTaskMarkdown(content, task.line);
     if (!result.removed) throw new Error("待办已变化或已不存在，请重新查看待办后操作。");
     await this.recordDeletedTaskLines([task.line]);
-    await this.app.vault.modify(file, result.content);
+    await this.tx.modify(file, result.content);
   }
 
   async undoCompleteTask(originalOpenLine: string): Promise<void> {
-    const openFile = await ensureFile(this.app, this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
-    const doneFile = await ensureFile(this.app, this.fs.path("Tasks", "done.md"), DONE_TASKS_FALLBACK);
-    const openContent = await this.app.vault.read(openFile);
-    const doneContent = await this.app.vault.read(doneFile);
+    if (!this.transaction) return this.write("undo-completion", service => service.undoCompleteTask(originalOpenLine));
+    const openFile = await this.tx.file(this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
+    const doneFile = await this.tx.file(this.fs.path("Tasks", "done.md"), DONE_TASKS_FALLBACK);
+    const openContent = await this.tx.read(openFile);
+    const doneContent = await this.tx.read(doneFile);
+    // The toast holds the pre-completion line, while the completed card holds
+    // the done line. Only checkbox/date changes are implicit in an undo; a
+    // changed title or metadata needs a fresh user decision.
+    const normalizeUndoLine = (line: string) => line.trim()
+      .replace(/^-\s*\[[ xX]\]/u, "- [ ]")
+      .replace(/\s*✅\s*20\d{2}-\d{2}-\d{2}/gu, "")
+      .replace(/\s+/gu, " ");
+    const completedLines = doneContent.split(/\r?\n/u).filter(line =>
+      /^-\s*\[[xX]\]/u.test(line.trim()) && normalizeUndoLine(line) === normalizeUndoLine(originalOpenLine));
+    if (completedLines.length !== 1) throw new Error("已完成任务已变化或已不存在，请重新查看后恢复。");
+    this.requireCurrentTask(doneContent, completedLines[0]);
     const result = undoTaskMarkdown(
       openContent,
       doneContent,
-      originalOpenLine
+      completedLines[0]
     );
     if (result.doneContent === doneContent) {
       throw new Error("已完成任务已变化或已不存在，请重新查看待办后操作。");
     }
-    await this.app.vault.modify(openFile, result.openContent);
-    await this.app.vault.modify(doneFile, result.doneContent);
+    await this.tx.modify(openFile, result.openContent);
+    await this.tx.modify(doneFile, result.doneContent);
     await this.unsuppressTaskLine(result.openLine);
   }
 
   async batchCompleteTasks(tasks: LifeOSTask[]): Promise<TaskBatchResult> {
+    if (!this.transaction) return this.write("batch-complete", service => service.batchCompleteTasks(tasks));
     const selected = this.uniqueTasks(tasks).filter((task) => task.source === "open" && !task.isDone);
     if (selected.length === 0) return { succeeded: 0, failed: [] };
-    const openFile = await ensureFile(this.app, this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
-    const doneFile = await ensureFile(this.app, this.fs.path("Tasks", "done.md"), DONE_TASKS_FALLBACK);
-    let openContent = await this.app.vault.read(openFile);
-    let doneContent = await this.app.vault.read(doneFile);
+    const openFile = await this.tx.file(this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
+    const doneFile = await this.tx.file(this.fs.path("Tasks", "done.md"), DONE_TASKS_FALLBACK);
+    let openContent = await this.tx.read(openFile);
+    let doneContent = await this.tx.read(doneFile);
     const failed: TaskBatchResult["failed"] = [];
     const completedLines: string[] = [];
     let succeeded = 0;
     const completedAt = `${formatDate()} ${formatTime()}`;
     for (const task of selected) {
+      if (this.findTaskLineIndex(openContent.split(/\r?\n/u), task.line) < 0) {
+        failed.push({ task, reason: "任务已变化或已不存在" });
+        continue;
+      }
       const result = completeTaskMarkdown(openContent, doneContent, task.line, completedAt);
       if (result.openContent === openContent) {
         failed.push({ task, reason: "任务已变化或已不存在" });
@@ -246,23 +292,28 @@ export class TaskService {
     }
     if (succeeded > 0) {
       await this.recordDeletedTaskLines(completedLines);
-      await this.app.vault.modify(openFile, openContent);
-      await this.app.vault.modify(doneFile, doneContent);
+      await this.tx.modify(openFile, openContent);
+      await this.tx.modify(doneFile, doneContent);
     }
     return { succeeded, failed };
   }
 
   async batchRestoreTasks(tasks: LifeOSTask[]): Promise<TaskBatchResult> {
+    if (!this.transaction) return this.write("batch-restore", service => service.batchRestoreTasks(tasks));
     const selected = this.uniqueTasks(tasks).filter((task) => task.source === "done" || task.isDone);
     if (selected.length === 0) return { succeeded: 0, failed: [] };
-    const openFile = await ensureFile(this.app, this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
-    const doneFile = await ensureFile(this.app, this.fs.path("Tasks", "done.md"), DONE_TASKS_FALLBACK);
-    let openContent = await this.app.vault.read(openFile);
-    let doneContent = await this.app.vault.read(doneFile);
+    const openFile = await this.tx.file(this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
+    const doneFile = await this.tx.file(this.fs.path("Tasks", "done.md"), DONE_TASKS_FALLBACK);
+    let openContent = await this.tx.read(openFile);
+    let doneContent = await this.tx.read(doneFile);
     const failed: TaskBatchResult["failed"] = [];
     const restoredLines: string[] = [];
     let succeeded = 0;
     for (const task of selected) {
+      if (this.findTaskLineIndex(doneContent.split(/\r?\n/u), task.line) < 0) {
+        failed.push({ task, reason: "任务已变化或已不存在" });
+        continue;
+      }
       const removable = deleteTaskMarkdown(doneContent, task.line);
       if (!removable.removed) {
         failed.push({ task, reason: "任务已变化或已不存在" });
@@ -275,20 +326,21 @@ export class TaskService {
       succeeded += 1;
     }
     if (succeeded > 0) {
-      await this.app.vault.modify(openFile, openContent);
-      await this.app.vault.modify(doneFile, doneContent);
+      await this.tx.modify(openFile, openContent);
+      await this.tx.modify(doneFile, doneContent);
       await this.unsuppressTaskLines(restoredLines);
     }
     return { succeeded, failed };
   }
 
   async batchDeleteTasks(tasks: LifeOSTask[]): Promise<TaskBatchResult> {
+    if (!this.transaction) return this.write("batch-delete", service => service.batchDeleteTasks(tasks));
     const selected = this.uniqueTasks(tasks);
     if (selected.length === 0) return { succeeded: 0, failed: [] };
-    const openFile = await ensureFile(this.app, this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
-    const doneFile = await ensureFile(this.app, this.fs.path("Tasks", "done.md"), DONE_TASKS_FALLBACK);
-    let openContent = await this.app.vault.read(openFile);
-    let doneContent = await this.app.vault.read(doneFile);
+    const openFile = await this.tx.file(this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
+    const doneFile = await this.tx.file(this.fs.path("Tasks", "done.md"), DONE_TASKS_FALLBACK);
+    let openContent = await this.tx.read(openFile);
+    let doneContent = await this.tx.read(doneFile);
     const failed: TaskBatchResult["failed"] = [];
     const deletedLines: string[] = [];
     let succeeded = 0;
@@ -296,6 +348,10 @@ export class TaskService {
     let doneChanged = false;
     for (const task of selected) {
       const current = task.source === "done" ? doneContent : openContent;
+      if (this.findTaskLineIndex(current.split(/\r?\n/u), task.line) < 0) {
+        failed.push({ task, reason: "任务已变化或已不存在" });
+        continue;
+      }
       const result = deleteTaskMarkdown(current, task.line);
       if (!result.removed) {
         failed.push({ task, reason: "任务已变化或已不存在" });
@@ -313,8 +369,8 @@ export class TaskService {
     }
     if (succeeded > 0) {
       await this.recordDeletedTaskLines(deletedLines);
-      if (openChanged) await this.app.vault.modify(openFile, openContent);
-      if (doneChanged) await this.app.vault.modify(doneFile, doneContent);
+      if (openChanged) await this.tx.modify(openFile, openContent);
+      if (doneChanged) await this.tx.modify(doneFile, doneContent);
     }
     return { succeeded, failed };
   }
@@ -325,9 +381,10 @@ export class TaskService {
    * to done.md because that would falsify completion history.
    */
   async archiveAndClearOpenTasks(): Promise<TaskArchiveClearResult> {
+    if (!this.transaction) return this.write("archive-open", service => service.archiveAndClearOpenTasks());
     const openPath = this.fs.path("Tasks", "open.md");
-    const openFile = await ensureFile(this.app, openPath, OPEN_TASKS_FALLBACK);
-    const original = await this.app.vault.read(openFile);
+    const openFile = await this.tx.file(openPath, OPEN_TASKS_FALLBACK);
+    const original = await this.tx.read(openFile);
     const unfinished = original
       .split(/\r?\n/u)
       .map((line) => parseTaskLine(line, "open"))
@@ -335,31 +392,26 @@ export class TaskService {
     if (unfinished.length === 0) return { cleared: 0, openPath, backupPath: "" };
 
     const archiveFolder = this.fs.path("Tasks", "archive");
-    await ensureFolder(this.app, archiveFolder);
     const stamp = `${formatDate()}-${formatTime().replace(/[^0-9]/gu, "") || "0000"}`;
     let backupPath = `${archiveFolder}/open-backup-${stamp}.md`;
     let suffix = 2;
-    while (this.app.vault.getAbstractFileByPath(backupPath)) {
+    while (this.tx.exists(backupPath)) {
       backupPath = `${archiveFolder}/open-backup-${stamp}-${suffix}.md`;
       suffix += 1;
     }
 
-    await this.app.vault.create(backupPath, original);
-    try {
-      await this.recordDeletedTaskLines(unfinished.map((task) => task.line));
-      await this.app.vault.modify(openFile, OPEN_TASKS_FALLBACK);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`任务备份已保存到 ${backupPath}，但清空 open.md 失败：${message}`);
-    }
+    await this.tx.create(backupPath, original);
+    await this.recordDeletedTaskLines(unfinished.map((task) => task.line));
+    await this.tx.modify(openFile, OPEN_TASKS_FALLBACK);
     return { cleared: unfinished.length, openPath, backupPath };
   }
 
   /** Preserve the exact completed-task history before clearing the visible archive. */
   async archiveAndClearDoneTasks(): Promise<CompletedTaskArchiveClearResult> {
+    if (!this.transaction) return this.write("archive-done", service => service.archiveAndClearDoneTasks());
     const donePath = this.fs.path("Tasks", "done.md");
-    const doneFile = await ensureFile(this.app, donePath, DONE_TASKS_FALLBACK);
-    const original = await this.app.vault.read(doneFile);
+    const doneFile = await this.tx.file(donePath, DONE_TASKS_FALLBACK);
+    const original = await this.tx.read(doneFile);
     const completed = original
       .split(/\r?\n/u)
       .map((line) => parseTaskLine(line, "done"))
@@ -367,22 +419,16 @@ export class TaskService {
     if (completed.length === 0) return { cleared: 0, donePath, backupPath: "" };
 
     const archiveFolder = this.fs.path("Tasks", "archive");
-    await ensureFolder(this.app, archiveFolder);
     const stamp = `${formatDate()}-${formatTime().replace(/[^0-9]/gu, "") || "0000"}`;
     let backupPath = `${archiveFolder}/done-backup-${stamp}.md`;
     let suffix = 2;
-    while (this.app.vault.getAbstractFileByPath(backupPath)) {
+    while (this.tx.exists(backupPath)) {
       backupPath = `${archiveFolder}/done-backup-${stamp}-${suffix}.md`;
       suffix += 1;
     }
 
-    await this.app.vault.create(backupPath, original);
-    try {
-      await this.app.vault.modify(doneFile, DONE_TASKS_FALLBACK);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`已完成任务备份已保存到 ${backupPath}，但清空 done.md 失败：${message}`);
-    }
+    await this.tx.create(backupPath, original);
+    await this.tx.modify(doneFile, DONE_TASKS_FALLBACK);
     return { cleared: completed.length, donePath, backupPath };
   }
 
@@ -392,20 +438,38 @@ export class TaskService {
    */
   async filterSuppressedAutomaticTaskLines(taskLines: string[]): Promise<string[]> {
     if (taskLines.length === 0) return [];
-    const ledgerFile = this.app.vault.getAbstractFileByPath(this.deletedTaskIndexPath());
-    if (!ledgerFile || !ledgerFile.path.endsWith(".md")) return [...taskLines];
-    const content = await this.app.vault.read(ledgerFile as TFile);
-    return filterSuppressedTaskLines(taskLines, content);
+    const path = this.deletedTaskIndexPath();
+    if (this.transaction) {
+      if (!this.tx.exists(path)) return [...taskLines];
+      return filterSuppressedTaskLines(taskLines, await this.tx.read(await this.tx.file(path)));
+    }
+    await waitForTaskWrites(this.app, this.fs.path("Tasks"));
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!file || !file.path.endsWith(".md")) return [...taskLines];
+    return filterSuppressedTaskLines(taskLines, await this.app.vault.read(file as TFile));
+  }
+
+  /** Re-check deletion and duplicate state INSIDE the writer lock at delivery. */
+  async appendAutomaticTasks(taskLines: string[], heading = "", limit = taskLines.length): Promise<string[]> {
+    if (!this.transaction) return this.write("automatic-tasks", service => service.appendAutomaticTasks(taskLines, heading, limit));
+    const candidates = taskLines.filter(line => !!parseTaskLine(line, "open") && !parseTaskLine(line, "open")!.isDone);
+    const file = await this.tx.file(this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
+    const eligible = await this.filterSuppressedAutomaticTaskLines(candidates);
+    const additions = dedupTaskLines(eligible, parseOpenTasks(await this.tx.read(file)))
+      .slice(0, Math.max(0, Math.floor(Number.isFinite(limit) ? limit : 0)));
+    if (additions.length) await this.tx.append(file, "\n" + (heading ? heading + "\n\n" : "") + additions.join("\n") + "\n");
+    return additions;
   }
 
   async batchUpdateTasks(tasks: LifeOSTask[], update: TaskBatchUpdate): Promise<TaskBatchResult> {
+    if (!this.transaction) return this.write("batch-update", service => service.batchUpdateTasks(tasks, update));
     const selected = this.uniqueTasks(tasks);
     if (selected.length === 0) return { succeeded: 0, failed: [] };
 
-    const openFile = await ensureFile(this.app, this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
-    const doneFile = await ensureFile(this.app, this.fs.path("Tasks", "done.md"), DONE_TASKS_FALLBACK);
-    const openLines = (await this.app.vault.read(openFile)).split(/\r?\n/u);
-    const doneLines = (await this.app.vault.read(doneFile)).split(/\r?\n/u);
+    const openFile = await this.tx.file(this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
+    const doneFile = await this.tx.file(this.fs.path("Tasks", "done.md"), DONE_TASKS_FALLBACK);
+    const openLines = (await this.tx.read(openFile)).split(/\r?\n/u);
+    const doneLines = (await this.tx.read(doneFile)).split(/\r?\n/u);
     const failed: TaskBatchResult["failed"] = [];
     let succeeded = 0;
     let openChanged = false;
@@ -429,24 +493,29 @@ export class TaskService {
       }
     }
 
-    if (openChanged) await this.app.vault.modify(openFile, openLines.join("\n"));
-    if (doneChanged) await this.app.vault.modify(doneFile, doneLines.join("\n"));
+    if (openChanged) await this.tx.modify(openFile, openLines.join("\n"));
+    if (doneChanged) await this.tx.modify(doneFile, doneLines.join("\n"));
     return { succeeded, failed };
   }
 
   async carryoverToTomorrow(today: string, tomorrow: string): Promise<number> {
-    const openFile = await ensureFile(this.app, this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
-    const result = carryoverOpenTasks(await this.app.vault.read(openFile), today, tomorrow);
+    if (!this.transaction) return this.write("carryover", service => service.carryoverToTomorrow(today, tomorrow));
+    const openFile = await this.tx.file(this.fs.path("Tasks", "open.md"), OPEN_TASKS_FALLBACK);
+    const result = carryoverOpenTasks(await this.tx.read(openFile), today, tomorrow);
     if (result.count > 0) {
-      await this.app.vault.modify(openFile, result.content);
+      await this.tx.modify(openFile, result.content);
     }
     return result.count;
   }
 
-  private async readTasks(fileName: "open.md" | "done.md", source: "open" | "done"): Promise<LifeOSTask[]> {
+  private async readTasks(fileName: "open.md" | "done.md", source: "open" | "done", signal?: AbortSignal): Promise<LifeOSTask[]> {
+    throwIfReadAborted(signal);
     const path = this.fs.path("Tasks", fileName);
-    await ensureFile(this.app, path, fileName === "open.md" ? OPEN_TASKS_FALLBACK : DONE_TASKS_FALLBACK);
-    const content = await readFile(this.app, path);
+    await waitForTaskWrites(this.app, this.fs.path("Tasks"));
+    throwIfReadAborted(signal);
+    if (!this.app.vault.getAbstractFileByPath(path)) return [];
+    const content = await readVaultSnapshot(this.app, path, signal);
+    throwIfReadAborted(signal);
     return content
       .split(/\r?\n/)
       .map((line) => parseTaskLine(line, source))
@@ -454,8 +523,7 @@ export class TaskService {
   }
 
   private async taskFile(source: LifeOSTask["source"]) {
-    return ensureFile(
-      this.app,
+    return this.tx.file(
       this.fs.path("Tasks", source === "done" ? "done.md" : "open.md"),
       source === "done" ? DONE_TASKS_FALLBACK : OPEN_TASKS_FALLBACK
     );
@@ -467,13 +535,11 @@ export class TaskService {
 
   private async recordDeletedTaskLines(taskLines: string[]): Promise<void> {
     if (taskLines.length === 0) return;
-    const archiveFolder = this.fs.path("Tasks", "archive");
-    await ensureFolder(this.app, archiveFolder);
-    const ledgerFile = await ensureFile(this.app, this.deletedTaskIndexPath(), DELETED_TASK_INDEX_FALLBACK);
-    const current = await this.app.vault.read(ledgerFile);
+    const ledgerFile = await this.tx.file(this.deletedTaskIndexPath(), DELETED_TASK_INDEX_FALLBACK);
+    const current = await this.tx.read(ledgerFile);
     const next = appendTaskDeletionMarkers(current, taskLines);
     if (next.added > 0) {
-      await this.app.vault.append(ledgerFile, next.content.slice(current.length));
+      await this.tx.append(ledgerFile, next.content.slice(current.length));
     }
   }
 
@@ -483,9 +549,9 @@ export class TaskService {
 
   private async unsuppressTaskLines(taskLines: string[]): Promise<void> {
     if (taskLines.length === 0) return;
-    const ledgerFile = this.app.vault.getAbstractFileByPath(this.deletedTaskIndexPath());
-    if (!ledgerFile || !ledgerFile.path.endsWith(".md")) return;
-    const current = await this.app.vault.read(ledgerFile as TFile);
+    if (!this.tx.exists(this.deletedTaskIndexPath())) return;
+    const ledgerFile = await this.tx.file(this.deletedTaskIndexPath());
+    const current = await this.tx.read(ledgerFile);
     let content = current;
     let removed = false;
     for (const taskLine of taskLines) {
@@ -494,16 +560,22 @@ export class TaskService {
       removed = removed || next.removed;
     }
     if (removed) {
-      await this.app.vault.modify(ledgerFile as TFile, content);
+      await this.tx.modify(ledgerFile, content);
     }
   }
 
   private findTaskLineIndex(lines: string[], taskLine: string): number {
-    const targetId = taskLine.match(/\^([A-Za-z0-9_-]+)/u)?.[1];
-    return lines.findIndex((line) => {
-      if (targetId) return line.match(/\^([A-Za-z0-9_-]+)/u)?.[1] === targetId;
-      return line.trim() === taskLine.trim();
-    });
+    const matches = lines.map((line, index) => line.trim() === taskLine.trim() ? index : -1).filter(index => index >= 0);
+    if (matches.length !== 1) return -1;
+    const blockId = taskLine.trim().match(/\^([^\s]+)$/u)?.[1];
+    if (blockId && lines.filter(line => line.trim().match(/\^([^\s]+)$/u)?.[1] === blockId).length !== 1) return -1;
+    return matches[0];
+  }
+
+  private requireCurrentTask(content: string, taskLine: string): void {
+    if (this.findTaskLineIndex(content.split(/\r?\n/u), taskLine) < 0) {
+      throw new Error("待办已变化或已不存在，请重新查看待办后操作。");
+    }
   }
 
   private uniqueTasks(tasks: LifeOSTask[]): LifeOSTask[] {

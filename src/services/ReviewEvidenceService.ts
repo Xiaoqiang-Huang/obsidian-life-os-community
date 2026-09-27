@@ -3,6 +3,7 @@ import type { PersonalLifeSystemSettings } from "../settings";
 import { readFile } from "../utils/vault";
 import { DailyNoteService } from "./DailyNoteService";
 import type { FileSystemService } from "./FileSystemService";
+import { prepareCitableMarkdown, USER_SAVED_CONVERSATION_LABEL } from "./context-engine/ContextSourcePolicyService";
 
 export type ReviewEvidenceKind = "daily" | "weekly" | "monthly" | "custom";
 export type ReviewEvidenceTrust = "user-authored" | "confirmed-ai" | "verified-record" | "current-state";
@@ -172,6 +173,8 @@ export class ReviewEvidenceService {
       .filter((file) => file.basename >= window.start && file.basename <= window.end);
     const sources = await Promise.all(dailyNotes.map(async (file) => {
       const content = await this.app.vault.read(file);
+      const dateField = content.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u)?.[1].match(/^date:\s*["']?(\d{4}-\d{2}-\d{2})/mu)?.[1];
+      if (dateField && dateField !== file.basename) throw new Error(`日志日期冲突：${file.path} 的日期属性为 ${dateField}，请核对后重试。`);
       return {
         date: file.basename,
         path: file.path,
@@ -279,7 +282,8 @@ export class ReviewEvidenceService {
         date,
         text,
         sourceNodeIds,
-        sourcePath: String(session?.notePath ?? this.fs.path("Projects", "AIWorkspace", "index.json")),
+        // Cite the explicitly confirmed fact record, not the entire automatically saved chat.
+        sourcePath: this.fs.path("Projects", "AIWorkspace", "index.json"),
         status,
         updatedAt: String(rawFact.updatedAt ?? rawFact.confirmedAt ?? rawFact.createdAt ?? "")
       }];
@@ -310,9 +314,9 @@ export class ReviewEvidenceService {
         type: "project-activity",
         trust: "confirmed-ai",
         date: activity.date,
-        text: activity.text,
+        text: `用户确认保存的会话提要（非独立原始事实）：${activity.text}`,
         sourcePath: activity.sourcePath,
-        sourceRef: `${activity.date} / ${activity.sessionTitle}${activity.sourceNodeIds.length ? ` / ${activity.sourceNodeIds.join(",")}` : ""}`,
+        sourceRef: `${activity.date} / 已确认提要 ${activity.id}`,
         sourceNodeIds: activity.sourceNodeIds
       }));
     }
@@ -378,14 +382,17 @@ export class ReviewEvidenceService {
   }
 }
 
+export function stripManagedReviewDailyBlocks(content: string): string {
+  for (const pattern of MANAGED_DAILY_BLOCKS) content = content.replace(pattern, "");
+  return content;
+}
+
 export function cleanReviewDailyContent(content: string): string {
-  let clean = content.replace(/^---\s*\n[\s\S]*?\n---\s*/u, "");
-  clean = clean.replace(WEIXIN_DAILY_INPUT_BLOCK, (_block, body: string) => body
-    .split(/\r?\n/u)
-    .filter((line) => /^\s*-\s+\S/u.test(line))
-    .join("\n"));
-  clean = clean.replace(/<!--\s*lifeos-weixin-input:[^>]+-->/giu, "");
-  for (const pattern of MANAGED_DAILY_BLOCKS) clean = clean.replace(pattern, "");
+  const evidence = prepareCitableMarkdown("review-daily.md", content);
+  if (!evidence.allowed) return "";
+  let clean = evidence.markdown.replace(/^---\s*\n[\s\S]*?\n---\s*/u, "");
+  if (evidence.origin === "user-saved-conversation") clean = `说明：${USER_SAVED_CONVERSATION_LABEL}\n\n${clean}`;
+  clean = stripManagedReviewDailyBlocks(clean);
   const lines = clean.split(/\r?\n/);
   const filtered: string[] = [];
   let previousHeading = "";

@@ -1,4 +1,5 @@
-import { App, Modal, Notice, TFile, setIcon } from "obsidian";
+import { LifeOSModal as Modal } from "./components/LifeOSModal";
+import { App, Notice, TFile, setIcon } from "obsidian";
 import type { IPlugin } from "./plugin-api";
 import { ensureFile, formatDate, makeId } from "./utils";
 import { FileSystemService } from "./services/FileSystemService";
