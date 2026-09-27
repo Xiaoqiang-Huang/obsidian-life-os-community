@@ -218,9 +218,9 @@
 .lifeos-v3 .lifeos-knowledge-doc-meta { font-size: 12px; color: var(--v3-muted); display: flex; gap: 8px; flex-wrap: wrap; }
 .lifeos-v3 .lifeos-knowledge-doc-excerpt { font-size: 13px; color: var(--v3-muted); overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .lifeos-v3 .lifeos-knowledge-doc-scroll { overflow: visible; height: auto; max-height: none; }
-.lifeos-v3 .lifeos-knowledge-doc-item { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 14px 16px; border: 0; border-bottom: 1px solid var(--v3-line); border-radius: 0; background: none; box-shadow: none; }
+.lifeos-v3 .lifeos-knowledge-doc-item { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 14px 16px; border: 0; border-bottom: 1px solid var(--v3-line); border-radius: 0; background: none; box-shadow: none; text-align: left; }
 .lifeos-v3 .lifeos-knowledge-doc-copy, .lifeos-v3 .lifeos-knowledge-doc-item-copy { width: 100%; display: grid; gap: 6px; }
-.lifeos-v3 .lifeos-knowledge-doc-title { display: flex; flex-wrap: wrap; gap: 6px; font-size: 14px; white-space: normal; }
+.lifeos-v3 .lifeos-knowledge-doc-title { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 6px; font-size: 14px; white-space: normal; }
 .lifeos-v3 .lifeos-knowledge-doc-item-actions { display: flex; justify-content: end; gap: 6px; }
 .lifeos-v3 .lifeos-knowledge-side-stack .lifeos-knowledge-import-grid { grid-template-columns: minmax(0, 1fr); }
 .lifeos-v3 button.lifeos-knowledge-import-tile { width: 100%; justify-content: start; text-align: start; white-space: normal; padding: 10px; }

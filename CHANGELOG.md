@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.21 - 2026-09-28
+
+### Fixed
+
+- Declare Obsidian 1.6.6 as the minimum for `FileManager.trashFile`; earlier plugin versions retain their existing compatibility mapping.
+- Move batch-resource, knowledge-file and document-list inline styles into stylesheet classes to satisfy community scanner rules without changing their intended layout.
+
+
 ## 0.3.20 - 2026-09-27
 
 ### Added

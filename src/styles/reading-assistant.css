@@ -228,6 +228,9 @@
 .lifeos-resource-batch-list { max-height:38vh; overflow:auto; display:grid; gap:6px; }
 .lifeos-resource-batch-list label { display:flex; gap:8px; align-items:center; overflow-wrap:anywhere; }
 .lifeos-resource-batch-controls { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0; }
+.lifeos-resource-batch-value, .lifeos-knowledge-file-input { width:100%; }
+.lifeos-resource-batch-status { white-space:pre-wrap; max-height:20vh; overflow:auto; }
+.lifeos-knowledge-file-path { overflow-wrap:anywhere; }
 
 @media(pointer:coarse) {
  .lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-skill-chip, .lifeos-v3 .lifeos-chat-skill-select { min-height:44px; }

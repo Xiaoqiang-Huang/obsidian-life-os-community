@@ -1447,10 +1447,8 @@ export class KnowledgeView extends ItemView {
           cls: "lifeos-knowledge-doc-item",
           attr: { role: "button", tabindex: "0", "data-lifeos-knowledge-path": document.file.path }
         });
-        row.style.textAlign = "left";
         const copy = row.createDiv({ cls: "lifeos-knowledge-doc-copy" });
         const rowTitle = copy.createDiv({ cls: "lifeos-knowledge-doc-title" });
-        rowTitle.style.justifyContent = "flex-start";
         rowTitle.createSpan({ text: document.file.name, attr: { title: document.file.path } });
         rowTitle.createSpan({ cls: "lifeos-badge", text: document.category });
         copy.createDiv({ cls: "lifeos-knowledge-doc-excerpt", text: document.snippet || "暂无正文摘要，可打开查看。" });

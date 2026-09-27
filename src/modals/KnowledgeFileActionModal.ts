@@ -31,14 +31,12 @@ export class KnowledgeFileActionModal extends LifeOSModal {
       title: rename ? "重命名知识文件" : "移入 Obsidian 回收站",
       subtitle: this.file.name, icon: rename ? "pencil" : "trash-2"
     });
-    const path = body.createEl("p", { text: this.file.path });
-    path.style.overflowWrap = "anywhere";
+    body.createEl("p", { cls: "lifeos-knowledge-file-path", text: this.file.path });
     let input: HTMLInputElement | undefined;
     if (rename) {
       body.createEl("p", { text: "仅更改文件名，保留目录和内容；.md 扩展名可省略。同名时沿用自动编号规则。" });
-      input = body.createEl("input", { attr: { type: "text", "aria-label": "新文件名" } });
+      input = body.createEl("input", { cls: "lifeos-knowledge-file-input", attr: { type: "text", "aria-label": "新文件名" } });
       input.value = this.file.basename;
-      input.style.width = "100%";
     } else {
       body.createEl("p", { text: "确认将这份资料移入 Obsidian 回收站？本操作不会永久删除，也不会移除来源附件。" });
     }

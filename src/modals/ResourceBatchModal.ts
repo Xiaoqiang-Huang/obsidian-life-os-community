@@ -15,13 +15,10 @@ export class ResourceBatchModal extends LifeOSModal {
     const search = controls.createEl("input", { attr: { type: "search", placeholder: "搜索文件名或路径", "aria-label": "批量资料搜索" } });
     const mode = controls.createEl("select", { attr: { "aria-label": "批量操作" } });
     for (const [value, text] of [["rename", "批量重命名（加前缀）"], ["tags", "批量追加标签"], ["trash", "批量移入回收站"], ["new", "批量新建文档"]]) mode.createEl("option", { value, text });
-    const value = body.createEl("textarea", { attr: { "aria-label": "操作内容", placeholder: "重命名：输入前缀；标签：逗号分隔；新建：每行一个文档名。" } });
-    value.style.width = "100%";
+    const value = body.createEl("textarea", { cls: "lifeos-resource-batch-value", attr: { "aria-label": "操作内容", placeholder: "重命名：输入前缀；标签：逗号分隔；新建：每行一个文档名。" } });
     const selected = new Set<TFile>();
     const list = body.createDiv({ cls: "lifeos-resource-batch-list" });
-    const status = body.createEl("pre", { attr: { role: "status", "aria-live": "polite" } });
-    status.style.whiteSpace = "pre-wrap";
-    status.style.maxHeight = "20vh"; status.style.overflow = "auto";
+    const status = body.createEl("pre", { cls: "lifeos-resource-batch-status", attr: { role: "status", "aria-live": "polite" } });
     let busy = false;
     let planning = false;
     let plan: Array<{ file?: TFile; path: string; next?: string; content?: string }> = [];
