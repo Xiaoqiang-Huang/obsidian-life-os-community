@@ -772,5 +772,4 @@ export class DashboardView extends ItemView {
 async function openPath(plugin: IPlugin, path: string): Promise<void> {
   const file = await ensureFile(plugin.app, path, "");
   await plugin.app.workspace.getLeaf(false).openFile(file);
-  plugin.app.workspace.activeLeaf?.view.containerEl.addClass("pls-life-file-leaf");
 }

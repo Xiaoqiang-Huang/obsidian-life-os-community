@@ -10,7 +10,7 @@ export class ResourceBatchModal extends LifeOSModal {
   constructor(app: App, private files: TFile[], private folder: string,
     private changed: () => void | Promise<void>, private allowed: (path: string) => boolean) { super(app); }
   onOpen(): void {
-    const { body, footer } = createModalShell(this.contentEl, { title: "批量管理资料", subtitle: "统一管理同一份文件；先预览，再确认。删除仅移入 Obsidian 回收站，保留来源附件。", icon: "files" });
+    const { body, footer } = createModalShell(this.contentEl, { title: "批量管理资料", subtitle: "统一管理同一份文件；先预览，再确认。只将所选文件移入 Obsidian 回收站，不自动连带删除其他附件。", icon: "files" });
     const controls = body.createDiv({ cls: "lifeos-resource-batch-controls" });
     const search = controls.createEl("input", { attr: { type: "search", placeholder: "搜索文件名或路径", "aria-label": "批量资料搜索" } });
     const mode = controls.createEl("select", { attr: { "aria-label": "批量操作" } });
@@ -21,7 +21,7 @@ export class ResourceBatchModal extends LifeOSModal {
     const status = body.createEl("pre", { cls: "lifeos-resource-batch-status", attr: { role: "status", "aria-live": "polite" } });
     let busy = false;
     let planning = false;
-    let plan: Array<{ file?: TFile; path: string; next?: string; content?: string }> = [];
+    let plan: Array<{ file?: TFile; path: string; next?: string; content?: string; mtime?: number; size?: number }> = [];
     let capturedMode: Operation = "rename", capturedValue = "";
     const confirm = createButton(footer, "确认执行", async () => {
       if (busy || !plan.length || running.has(this.app)) return;
@@ -38,12 +38,17 @@ export class ResourceBatchModal extends LifeOSModal {
               this.files.push(created);
             } else {
               const file = item.file!;
-              if (file.path !== item.path || this.app.vault.getAbstractFileByPath(item.path) !== file || await this.app.vault.read(file) !== item.content) throw new Error("文件已变化，请重新预览");
+              if (file.path !== item.path || this.app.vault.getAbstractFileByPath(item.path) !== file
+                || file.stat.mtime !== item.mtime || file.stat.size !== item.size
+                || (file.extension.toLowerCase() === "md" && await this.app.vault.read(file) !== item.content)) {
+                throw new Error("文件已变化，请重新预览");
+              }
               if (capturedMode === "trash") await this.app.fileManager.trashFile(file);
               else if (capturedMode === "rename") {
                 if (!item.next || !this.allowed(item.next) || this.app.vault.getAbstractFileByPath(item.next)) throw new Error("目标文件已存在或名称不合法");
                 await this.app.fileManager.renameFile(file, item.next);
               } else {
+                if (file.extension.toLowerCase() !== "md" || file.path.includes("/Originals/")) throw new Error("原文件不能追加 Markdown 标签");
                 await this.app.vault.process(file, current => {
                   if (current !== item.content || file.path !== item.path) throw new Error("文件已变化，未覆盖");
                   const match = current.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u);
@@ -93,6 +98,7 @@ export class ResourceBatchModal extends LifeOSModal {
         if (capturedMode === "tags" && capturedValue.split(/[,，\n]/u).some(t => !/^#?[\p{L}\p{N}_/-]+$/u.test(t.trim()))) throw new Error("标签仅支持文字、数字、下划线、横线和层级斜线");
         const validName = (name: string) => name.length <= 180 && !/[<>:"/\\|?*\x00-\x1f]/u.test(name) && !/[. ]$/u.test(name) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(name);
         if (capturedMode === "new") {
+          if (this.folder.endsWith("/Originals")) throw new Error("原文件目录不能新建 Markdown；请使用导入文件。");
           const names = Array.from(new Set(capturedValue.split(/\r?\n/u).map(v => v.trim().replace(/\.md$/iu, "")).filter(Boolean)));
           for (const name of names) {
             if (!validName(name)) throw new Error(`不合法文件名：${name}`);
@@ -101,10 +107,12 @@ export class ResourceBatchModal extends LifeOSModal {
             plan.push({ path, next: name });
           }
         } else for (const file of selected) {
+          if (capturedMode === "tags" && (file.extension.toLowerCase() !== "md" || file.path.includes("/Originals/"))) throw new Error("原文件不能追加 Markdown 标签，请只选择 Markdown 文档。");
           const path = file.path, nextName = `${capturedValue}${file.basename}`;
-          const next = capturedMode === "rename" ? normalizePath(`${file.parent?.path}/${nextName}.md`) : undefined;
+          const next = capturedMode === "rename" ? normalizePath(`${file.parent?.path}/${nextName}.${file.extension}`) : undefined;
           if (capturedMode === "rename" && (!validName(nextName) || !next || !this.allowed(next) || this.app.vault.getAbstractFileByPath(next))) throw new Error(`重命名冲突或名称不合法：${file.name}`);
-          plan.push({ file, path, next, content: await this.app.vault.read(file) });
+          plan.push({ file, path, next, content: file.extension.toLowerCase() === "md" ? await this.app.vault.read(file) : undefined,
+            mtime: file.stat.mtime, size: file.stat.size });
         }
         if (requestRevision !== revision) { invalidate(); return; }
         if (!plan.length) throw new Error("请先选择文档；新建时每行填写一个文件名");

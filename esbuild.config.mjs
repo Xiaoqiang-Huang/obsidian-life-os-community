@@ -1,10 +1,10 @@
 import esbuild from "esbuild";
 import { fileURLToPath } from "node:url";
-import { pdfRuntimeIsolation } from "./scripts/pdf-runtime-isolation.mjs";
+import { pdfRuntimeIsolation } from "./src/build/pdf-runtime-isolation.mjs";
 import { readFileSync } from "node:fs";
+import { builtinModules } from "node:module";
 import process from "process";
-import builtins from "builtin-modules";
-import { buildUIStyles } from "./scripts/build-ui-styles.mjs";
+import { buildUIStyles } from "./src/build/build-ui-styles.mjs";
 
 const prod = process.argv[2] === "production";
 await buildUIStyles();
@@ -30,7 +30,7 @@ const context = await esbuild.context({
     "@lezer/common",
     "@lezer/highlight",
     "@lezer/lr",
-    ...builtins
+    ...builtinModules
   ],
   format: "cjs",
   target: "es2018",

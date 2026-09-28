@@ -54,6 +54,8 @@ export interface LifeOSProjectDocument {
   characterCount?: number;
   hasSearchableText?: boolean;
   warningCount?: number;
+  /** UI-only raw archive entry; there is no Markdown wrapper to edit or read as text. */
+  sourceOnly?: boolean;
 }
 
 export interface LifeOSProjectSummary {

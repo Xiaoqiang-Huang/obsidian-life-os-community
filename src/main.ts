@@ -6,6 +6,7 @@ import { TaskSuggestionService, normalizeTaskSuggestionDailyLimit } from "./serv
 import { refreshExperienceTheme, syncThemeClassNames } from "./ui/theme";
 import { persistSettingsSnapshot } from "./ui/theme-selection";
 import { applyDocumentAppearance, clearDocumentAppearance, documentBackgroundUrl } from "./ui/document-appearance";
+import { shouldDecorateLifeOsMarkdownLeaf } from "./utils/lifeos-document-leaf";
 import { prepareDailyAnalysisSource } from "./services/DailyAnalysisSource";
 import { USER_SAVED_CONVERSATION_LABEL, USER_SAVED_CONVERSATION_SOURCE, type EvidenceOrigin } from "./services/context-engine/ContextSourcePolicyService";
 import { snapshotWritebackUndo } from "./services/writeback-undo";
@@ -3480,15 +3481,17 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.app.workspace.iterateAllLeaves((leaf) => {
       const view = leaf.view as typeof leaf.view & { file?: TFile; containerEl?: HTMLElement };
       const file = view.file;
-      const isLifeOsFile = file instanceof TFile && (file.path === root || file.path.startsWith(`${root}/`));
+      // A Life OS folder also contains PDF, Office and image attachments. Those
+      // must remain native Obsidian views: giving them Markdown's background and
+      // overflow classes can stop the native PDF viewer from painting pages.
+      const isLifeOsMarkdown = shouldDecorateLifeOsMarkdownLeaf(file, root);
       const containers = [view.containerEl].filter((element): element is HTMLElement => element instanceof HTMLElement);
       for (const container of containers) {
-        syncThemeClassNames(container, isLifeOsFile ? activeThemeClasses : [], themeClasses);
-        if (isLifeOsFile) {
+        syncThemeClassNames(container, isLifeOsMarkdown ? activeThemeClasses : [], themeClasses);
+        if (isLifeOsMarkdown) {
           container.addClass("pls-life-file-leaf", "lifeos-file-leaf");
           // Theme classes were diffed above; do not remove/re-add them on layout events.
-          if (file?.extension === "md") applyDocumentAppearance(container, this.settings, this.getBackgroundResourceUrl());
-          else clearDocumentAppearance(container);
+          applyDocumentAppearance(container, this.settings, this.getBackgroundResourceUrl());
         } else {
           clearDocumentAppearance(container);
           container.removeClass("pls-life-file-leaf", "lifeos-file-leaf");

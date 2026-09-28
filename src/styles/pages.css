@@ -64,6 +64,28 @@
 .lifeos-v3 .lifeos-chat-side-panel { min-height: 0; overflow: auto; border: 1px solid var(--v3-line); border-radius: 8px; background: var(--v3-surface); padding: 12px; }
 .lifeos-v3 .lifeos-chat-drawer { height: 100%; max-height: 100%; overflow: auto; position: static; width: 100%; border: 0; background: none; }
 .lifeos-v3 .lifeos-chat-side-panel .lifeos-chat-drawer > * { flex-shrink: 0; }
+.lifeos-v3 .lifeos-chat-context-drawer,
+.lifeos-v3 .lifeos-context-source-list,
+.lifeos-v3 .lifeos-context-status-list,
+.lifeos-v3 .lifeos-context-source-card,
+.lifeos-v3 .lifeos-context-item { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.lifeos-v3 .lifeos-context-source-list,
+.lifeos-v3 .lifeos-context-status-list { display: grid; gap: 8px; }
+.lifeos-v3 .lifeos-context-source-card,
+.lifeos-v3 .lifeos-context-item,
+.lifeos-v3 .lifeos-context-trace { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--v3-line); border-radius: 8px; overflow: hidden; overflow-wrap: anywhere; background: var(--v3-surface); }
+.lifeos-v3 .lifeos-context-source-head,
+.lifeos-v3 .lifeos-context-source-footer,
+.lifeos-v3 .lifeos-context-section-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.lifeos-v3 .lifeos-context-source-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lifeos-v3 .lifeos-context-source-footer { flex-wrap: wrap; justify-content: space-between; }
+.lifeos-v3 .lifeos-context-source-excerpt { min-width: 0; max-width: 100%; }
+.lifeos-v3 .lifeos-context-source-excerpt summary { cursor: pointer; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+.lifeos-v3 .lifeos-context-source-excerpt-full { max-height: 260px; overflow: auto; padding: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.lifeos-v3 .lifeos-context-item > * { min-width: 0; overflow-wrap: anywhere; }
+.lifeos-v3 .lifeos-knowledge-metadata-warning { margin: 8px 0 12px; padding: 10px 12px; border: 1px solid var(--v3-line); border-radius: 8px; overflow-wrap: anywhere; }
+.lifeos-v3 .lifeos-knowledge-metadata-warning summary { cursor: pointer; font-weight: 600; }
+.lifeos-v3 .lifeos-knowledge-metadata-warning ul { margin: 8px 0 0; padding-inline-start: 20px; }
 .lifeos-v3 .lifeos-chat-main { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; padding: 0; gap: 0; background: var(--v3-surface); border: 1px solid var(--v3-line); border-radius: 10px; }
 .lifeos-v3 .lifeos-chat-top { flex: none; display: flex; flex-wrap: nowrap; gap: 12px; padding: 14px 16px; align-items: center; justify-content: space-between; background: none; }
 .lifeos-v3 .lifeos-chat-top-copy h1 { font-size: 20px; }

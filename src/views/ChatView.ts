@@ -2222,7 +2222,11 @@ export class LifeOSChatView extends ItemView {
     head.createEl("strong", { text: source.title || source.path, attr: { title: source.path } });
     const locator = this.contextSourceLocator(source);
     if (locator) card.createDiv({ cls: "lifeos-context-source-locator", text: locator });
-    if (source.excerpt) card.createDiv({ cls: "lifeos-context-source-excerpt", text: source.excerpt });
+    if (source.excerpt) {
+      const excerpt = card.createEl("details", { cls: "lifeos-context-source-excerpt" });
+      excerpt.createEl("summary", { text: source.excerpt.slice(0, 130) + (source.excerpt.length > 130 ? "…" : "") });
+      excerpt.createDiv({ cls: "lifeos-context-source-excerpt-full", text: source.excerpt });
+    }
     const footer = card.createDiv({ cls: "lifeos-context-source-footer" });
     footer.createSpan({ text: this.contextSourceTypeLabel(source.type) });
     const open = footer.createEl("button", { text: "打开来源", attr: { type: "button", title: source.path } });

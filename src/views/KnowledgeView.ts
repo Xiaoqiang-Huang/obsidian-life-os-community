@@ -2,6 +2,9 @@ import { ResourceBatchModal } from "../modals/ResourceBatchModal";
 import { LifeOSModal as Modal } from "../components/LifeOSModal";
 import { isManagedKnowledgePath } from "../services/knowledge-document-scope";
 import { readPageSession, savePageSession, savePageScroll, restorePageScroll } from "../utils/page-session-state";
+import { readManagedKnowledgeFrontmatter } from "../utils/managed-knowledge-frontmatter";
+import { isManagedOriginalOnlyPath, managedOriginalSourcePath } from "../utils/managed-original-documents";
+import { archiveOriginalFiles as archiveOnly } from "../utils/archive-original-files";
 import { App, ItemView, Notice, TFile, TFolder, WorkspaceLeaf, parseYaml, requestUrl, setIcon, type TAbstractFile } from "obsidian";
 import { createButton } from "../components/Button";
 import { createCard } from "../components/Card";
@@ -79,6 +82,10 @@ interface ManagedKnowledgeDocument {
   source: string;
   snippet: string;
   searchText: string;
+  metadataWarning?: string;
+  originalFile?: TFile;
+  originalPath?: string;
+  originalOnly?: boolean;
 }
 
 interface KnowledgePipelineSection {
@@ -103,7 +110,7 @@ interface KnowledgeCaptureInput {
 }
 
 interface KnowledgeImportHandlers {
-  importFiles: (files: File[], privacy: KnowledgePrivacyChoice, destination: KnowledgeCaptureKind, projectId?: string) => Promise<void>;
+  importFiles: (files: File[], privacy: KnowledgePrivacyChoice, destination: KnowledgeCaptureKind, projectId?: string, originalOnly?: boolean) => Promise<void>;
   importUrl: (
     url: string,
     title: string,
@@ -1049,7 +1056,7 @@ export class KnowledgeView extends ItemView {
       text: "PDF、Word、Web Clipper 和项目文档都从这里进入。网页剪藏先进入收件箱，不会绕过整理和复核。"
     });
     const grid = card.createDiv({ cls: "lifeos-knowledge-import-grid" });
-    this.importTile(grid, "PDF / Word", "保存原文件并解析正文", "file-text", () => void this.openKnowledgeImportHub(fs));
+    this.importTile(grid, "PDF / Word", "解析正文或仅保存原文件", "file-text", () => void this.openKnowledgeImportHub(fs));
     this.importTile(grid, "Web Clipper 收件箱", "抓取网页正文和图片，先进收件箱", "link", () => void this.openKnowledgeImportHub(fs));
     this.importTile(grid, "粘贴文本", "保存片段或读书摘录", "clipboard", () => void this.openNewKnowledgeSourceModal(fs));
     this.importTile(grid, "项目文档", "归入指定项目资料库", "folder-input", () => void this.openKnowledgeImportHub(fs));
@@ -1405,6 +1412,19 @@ export class KnowledgeView extends ItemView {
     createButton(actions, "打开知识库目录", () => void this.openIndex(fs), { icon: "folder-open" });
     createButton(actions, "批量管理", () => { if (requireProFeature(this.plugin, "knowledgeManagement")) new ResourceBatchModal(this.app, documents.map(d => d.file), fs.path("Knowledge"), () => void this.render(), path => isManagedKnowledgePath(path, fs)).open(); }, { icon: "list-checks" });
 
+    const invalidMetadata = documents.filter((document) => document.metadataWarning);
+    if (invalidMetadata.length) {
+      const warning = card.createEl("details", { cls: "lifeos-knowledge-metadata-warning" });
+      warning.createEl("summary", { text: `${invalidMetadata.length} 篇文档的属性格式有误，资料仍可浏览` });
+      warning.createEl("p", { text: "原文件未被修改。可打开下列文档修正属性区；其他资料不受影响。" });
+      const list = warning.createEl("ul");
+      for (const document of invalidMetadata.slice(0, 10)) {
+        const item = list.createEl("li");
+        createButton(item, document.file.basename, () => void this.app.workspace.getLeaf(false).openFile(document.file), { icon: "file-text" });
+      }
+      if (invalidMetadata.length > 10) warning.createEl("p", { text: `另有 ${invalidMetadata.length - 10} 篇，可在列表中搜索文件名。` });
+    }
+
     const toolbar = card.createDiv({ cls: "lifeos-knowledge-doc-toolbar" });
     const search = toolbar.createEl("input", {
       cls: "lifeos-knowledge-doc-search",
@@ -1458,6 +1478,14 @@ export class KnowledgeView extends ItemView {
         const rowActions = row.createDiv({ cls: "lifeos-knowledge-doc-item-actions" });
         createButton(rowActions, "打开", () => void this.openManagedKnowledgeFile(document.file), { ghost: true, icon: "external-link" })
           .setAttr("aria-label", `打开 ${document.file.name}`);
+        if (document.originalPath && document.originalPath !== document.file.path) {
+          createButton(rowActions, "查看原文档", () => {
+            const file = this.app.vault.getAbstractFileByPath(document.originalPath!);
+            if (!(file instanceof TFile)) { new Notice("原文档已移动或删除，请核对附件路径。", 6000); return; }
+            void this.app.workspace.getLeaf("tab").openFile(file, { active: true });
+          }, { ghost: true, icon: "file" })
+            .setAttr("aria-label", `查看原文档 ${document.originalFile?.name ?? document.originalPath}`);
+        }
         createButton(rowActions, "重命名", () => void this.renameManagedKnowledgeFile(document.file), { ghost: true, icon: "pencil" })
           .setAttr("aria-label", `重命名 ${document.file.name}`);
         createButton(rowActions, "移入回收站", () => void this.trashManagedKnowledgeFile(document.file), { ghost: true, icon: "trash-2" })
@@ -1516,6 +1544,7 @@ export class KnowledgeView extends ItemView {
     const files = this.app.vault.getMarkdownFiles()
       .filter((file) => {
         const path = file.path.replace(/\\/g, "/");
+        if (isManagedOriginalOnlyPath(path, fs.path("Knowledge"), fs.path("Projects"), fs.path("Knowledge", "Attachments"))) return false;
         if (!isManagedKnowledgePath(path, fs)) return false;
         if (this.removedRecentKnowledgePaths.has(path)) return false;
         return !excludedRoots.some((root) => path === root || path.startsWith(`${root}/`));
@@ -1539,6 +1568,27 @@ export class KnowledgeView extends ItemView {
       }));
       documents.push(...described.filter((item): item is ManagedKnowledgeDocument => item !== null));
     }
+    const knowledgeRootPath = fs.path("Knowledge");
+    const projectsRootPath = fs.path("Projects");
+    const originalKnowledgePrefix = `${fs.path("Knowledge", "Attachments", "Originals")}/`;
+    for (const file of this.app.vault.getFiles()) {
+      throwIfReadAborted(signal);
+      if (!isManagedOriginalOnlyPath(file.path, knowledgeRootPath, projectsRootPath, fs.path("Knowledge", "Attachments"))
+        || this.removedRecentKnowledgePaths.has(file.path.replace(/\\/gu, "/"))) continue;
+      const originalCategory = file.path.startsWith(originalKnowledgePrefix)
+        ? file.path.slice(originalKnowledgePrefix.length).split("/")[0] : "";
+      const category = file.path.startsWith(`${projectsRootPath}/`) ? "项目资料"
+        : originalCategory === "materials" || originalCategory === "books" || originalCategory === "mistakes"
+          ? this.captureDestinationLabel(originalCategory)
+          : "原始文件";
+      documents.push({
+        file, title: file.name, category, source: "本地原文件",
+        snippet: "仅保存原文件，未生成 Markdown 或解析正文。",
+        searchText: `${file.name}\n${file.path}\n${category}`.toLocaleLowerCase(),
+        originalFile: file, originalOnly: true
+      });
+    }
+    documents.sort((a, b) => b.file.stat.mtime - a.file.stat.mtime);
     throwIfReadAborted(signal);
     return documents;
   }
@@ -1557,17 +1607,20 @@ export class KnowledgeView extends ItemView {
     throwIfReadAborted(signal);
     // Parse the same snapshot as the body: Obsidian's metadata index may still
     // describe the previous revision when its Vault modify event arrives.
-    const yaml = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u)?.[1];
-    let parsed: unknown;
-    try { parsed = yaml === undefined ? undefined : parseYaml(yaml); }
-    catch (error) { throw new Error(`无法解析 ${normalizedPath} 的属性：${error instanceof Error ? error.message : String(error)}`); }
-    const frontmatter = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
+    const { frontmatter, warning: metadataWarning } = readManagedKnowledgeFrontmatter(content, parseYaml);
     const heading = content.match(/^#\s+(.+)$/mu)?.[1]?.trim();
     const title = String(frontmatter?.title ?? heading ?? file.basename).replace(/^['"]|['"]$/g, "").trim() || file.basename;
     const category = this.managedKnowledgeCategory(file.path, fs);
     const sourceValue = frontmatter?.source_url ?? frontmatter?.source ?? frontmatter?.url;
     const sourceLine = content.match(/^>\s*(?:来源|Source)\s*[:：]\s*(.+)$/imu)?.[1]?.trim();
     const source = String(sourceValue ?? sourceLine ?? "").replace(/^['"]|['"]$/g, "").trim();
+    const attachmentLine = content.match(/^-\s*附件路径\s*[:：]\s*(.+)$/imu)?.[1]?.trim();
+    const originalPath = managedOriginalSourcePath(
+      file.path,
+      frontmatter?.source_file ?? frontmatter?.source_path ?? attachmentLine,
+      fs.path("Knowledge"), fs.path("Projects"), fs.path("Knowledge", "Attachments")
+    );
+    const originalCandidate = originalPath ? this.app.vault.getAbstractFileByPath(originalPath) : null;
     const body = content
       .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/u, "")
       .replace(/<!--[\s\S]*?-->/gu, "")
@@ -1583,6 +1636,9 @@ export class KnowledgeView extends ItemView {
       category,
       source,
       snippet,
+      metadataWarning,
+      originalFile: originalCandidate instanceof TFile ? originalCandidate : undefined,
+      originalPath: originalPath ?? undefined,
       searchText: `${title}\n${category}\n${source}\n${file.path}\n${content}`.toLocaleLowerCase()
     };
     // This view cache includes full search text, so bound it independently of
@@ -1712,7 +1768,8 @@ export class KnowledgeView extends ItemView {
     const assertSource = (): void => {
       if (this.closed || root !== this.plugin.getRoot() || language !== this.plugin.settings.directoryLanguage
         || !(file instanceof TFile) || file.path !== oldPath || this.app.vault.getAbstractFileByPath(oldPath) !== file
-        || file.extension !== "md" || oldPath.split(/[\\/]/u).some(part => !part || part === "." || part === "..")
+        || (file.extension !== "md" && !isManagedOriginalOnlyPath(oldPath, fs.path("Knowledge"), fs.path("Projects"), fs.path("Knowledge", "Attachments")))
+        || oldPath.split(/[\\/]/u).some(part => !part || part === "." || part === "..")
         || !isManagedKnowledgePath(oldPath, fs) || this.removedRecentKnowledgePaths.has(oldPath.replace(/\\/g, "/"))) {
         throw new Error("资料已移动、失效或不在当前知识管理范围，请重新打开列表。");
       }
@@ -1722,7 +1779,10 @@ export class KnowledgeView extends ItemView {
       new KnowledgeFileActionModal(this.app, file, "rename", async name => {
         if (!requireProFeature(this.plugin, "knowledgeManagement")) throw new Error("当前无知识管理权限，未修改文件。");
         assertSource();
-        const trimmed = name.trim().replace(/\.md$/iu, "").trim();
+        const suffix = `.${file.extension}`;
+        const supplied = name.trim();
+        const trimmed = supplied.toLocaleLowerCase().endsWith(suffix.toLocaleLowerCase())
+          ? supplied.slice(0, -suffix.length).trim() : supplied;
         if (!trimmed) throw new Error("请输入新文件名。");
         if (trimmed === file.basename) return;
         const nextPath = this.uniqueManagedKnowledgeRenamePath(file, trimmed);
@@ -1744,13 +1804,14 @@ export class KnowledgeView extends ItemView {
   private uniqueManagedKnowledgeRenamePath(file: TFile, title: string): string {
     const parentPath = file.parent?.path.replace(/\\/g, "/").replace(/\/+$/g, "") ?? "";
     const base = this.sanitizeKnowledgeTitle(title);
+    const extension = `.${file.extension}`;
     for (let index = 0; index < 100; index += 1) {
       const suffix = index === 0 ? "" : `-${index + 1}`;
-      const candidate = parentPath ? `${parentPath}/${base}${suffix}.md` : `${base}${suffix}.md`;
+      const candidate = parentPath ? `${parentPath}/${base}${suffix}${extension}` : `${base}${suffix}${extension}`;
       const existing = this.app.vault.getAbstractFileByPath(candidate);
       if (!existing || existing === file) return candidate;
     }
-    return parentPath ? `${parentPath}/${base}-${Date.now()}.md` : `${base}-${Date.now()}.md`;
+    return parentPath ? `${parentPath}/${base}-${Date.now()}${extension}` : `${base}-${Date.now()}${extension}`;
   }
 
   private async trashManagedKnowledgeFile(file: TFile): Promise<void> {
@@ -1762,7 +1823,8 @@ export class KnowledgeView extends ItemView {
     const assertSource = (): void => {
       if (this.closed || root !== this.plugin.getRoot() || language !== this.plugin.settings.directoryLanguage
         || !(file instanceof TFile) || file.path !== oldPath || this.app.vault.getAbstractFileByPath(oldPath) !== file
-        || file.extension !== "md" || oldPath.split(/[\\/]/u).some(part => !part || part === "." || part === "..")
+        || (file.extension !== "md" && !isManagedOriginalOnlyPath(oldPath, fs.path("Knowledge"), fs.path("Projects"), fs.path("Knowledge", "Attachments")))
+        || oldPath.split(/[\\/]/u).some(part => !part || part === "." || part === "..")
         || !isManagedKnowledgePath(oldPath, fs) || this.removedRecentKnowledgePaths.has(oldPath.replace(/\\/g, "/"))) {
         throw new Error("资料已移动、失效或不在当前知识管理范围，请重新打开列表。");
       }
@@ -1807,7 +1869,22 @@ export class KnowledgeView extends ItemView {
     if (!requireProFeature(this.plugin, "knowledgeImport")) return;
     const projects = await new ProjectService(this.app, fs).loadProjects();
     new KnowledgeImportHubModal(this.app, projects, {
-      importFiles: async (files, privacy, destination, projectId) => {
+      importFiles: async (files, privacy, destination, projectId, originalOnly) => {
+        if (originalOnly) {
+          const project = destination === "project" ? await this.requireProjectForDestination(fs, projectId) : null;
+          if (project && !requireProFeature(this.plugin, "projectDocuments")) return;
+          const folderPath = project
+            ? `${new ProjectDocumentService(this.app, fs).attachmentsPath(project)}/Originals`
+            : fs.path("Knowledge", "Attachments", "Originals", destination);
+          const paths = await archiveOnly(files,
+            async source => (await saveImportedFileToVault(this.app, asRelativeReadableImportFile(source), { folderPath })).vaultPath);
+          const savedFiles = paths.map(path => this.app.vault.getAbstractFileByPath(path))
+            .filter((file): file is TFile => file instanceof TFile);
+          new Notice(`已保存 ${savedFiles.length} 个原文件；未解析正文，也未生成 Markdown。`, 6000);
+          await this.render();
+          if (savedFiles[0]) await this.app.workspace.getLeaf("tab").openFile(savedFiles[0], { active: true });
+          return;
+        }
         if (destination === "project") {
           const imported = await this.importKnowledgeFilesToProject(fs, files, projectId);
           new Notice(`已导入 ${imported.length} 个项目文档。`, 6000);
@@ -2762,6 +2839,7 @@ class KnowledgeImportHubModal extends Modal {
   private urlInput!: HTMLInputElement;
   private urlTitleInput!: HTMLInputElement;
   private clipModeSelect!: HTMLSelectElement;
+  private fileModeSelect!: HTMLSelectElement;
   private projectSelect: HTMLSelectElement | null = null;
   private projectField: HTMLElement | null = null;
 
@@ -2777,7 +2855,7 @@ class KnowledgeImportHubModal extends Modal {
     this.modalEl.addClass("lifeos-modal-host", "lifeos-knowledge-import-modal-host");
     const { body, footer } = createModalShell(this.contentEl, {
       title: "导入资料",
-      subtitle: "导入后的内容会先进入待处理资料。确认写入之后，才会成为 AI 可复用的正式知识。",
+      subtitle: "解析模式可生成 Markdown 并进入待整理或分类；仅保存原文件模式只归档附件，不进入 AI 处理队列。",
       icon: "upload-cloud",
       className: "lifeos-knowledge-import-modal"
     });
@@ -2833,7 +2911,13 @@ class KnowledgeImportHubModal extends Modal {
     const head = card.createDiv({ cls: "lifeos-card-title" });
     setIcon(head.createSpan(), "files");
     head.createSpan({ text: "PDF / Word / Markdown / 文本" });
-    card.createEl("p", { text: "保存原文件，提取可检索正文，再按“保存到”进入待整理、分类资料或项目文档。" });
+    card.createEl("p", { text: "可解析正文并生成 Markdown，也可仅保存原文件；后者不会识别或改写为 Markdown，AI 引用内容前需再解析。" });
+    const modeField = card.createDiv({ cls: "lifeos-knowledge-capture-field is-wide" });
+    modeField.createEl("label", { text: "文件导入方式" });
+    this.fileModeSelect = modeField.createEl("select", { cls: "lifeos-knowledge-capture-select", attr: { "aria-label": "文件导入方式" } });
+    this.fileModeSelect.createEl("option", { value: "parsed", text: "保存原文件并解析正文（生成 Markdown）" });
+    this.fileModeSelect.createEl("option", { value: "original-only", text: "仅保存原文件（不生成 Markdown）" });
+    card.createEl("p", { cls: "lifeos-muted-text", text: "仅保存原文件不会记录隐私属性，只支持“普通”；需要私密或敏感级别时，请使用解析模式。" });
     const input = card.createEl("input", {
       attr: {
         type: "file",
@@ -2960,12 +3044,16 @@ class KnowledgeImportHubModal extends Modal {
     const destination = this.selectedDestination();
     const projectId = this.selectedProjectId();
     if (!this.ensureProjectDestinationReady(destination, projectId)) return;
+    if (this.fileModeSelect.value === "original-only" && this.selectedPrivacy() !== "normal") {
+      new Notice("仅保存原文件不会生成隐私属性；请选“普通”，或改用解析并生成 Markdown 模式。", 7000);
+      return;
+    }
     this.fileImportButton.disabled = true;
     this.fileImportButton.setAttr("aria-busy", "true");
     this.fileImportButton.querySelector<HTMLElement>(".lifeos-v2-button-label")
       ?.setText(`正在导入 ${this.files.length} 个文档…`);
     try {
-      await this.handlers.importFiles(this.files, this.selectedPrivacy(), destination, projectId);
+      await this.handlers.importFiles(this.files, this.selectedPrivacy(), destination, projectId, this.fileModeSelect.value === "original-only");
       this.close();
     } catch (error) {
       this.fileImportButton.disabled = false;

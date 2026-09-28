@@ -406,8 +406,18 @@ export class AiWorkspaceView extends ItemView {
         render();
         list.scrollTop = scroll;
       };
+      const loadRecords = async (): Promise<LifeOSProjectDocument[]> => {
+        const markdown = await documents.listDocuments(project);
+        const originals: LifeOSProjectDocument[] = documents.listOriginalOnlyFiles(project).map(file => ({
+          projectId: project.id, projectName: project.name, title: file.name, path: file.path,
+          kind: "reference", mtime: file.stat.mtime, sourceName: file.name,
+          excerpt: "仅保存原文件，未生成 Markdown 或解析正文。",
+          textImportMode: "attachment-only", hasSearchableText: false, sourceOnly: true
+        }));
+        return [...markdown, ...originals].sort((a, b) => b.mtime - a.mtime);
+      };
       const reload = async () => {
-        const latest = await documents.listDocuments(project);
+        const latest = await loadRecords();
         if (inScope()) displayRecords(latest);
       };
       createButton(actions, "导入资料", () => { if (inScope() && requireProFeature(this.plugin, "projectDocuments")) new ImportProjectDocumentsModal(this.app, project, documents, this.plugin, reload).open(); }, { primary: true, icon: "upload" });
@@ -416,7 +426,9 @@ export class AiWorkspaceView extends ItemView {
         if (!inScope() || !requireProFeature(this.plugin, "projectDocuments")) return;
         const files = records.map(doc => this.app.vault.getAbstractFileByPath(doc.path)).filter((file): file is TFile => file instanceof TFile);
         const folder = documents.documentsPath(project);
-        new ResourceBatchModal(this.app, files, folder, reload, path => path.startsWith(folder + "/") && !path.includes("/AI Workspace/")).open();
+        const originals = `${documents.attachmentsPath(project)}/Originals/`;
+        new ResourceBatchModal(this.app, files, folder, reload, path =>
+          (path.startsWith(folder + "/") && !path.includes("/AI Workspace/")) || path.startsWith(originals)).open();
       }, { icon: "list-checks" });
       const render = () => {
         list.empty();
@@ -431,7 +443,7 @@ export class AiWorkspaceView extends ItemView {
           const openSource = async () => {
             if (!inScope()) return;
             try {
-              const path = await documents.sourceFilePath(project, doc);
+              const path = doc.sourceOnly ? doc.path : await documents.sourceFilePath(project, doc);
               if (!inScope()) return;
               const file = this.app.vault.getAbstractFileByPath(path);
               if (!(file instanceof TFile)) throw new Error("原文件已移动或删除。");
@@ -457,11 +469,21 @@ export class AiWorkspaceView extends ItemView {
           }, { icon: "file-text", className: "lifeos-project-document-open" });
           open.title = doc.path;
           const rowActions = row.createDiv({ cls: "lifeos-project-document-actions" });
-          if (doc.sourceName) createButton(rowActions, "查看原文件", openSource, { icon: "file", ghost: true });
-          for (const [action, label, icon] of [["edit", "编辑", "file-pen"], ["rename", "重命名", "pencil"], ["trash", "移入回收站", "trash-2"]] as const) {
-            createButton(rowActions, label, () => {
-              if (inScope() && requireProFeature(this.plugin, "projectDocuments")) new ProjectDocumentActionModal(this.app, project, doc, action, documents, this.plugin, reload).open();
-            }, { icon, ghost: true }).setAttr("aria-label", `${label} ${name}`);
+          if (doc.sourceName && !doc.sourceOnly) createButton(rowActions, "查看原文件", openSource, { icon: "file", ghost: true });
+          if (doc.sourceOnly) {
+            createButton(rowActions, "管理原文件", () => {
+              const file = this.app.vault.getAbstractFileByPath(doc.path);
+              const folder = `${documents.attachmentsPath(project)}/Originals`;
+              if (file instanceof TFile && inScope() && requireProFeature(this.plugin, "projectDocuments")) {
+                new ResourceBatchModal(this.app, [file], folder, reload, path => path.startsWith(`${folder}/`)).open();
+              }
+            }, { icon: "list-checks", ghost: true });
+          } else {
+            for (const [action, label, icon] of [["edit", "编辑", "file-pen"], ["rename", "重命名", "pencil"], ["trash", "移入回收站", "trash-2"]] as const) {
+              createButton(rowActions, label, () => {
+                if (inScope() && requireProFeature(this.plugin, "projectDocuments")) new ProjectDocumentActionModal(this.app, project, doc, action, documents, this.plugin, reload).open();
+              }, { icon, ghost: true }).setAttr("aria-label", `${label} ${name}`);
+            }
           }
         }
         if (limit < filtered.length) createButton(list, "显示更多", () => { limit += 30; render(); });
@@ -471,7 +493,7 @@ export class AiWorkspaceView extends ItemView {
         // renderStableView builds off-DOM before committing. Initial data must
         // populate that staging tree; subsequent user actions still require a
         // connected, current page and cannot mutate a replaced project view.
-        const latest = await documents.listDocuments(project);
+        const latest = await loadRecords();
         if (isCurrent()) displayRecords(latest);
       } catch (error) {
         status.textContent = error instanceof Error ? error.message : "项目资料读取失败，请重新打开资料页。";

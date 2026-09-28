@@ -26,7 +26,7 @@ export class ImportProjectDocumentsModal extends Modal {
   private listEl: HTMLElement | null = null;
   private importButton: HTMLButtonElement | null = null;
   private progressEl: HTMLElement | null = null;
-  private textMode: ProjectDocumentTextImportMode = "ai-formatted";
+  private textMode: ProjectDocumentTextImportMode | "original-only" = "ai-formatted";
   private importBusy = false;
 
   constructor(
@@ -43,7 +43,7 @@ export class ImportProjectDocumentsModal extends Modal {
     this.modalEl.addClass("lifeos-modal-host", "lifeos-project-import-modal-host");
     const { body, footer } = createModalShell(this.contentEl, {
       title: "导入项目文档",
-      subtitle: `先保存原文件，再完整提取正文；选择 AI 整理时会按段落分批处理「${this.project.name}」的项目资料。`,
+      subtitle: `为「${this.project.name}」选择正文提取，或只归档原文件且不生成 Markdown。`,
       icon: "upload-cloud",
       className: "lifeos-task-modal lifeos-project-import-modal"
     });
@@ -81,7 +81,7 @@ export class ImportProjectDocumentsModal extends Modal {
     setIcon(drop.createSpan({ cls: "lifeos-project-import-drop-icon" }), "files");
     const copy = drop.createDiv({ cls: "lifeos-project-import-drop-copy" });
     copy.createEl("strong", { text: "拖拽文件到这里，或选择文件" });
-    copy.createEl("span", { text: "可一次选择整个目录。PDF / Word 会先保存原件；可读正文会完整写入项目文档，再按下方选项整理为可检索 Markdown。" });
+    copy.createEl("span", { text: "可一次选择整个目录。解析模式会保存原件并生成可检索 Markdown；仅保存原文件模式不提取正文，也不生成 Markdown。" });
     const fileActions = drop.createDiv({ cls: "lifeos-project-import-file-actions" });
     createButton(fileActions, "选择文件", () => input.click(), { ghost: true, icon: "paperclip" });
     createButton(fileActions, "选择目录", () => directoryInput.click(), { ghost: true, icon: "folder-open" });
@@ -174,9 +174,16 @@ export class ImportProjectDocumentsModal extends Modal {
       new Notice("正在导入：先完整提取正文，再逐段 AI 整理格式…", 4000);
     }
     try {
+      if (this.textMode === "original-only") {
+        const paths = await this.service.archiveOriginalFiles(this.project, this.files.map(asRelativeReadableImportFile),
+          progress => this.renderImportProgress(progress));
+        new Notice(`已保存 ${paths.length} 个原文件，未生成 Markdown。`);
+        this.close();
+        await this.onImported?.([]);
+        return;
+      }
       const imported = await this.service.importDocuments(this.project, this.files.map(asRelativeReadableImportFile), {
-        textMode: this.textMode,
-        onProgress: (progress) => this.renderImportProgress(progress)
+        textMode: this.textMode, onProgress: progress => this.renderImportProgress(progress)
       });
       new Notice(`已导入 ${imported.length} 个项目文档。`);
       this.close();
@@ -230,8 +237,8 @@ export class ImportProjectDocumentsModal extends Modal {
     const panel = body.createDiv({ cls: "lifeos-project-import-options" });
     const copy = panel.createDiv({ cls: "lifeos-project-import-options-copy" });
     copy.createEl("strong", { text: "正文处理方式" });
-    copy.createEl("span", { text: "AI 只在正文导入后按段落调整格式。可选择立即解析正文，或仅保存原文件。仅保存 PDF 时，AI 无法直接检索其正文，可能需要先按文件名找到原文件，再解析文字，最后回答或引用；扫描件还可能需要 OCR。" });
-    const options: Array<{ mode: ProjectDocumentTextImportMode; title: string; description: string }> = [
+    copy.createEl("span", { text: "AI 只在正文导入后按段落调整格式。仅归档 PDF 等原文件时，不会生成 Markdown；AI 引用其正文前可能需先按文件名定位，再解析文字，扫描件还可能需要 OCR。" });
+    const options: Array<{ mode: ProjectDocumentTextImportMode | "original-only"; title: string; description: string }> = [
       {
         mode: "ai-formatted",
         title: "先完整导入，再逐段 AI 整理格式",
@@ -244,8 +251,13 @@ export class ImportProjectDocumentsModal extends Modal {
       },
       {
         mode: "attachment-only",
-        title: "只保存原文件",
-        description: "保留原文件，不提取全文。后续需先找到文件名并解析正文，AI 才能基于内容处理；也可打开 PDF，选中可复制的文字使用 AI。"
+        title: "原文件＋Markdown 索引（不解析正文）",
+        description: "保留原文件并生成一个可检索文件名的 Markdown 索引，不提取正文。"
+      },
+      {
+        mode: "original-only",
+        title: "仅保存原文件（不生成 Markdown）",
+        description: "只归档原始 PDF / Word 等文件，不解析、不调用 AI，也不创建 Markdown 文档。"
       }
     ];
     const group = panel.createDiv({ cls: "lifeos-project-import-option-list" });

@@ -63,7 +63,11 @@ export function applyLifeOsBackground(plugin: IPlugin, root: HTMLElement): void 
 }
 
 export function markLifeOsLeaf(app: App): void {
-  app.workspace.activeLeaf?.view.containerEl.addClass("pls-life-file-leaf");
+  const view = app.workspace.activeLeaf?.view as { file?: TFile; containerEl?: HTMLElement } | undefined;
+  const container = view?.containerEl;
+  if (!container) return;
+  if (view.file?.extension === "md") container.addClass("pls-life-file-leaf", "lifeos-file-leaf");
+  else container.removeClass("pls-life-file-leaf", "lifeos-file-leaf");
 }
 
 function renderBrand(app: App, plugin: IPlugin, sidebar: HTMLElement, options: LifeOsShellOptions): void {

@@ -4,6 +4,7 @@ import type {
   LifeOSProjectDocument,
   LifeOSProjectDocumentKind
 } from "../types";
+import type { TFile } from "obsidian";
 import { formatDate } from "../utils/dates";
 import { joinPath, normalizePath } from "../utils/vault";
 import type { FileSystemService } from "./FileSystemService";
@@ -20,6 +21,7 @@ import { buildKeywordLinkedMarkdown, stripKeywordLinksSection } from "./KeywordL
 import { PdfOcrService, type PdfOcrProvider } from "./PdfOcrService";
 import { readVaultSnapshot, throwIfReadAborted } from "../utils/vault-read-cache";
 import { saveGuardedDocument } from "./GuardedDocumentService";
+import { archiveOriginalFiles as archiveOnly } from "../utils/archive-original-files";
 
 export { docxXmlToMarkdown, formatImportedPlainText, reconstructPdfPageText } from "./DocumentImportService";
 export { formatTesseractBlocksForMarkdown, parsePaddleStructuredOcrResponse } from "./PdfOcrService";
@@ -255,6 +257,26 @@ export class ProjectDocumentService {
     }
 
     return results;
+  }
+
+  /** Archive without OCR, AI, text extraction, or a generated Markdown wrapper. */
+  async archiveOriginalFiles(
+    project: LifeOSProject,
+    files: ReadableImportFile[],
+    onProgress?: (progress: ProjectDocumentImportProgress) => void
+  ): Promise<string[]> {
+    const folderPath = `${this.attachmentsPath(project)}/Originals`;
+    return archiveOnly(files,
+      async source => (await saveImportedFileToVault(this.app, source, { folderPath })).vaultPath,
+      (fileIndex, fileCount, source, stage) => onProgress?.({
+        fileIndex, fileCount, sourceName: source.name, stage
+      }));
+  }
+
+  listOriginalOnlyFiles(project: LifeOSProject): TFile[] {
+    const prefix = `${this.attachmentsPath(project)}/Originals/`;
+    return this.app.vault.getFiles().filter(file => file.path.startsWith(prefix))
+      .sort((a, b) => b.stat.mtime - a.stat.mtime);
   }
 
   async listDocuments(

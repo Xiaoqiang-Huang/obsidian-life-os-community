@@ -34,11 +34,13 @@ export class KnowledgeFileActionModal extends LifeOSModal {
     body.createEl("p", { cls: "lifeos-knowledge-file-path", text: this.file.path });
     let input: HTMLInputElement | undefined;
     if (rename) {
-      body.createEl("p", { text: "仅更改文件名，保留目录和内容；.md 扩展名可省略。同名时沿用自动编号规则。" });
+      body.createEl("p", { text: `仅更改文件名，保留目录和内容；.${this.file.extension} 扩展名可省略且不会改变。同名时自动编号。` });
       input = body.createEl("input", { cls: "lifeos-knowledge-file-input", attr: { type: "text", "aria-label": "新文件名" } });
       input.value = this.file.basename;
     } else {
-      body.createEl("p", { text: "确认将这份资料移入 Obsidian 回收站？本操作不会永久删除，也不会移除来源附件。" });
+      body.createEl("p", { text: this.file.path.includes("/Originals/")
+        ? "确认将这份原文件移入 Obsidian 回收站？本操作不会永久删除。"
+        : "确认将这份资料移入 Obsidian 回收站？本操作不会永久删除，也不会移除来源附件。" });
     }
     const status = body.createDiv({ attr: { role: "status", "aria-live": "polite" } });
     const cancel = createButton(footer, "取消", () => this.close(), { ghost: true });

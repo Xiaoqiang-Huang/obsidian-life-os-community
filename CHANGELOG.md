@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.22 - 2026-09-28
+
+### Fixed
+
+- Keep knowledge documents browsable when an individual note has malformed YAML properties, without changing the note's original bytes.
+- Bound and lay out AI context-source cards so long excerpts no longer overlap controls or force horizontal overflow.
+- Open stored source documents from the knowledge library and preserve their native file type.
+- Add an original-file-only import mode that stores PDF and other supported files without parsing text or creating a Markdown wrapper; recognize both English and localized Chinese knowledge folders when listing and searching those files.
+
+### Validation
+
+- TypeScript check and production build pass. Original-only archive tests confirm no parser call or generated Markdown, and rollback restores the baseline.
+- The localized-folder fix was verified against an existing PDF in the experience vault; after plugin reload, the user confirmed that the file appeared in Knowledge search and opened successfully.
+
 ## 0.3.21 - 2026-09-28
 
 ### Fixed
