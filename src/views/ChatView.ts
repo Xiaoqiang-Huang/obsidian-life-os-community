@@ -797,6 +797,11 @@ export class LifeOSChatView extends ItemView {
     this.inputEl.focus();
   }
 
+  /** Allows Help to reuse an already-open chat without silently losing its question. */
+  setDraftPrompt(prompt: string): void {
+    this.applyComposerPrompt(prompt);
+  }
+
   private renderRuntimeStatus(service?: ChatService): void {
     if (!this.runtimeStatusEl) return;
     this.runtimeStatusEl.empty();

@@ -1,4 +1,5 @@
 import type { LifeOSAgentToolExecutionContext } from "./agent/LifeOSAgentTypes";
+import { buildGuideHelpContext } from "../content/GuideManual";
 import { withAgentBudget, agentBudgetOf } from "./agent/AgentBudgetClient";
 import { combineAgentSignals, type AgentRequestBudget } from "./agent/AgentRequestBudget";
 import { agentEntrySessions } from "./AgentEntrySessions";
@@ -624,6 +625,7 @@ export class LifeOSAgentService {
       channelPolicy.systemInstruction,
       ...(input.systemInstructions || [])
     ].filter(Boolean).join("\n");
+    const guideHelpContext = buildGuideHelpContext(input.content);
     const promptSections = (input.promptSections || [])
       .filter((section) => section.content.trim())
       .map((section) => section.title ? `# ${section.title}\n${section.content.trim()}` : section.content.trim());
@@ -650,6 +652,7 @@ export class LifeOSAgentService {
         ].join("\n")
         : "",
       input.skillIndexSummary ? `# 已安装 Skill 轻量索引\n${this.compact(input.skillIndexSummary, 5_000, "[其余 Skill 索引已省略，可按名称继续调用。]")}` : "",
+      guideHelpContext,
       input.context ? `# 与当前请求相关的 Life OS 证据\n${input.context}` : "",
       input.imageParts?.length
         ? `# 本轮附件\n仅可使用本轮明确绑定的 ${input.imageParts.length} 张图片；后续新主题不得继续围绕这些图片，除非用户明确说“上一张图/前面的图”。`

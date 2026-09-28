@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, setIcon } from "obsidian";
+import { ItemView, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import { createButton } from "../components/Button";
 import { createCard } from "../components/Card";
 import { createHeroHeader } from "../components/HeroHeader";
@@ -6,6 +6,8 @@ import { createLifeOSShell } from "../components/LifeOSComponent";
 import { USER_GUIDE_VIEW_TYPE } from "../constants";
 import type PersonalLifeSystemPlugin from "../main";
 import { FirstRunModal } from "../modals/FirstRunModal";
+import { GUIDE_SECTIONS, searchGuideSections, type GuideSection } from "../content/GuideManual";
+import { requireProFeature } from "../licensing/entitlement";
 
 const HIGHLIGHTS = [
   { label: "从小事开始", value: "先记一句", copy: "不需要模型或网络即可记录、找回、打开来源。AI 是可选的整理和执行帮手。" },
@@ -120,11 +122,63 @@ export class UserGuideView extends ItemView {
       ]
     });
 
+    this.renderManual(main);
     this.renderHighlights(main);
     this.renderMigration(main);
     this.renderFeatureMap(main);
     this.renderWorkflows(main);
     this.renderDataAndPro(main);
+  }
+
+  private renderManual(parent: HTMLElement): void {
+    const panel = createCard(parent, "lifeos-guide-manual");
+    panel.createEl("h2", { text: "完整使用文档" });
+    panel.createEl("p", { text: "手册随插件离线提供。先搜索章节、照步骤操作；配置好 AI 后，也可以直接问用法。" });
+    const controls = panel.createDiv({ cls: "lifeos-guide-manual-controls" });
+    const search = controls.createEl("input", { type: "search", placeholder: "搜索功能，例如 PDF、任务、微信" });
+    search.setAttribute("aria-label", "搜索使用手册");
+    const results = panel.createDiv({ cls: "lifeos-guide-manual-results" });
+    const render = (sections: GuideSection[]): void => {
+      results.empty();
+      if (!sections.length) {
+        results.createEl("p", { text: "没有找到对应章节。可换一个功能名，或在下方询问 AI。" });
+        return;
+      }
+      for (const section of sections) {
+        const details = results.createEl("details", { cls: "lifeos-guide-manual-section" });
+        details.createEl("summary", { text: section.title });
+        const steps = details.createEl("ol");
+        for (const step of section.steps) steps.createEl("li", { text: step });
+        if (section.note) details.createEl("p", { cls: "lifeos-muted", text: section.note });
+      }
+    };
+    search.addEventListener("input", () => render(searchGuideSections(search.value, GUIDE_SECTIONS.length)));
+    render(GUIDE_SECTIONS);
+
+    const ask = createCard(panel, "lifeos-guide-ask");
+    ask.createEl("h3", { text: "向 AI 问使用方法" });
+    ask.createEl("p", { text: "AI 只在你提交问题后调用；会按需读取匹配的内置手册章节，手册之外的内容会提示核对。" });
+    const question = ask.createEl("textarea", { placeholder: "例如：如何只导入 PDF 原文件，不解析为 Markdown？" });
+    question.setAttribute("aria-label", "向 AI 询问插件使用方法");
+    const actions = ask.createDiv({ cls: "lifeos-guide-card-actions" });
+    createButton(actions, "问 AI 助手", () => void this.askGuideQuestion(question.value), { primary: true, icon: "messages-square" });
+    createButton(actions, "配置 AI", () => void this.plugin.activateSettings(), { ghost: true, icon: "settings-2" });
+    if (!this.plugin.ai.isConfigured()) ask.createEl("p", { cls: "lifeos-muted", text: "尚未配置 AI：手册仍可离线查看。先到设置 → AI 模型完成配置并测试连接。" });
+  }
+
+  private async askGuideQuestion(rawQuestion: string): Promise<void> {
+    const question = rawQuestion.trim();
+    if (!question) {
+      new Notice("请先输入想了解的功能。", 3500);
+      return;
+    }
+    if (!this.plugin.ai.isConfigured()) {
+      new Notice("请先在设置中配置并测试 AI 模型；内置手册无需 AI 即可使用。", 5000);
+      await this.plugin.activateSettings();
+      return;
+    }
+    if (!requireProFeature(this.plugin, "aiChat")) return;
+    await this.plugin.activateChat(`【插件使用帮助】${question}`);
   }
 
   private renderHighlights(parent: HTMLElement): void {

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.23 - 2026-09-29
+
+### Added
+
+- Add a searchable, offline in-plugin user manual with fourteen task-oriented sections covering quick start, minimum AI setup, knowledge/PDF intake, projects, tasks, diary, reviews, Skill, and troubleshooting.
+- Let users ask the AI assistant from Help after model and entitlement checks. Plugin-usage questions receive only relevant manual sections through the shared Agent message path used by desktop, selection assistance, and Weixin.
+
+### Validation and limits
+
+- TypeScript and production build, manual question routing, clean community export, patch replay and rollback checks passed. Live Obsidian Help-page interaction and a real model reply are not claimed until host acceptance is recorded.
+
 ## 0.3.22 - 2026-09-28
 
 ### Fixed

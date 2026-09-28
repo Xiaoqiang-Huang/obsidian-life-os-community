@@ -6,7 +6,7 @@
 
 [**English**](README.md) · [简体中文](README.zh-CN.md)
 
-![Version](https://img.shields.io/badge/version-0.3.22-0f172a?style=flat-square)
+![Version](https://img.shields.io/badge/version-0.3.23-0f172a?style=flat-square)
 ![Obsidian](https://img.shields.io/badge/Obsidian-1.6.6%2B-7c3aed?style=flat-square)
 ![Local first](https://img.shields.io/badge/data-local--first-15803d?style=flat-square)
 ![Mobile](https://img.shields.io/badge/mobile-supported-2563eb?style=flat-square)
@@ -17,9 +17,11 @@
 
 Life OS Assistant turns an Obsidian vault into a connected workspace for **today, tasks, diary, knowledge, memory, reviews, AI assistance, and project AI sessions**. Your editable records remain Markdown in the vault; original-only imports keep their native file format instead. AI writeback is off by default; you can keep preview confirmation or explicitly opt in to automatic writes only when the current request names one unambiguous destination.
 
-Current release: **0.3.22** · Obsidian **1.6.6+** · `isDesktopOnly: false`
+Current release: **0.3.23** · Obsidian **1.6.6+** · `isDesktopOnly: false`
 
-> **About the images:** the walkthrough images below were generated from the 0.3.20 information architecture. They use synthetic data and a neutral Obsidian theme, so newer 0.3.22 controls may differ; your actual layout follows your Obsidian theme, viewport, and enabled features.
+> **About the images:** the walkthrough images below were generated from the 0.3.20 information architecture. They use synthetic data and a neutral Obsidian theme, so newer 0.3.23 controls may differ; your actual layout follows your Obsidian theme, viewport, and enabled features.
+
+Open **Help** inside the plugin for fourteen offline, searchable how-to sections. Once an AI model is configured and AI Chat is available under your license, ask usage questions from Help or the AI assistant; relevant manual sections are supplied on demand, not on every turn.
 
 ![Life OS Today dashboard](readme-assets/01-today-overview.webp)
 
@@ -190,7 +192,7 @@ After the listing is accepted:
 
 ### Manual installation
 
-Create `.obsidian/plugins/personal-life-system/` and copy these three assets from an exact semantic-version release tag such as `0.3.22`:
+Create `.obsidian/plugins/personal-life-system/` and copy these three assets from an exact semantic-version release tag such as `0.3.23`:
 
 - `main.js`
 - `manifest.json`

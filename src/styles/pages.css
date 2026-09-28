@@ -561,3 +561,14 @@
 
 /* Long-press navigation ordering: feedback without changing item geometry. */
 .lifeos-v3 .lifeos-sortable-nav .is-reorder-ready { outline: 2px solid var(--v3-accent); outline-offset: -2px; cursor: grab; }
+.lifeos-guide-manual { margin-block: 1rem; padding: 1.25rem; }
+.lifeos-guide-manual > h2, .lifeos-guide-ask > h3 { margin: 0 0 .5rem; }
+.lifeos-guide-manual-controls { display: flex; gap: .75rem; margin: 1rem 0; }
+.lifeos-guide-manual-controls input { flex: 1; min-width: 0; width: 100%; }
+.lifeos-guide-manual-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 21rem), 1fr)); gap: .55rem; }
+.lifeos-guide-manual-section { min-width: 0; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m); background: var(--background-primary); padding: .65rem .85rem; }
+.lifeos-guide-manual-section summary { cursor: pointer; font-weight: 600; }
+.lifeos-guide-manual-section ol { padding-inline-start: 1.4rem; margin-bottom: .5rem; line-height: 1.6; }
+.lifeos-guide-manual-section li { overflow-wrap: anywhere; margin-block: .35rem; }
+.lifeos-guide-ask { margin-top: 1rem; padding: 1rem; }
+.lifeos-guide-ask textarea { display: block; width: 100%; min-height: 5rem; resize: vertical; margin-block: .75rem; }

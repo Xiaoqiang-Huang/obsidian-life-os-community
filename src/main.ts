@@ -3616,6 +3616,10 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     const leaf = this.getLifeOsLeaf();
     await leaf.setViewState({ type: CHAT_VIEW_TYPE, active: true });
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
+    if (leaf.view instanceof LifeOSChatView) {
+      const pending = this.consumePendingChatPrompt();
+      if (pending) leaf.view.setDraftPrompt(pending);
+    }
   }
 
   async activateUserGuide(): Promise<void> {
