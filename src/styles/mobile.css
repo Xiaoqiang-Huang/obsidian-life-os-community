@@ -82,6 +82,17 @@
 .lifeos-v3.lifeos-is-phone-pane .lifeos-chat-composer > textarea { min-height: 68px; max-height: 140px; }
 .lifeos-v3.lifeos-is-phone-pane .lifeos-chat-send-actions { display: flex; flex-direction: row; gap: 6px; width: 100%; }
 .lifeos-v3.lifeos-is-phone-pane .lifeos-chat-send-actions button { flex: 1; width: auto; }
+/* Keep the integrated composer usable when the assistant becomes a phone pane. */
+.lifeos-v3.lifeos-is-phone-pane .lifeos-chat-composer {
+  display: flex; flex-direction: column; margin: 0 8px max(8px, env(safe-area-inset-bottom));
+  padding: 9px 10px; overflow: visible;
+}
+.lifeos-v3.lifeos-is-phone-pane .lifeos-chat-composer-bottom { gap: 5px; }
+.lifeos-v3.lifeos-is-phone-pane .lifeos-chat-composer-bottom-right { gap: 4px; }
+.lifeos-v3.lifeos-is-phone-pane .lifeos-chat-quick-controls .lifeos-chat-compact-label { display: none; }
+.lifeos-v3.lifeos-is-phone-pane .lifeos-chat-quick-controls .lifeos-chat-compact-select { max-width: 115px; }
+.lifeos-v3.lifeos-is-phone-pane .lifeos-chat-send-actions button { flex: 0 0 36px; width: 36px; }
+.lifeos-v3.lifeos-is-phone-pane .lifeos-chat-composer-suggestions { margin: 0 8px 6px; max-height: 32vh; }
 .lifeos-v3.lifeos-is-phone-pane .lifeos-chat-compact-toolbar { grid-template-columns: minmax(0, 1fr); }
 .lifeos-v3.lifeos-is-phone-pane .lifeos-chat-options > summary { min-height: 44px; display: flex; align-items: center; }
 .lifeos-v3.lifeos-is-phone-pane .lifeos-settings-overview-grid { grid-template-columns: minmax(0, 1fr); }

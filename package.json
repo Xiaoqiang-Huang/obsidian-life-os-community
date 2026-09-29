@@ -1,6 +1,6 @@
 {
   "name": "obsidian-life-os",
-  "version": "0.3.23",
+  "version": "0.3.24",
   "description": "A local-first personal life system for Obsidian: diary, tasks, knowledge, memory, and AI-assisted reviews.",
   "main": "main.js",
   "scripts": {
@@ -22,6 +22,7 @@
     "@tesseract.js-data/chi_sim": "^1.0.0",
     "@tesseract.js-data/eng": "^1.0.0",
     "@ybouane/liquidglass": "^1.0.3",
+    "docx-preview": "^0.4.1",
     "fflate": "^0.8.3",
     "pdfjs-dist": "^6.2.108",
     "qrcode": "^1.5.4",

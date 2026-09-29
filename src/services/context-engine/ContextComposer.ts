@@ -87,7 +87,8 @@ export class ContextComposer {
       "",
       "",
       `## [${source.citationId}] ${section.title}`,
-      `来源：[${source.citationId}] ${source.path}`,
+      `来源：[${source.citationId}] ${source.originalPath || source.path}`,
+      source.originalPath ? `识别文本缓存：${source.path}；机器识别内容请对照原文档核实。` : "",
       source.evidenceOrigin === "user-saved-conversation" ? `来源性质：${USER_SAVED_CONVERSATION_LABEL}；仅说明该对话被保存，不证明其中主张为真。` : "",
       locator ? `定位：${locator}` : ""
     ].filter((line, index) => line || index < 2).join("\n") + "\n";

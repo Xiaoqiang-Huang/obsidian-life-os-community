@@ -7,7 +7,7 @@ type FileLike = TFile & {
   name?: string;
   basename?: string;
   extension?: string;
-  stat?: { mtime?: number };
+  stat?: { mtime?: number; size?: number };
 };
 
 interface CacheTag {
@@ -89,6 +89,7 @@ export class ObsidianMetadataService {
 
       const parsed = await this.metadataForFile(file);
       if (!parsed) continue;
+      if (!this.recognitionSourceIsCurrent(parsed.frontmatter)) continue;
       if (!this.policy.isAllowedFrontmatter(parsed.frontmatter) && !await this.readCitableSource(file.path)) continue;
 
       inventory.push({
@@ -112,6 +113,8 @@ export class ObsidianMetadataService {
     if (!file || !this.policy.isAllowedPath(file.path)) return "";
 
     try {
+      const metadata = await this.metadataForFile(file);
+      if (!metadata || !this.recognitionSourceIsCurrent(metadata.frontmatter)) return "";
       const mtime = file.stat?.mtime ?? 0;
       const cached = this.documentCache.get(file.path);
       if (cached && cached.mtime === mtime) {
@@ -140,7 +143,24 @@ export class ObsidianMetadataService {
   }
 
   decorateSource(source: ContextSource): ContextSource {
+    const frontmatter = this.documentCache.get(source.path)?.metadata.frontmatter;
+    if (frontmatter?.type === "lifeos-document-recognition" && this.recognitionSourceIsCurrent(frontmatter)) {
+      const page = /^第 (\d+) 页 \[(?:native|vision|empty)\]$/u.exec(source.heading || "");
+      return { ...source, originalPath: String(frontmatter.source_file), page: page ? Number(page[1]) : undefined,
+        title: String(frontmatter.source_file).split("/").pop() || source.title,
+        evidenceOrigin: this.evidenceDecisions.get(source.path)?.origin ?? "note" };
+    }
     return { ...source, evidenceOrigin: this.evidenceDecisions.get(source.path)?.origin ?? "note" };
+  }
+
+  private recognitionSourceIsCurrent(frontmatter: Record<string, unknown>): boolean {
+    if (frontmatter.type !== "lifeos-document-recognition") return true;
+    const sourcePath = String(frontmatter.source_file || "").replace(/\\/gu, "/");
+    const root = this.rootFolder.replace(/\\/gu, "/").replace(/\/+$/u, "");
+    if (!sourcePath.startsWith(`${root}/`) || !/\.(pdf|docx)$/iu.test(sourcePath)) return false;
+    const source = this.app.vault.getAbstractFileByPath?.(sourcePath);
+    return !!source && source.stat?.size === Number(frontmatter.source_size)
+      && source.stat?.mtime === Number(frontmatter.source_mtime);
   }
 
   /** Call after readFile: graph/index metadata must not quote headings/tags inside masked chat blocks. */

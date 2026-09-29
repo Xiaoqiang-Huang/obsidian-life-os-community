@@ -31,7 +31,7 @@ import {
   type AiDocumentEditCandidate,
   type AiDocumentEditTarget
 } from "../services/AiDocumentEditService";
-import { buildImportedAiSkillPackageMarkdown, buildImportedAiSkillRecord, composeAiSkillPrompt, createImportedAiSkills, ensureCustomAiSkillCategory, getAiSkillCategories, getAiSkillCategoryMeta, getAiSkills, getAiSkillsByCategory, isImportableGitHubSkillTextPath, normalizeAiSkillCategoryId, normalizeAiSkillIds, normalizeAiSkillOverrides, normalizeCustomAiSkillCategories, normalizeGitHubSkillUrl, normalizeImportedAiSkillFilePath, updateImportedAiSkillRecord, type AiSkill, type AiSkillCategory, type AiSkillCustomCategory, type AiSkillOverride, type ImportedAiSkillRecord, type ImportedAiSkillSourceFile, type NormalizedGitHubSkillUrl } from "../services/AiSkillService";
+import { buildImportedAiSkillPackageMarkdown, buildImportedAiSkillRecord, composeAiSkillPrompt, createImportedAiSkills, ensureCustomAiSkillCategory, getAiSkillCategories, getAiSkillCategoryMeta, getAiSkills, getAiSkillsByCategory, getAvailableAiSkills, isImportableGitHubSkillTextPath, normalizeAiSkillCategoryId, normalizeAiSkillIds, normalizeAiSkillOverrides, normalizeCustomAiSkillCategories, normalizeGitHubSkillUrl, normalizeImportedAiSkillFilePath, updateImportedAiSkillRecord, type AiSkill, type AiSkillCategory, type AiSkillCustomCategory, type AiSkillOverride, type ImportedAiSkillRecord, type ImportedAiSkillSourceFile, type NormalizedGitHubSkillUrl } from "../services/AiSkillService";
 import { LlmWikiIntakeService, type LlmWikiSaveInput, type LlmWikiSaveResult } from "../services/LlmWikiIntakeService";
 import { LlmWikiPathService } from "../services/LlmWikiPathService";
 import { LlmWikiUndoService } from "../services/LlmWikiUndoService";
@@ -43,6 +43,7 @@ import {
 import type { LifeOSAgentEvent, LifeOSAgentToolResult } from "../services/agent/LifeOSAgentTypes";
 import { CHAT_IMPORT_ACCEPT, buildImportedDocumentsContextMarkdown, buildImportedDocumentsMarkdown, buildImportedDocumentsSummary, formatAttachmentSize, formatImportedDocumentReference, readImportedFile, saveImportedFileToVault, type ImportedDocument } from "../services/DocumentImportService";
 import { PdfOcrService } from "../services/PdfOcrService";
+import { DocumentRecognitionCacheService } from "../services/DocumentRecognitionCacheService";
 import { buildNumericEvidenceMarkdown, extractNumericEvidence, hasNumericIntent, type NumericEvidence } from "../services/NumericEvidenceService";
 import { MemoryService } from "../services/MemoryService";
 import {
@@ -63,6 +64,7 @@ import { today } from "../utils/dates";
 import { renderMarkdownDisplay } from "../utils/markdown-render";
 import { joinPath, writeFile as writeVaultFile } from "../utils/vault";
 import { randomId } from "../utils/ids";
+import { composerFileLabel, composerSkillLabel, findComposerFiles, findComposerSkills, promptWithoutFileLabel, promptWithoutSelectedSkill, readComposerTrigger, replaceComposerTrigger, type ComposerTrigger } from "../ui/chat-composer-mentions";
 
 type UiChatMode = "chat" | "exam";
 type UiChatContextMode = "smart" | "semantic" | "global";
@@ -76,6 +78,17 @@ type ProjectWhiteboardChatIntent = "generate" | "adjust";
 type ChatComposerControlId = "mode" | "project" | "model" | "skill" | "web" | "reasoning" | "context" | "memory" | "aiReply" | "writeback" | "board" | "length" | "style";
 type ChatActivityStepState = "pending" | "active" | "done" | "skipped" | "error";
 type ChatActivityStepId = string;
+
+const CHAT_SLASH_SUGGESTIONS = [
+  { command: "/compact", description: "压缩早期对话，保留摘要" },
+  { command: "/usage", description: "查看上下文预算与上一轮用量" },
+  { command: "/sources", description: "打开本轮上下文来源" },
+  { command: "/memory", description: "查看当前记忆与摘要状态" },
+  { command: "/remember", description: "记录一条待确认的长期记忆" },
+  { command: "/whiteboard", description: "为当前项目生成白板" },
+  { command: "/whiteboard-adjust", description: "基于现有白板生成调整版" },
+  { command: "/clear", description: "清空当前显示，不删除历史" }
+] as const;
 
 interface ChatActivityStep {
   id: ChatActivityStepId;
@@ -215,6 +228,10 @@ export class LifeOSChatView extends ItemView {
   private inputEl!: HTMLTextAreaElement;
   private fileInputEl: HTMLInputElement | null = null;
   private attachmentListEl: HTMLElement | null = null;
+  private composerSuggestionEl: HTMLElement | null = null;
+  private composerSuggestionIndex = 0;
+  private composerSuggestionKey = "";
+  private composerSuggestionLimit = 20;
   private loadingEl!: HTMLElement;
   private stopButtonEl!: HTMLButtonElement;
   private sendButtonEl!: HTMLButtonElement;
@@ -263,6 +280,7 @@ export class LifeOSChatView extends ItemView {
   private manualComposerHeight: number | null = null;
   private composerCompositionActive = false;
   private composerCompositionEndedAt = 0;
+  private composerFileImportsPending = 0;
   private importedDocuments: ImportedDocument[] = [];
   private lastImportedDocuments: ImportedDocument[] = [];
   private importedAiSkills: AiSkill[] = [];
@@ -270,6 +288,8 @@ export class LifeOSChatView extends ItemView {
   private readonly messageActivity = new WeakMap<ChatMessage, ChatActivitySnapshot>();
   private readonly projectScopeControlId = randomId("lifeos-chat-project-scope");
   private agentSessionId = randomId("lifeos-chat-session");
+  private isViewOpen = false;
+  private chatStateUnsubscribe: (() => void) | null = null;
 
   constructor(leaf: WorkspaceLeaf, private plugin: PersonalLifeSystemPlugin) {
     super(leaf);
@@ -293,6 +313,8 @@ export class LifeOSChatView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
+    this.isViewOpen = true;
+    this.chatStateUnsubscribe?.();
     this.logEl?.removeEventListener("scroll", this.onChatScroll);
     await this.plugin.ensureBaseStructure();
     const draftInput = this.inputEl?.value ?? this.plugin.activeChatState.draftInput ?? "";
@@ -317,6 +339,7 @@ export class LifeOSChatView extends ItemView {
     this.webSearchMode = normalizeWebSearchMode(this.plugin.settings.defaultWebSearchMode);
     this.fileInputEl = null;
     this.attachmentListEl = null;
+    this.composerSuggestionEl = null;
     this.importedDocuments = importedSnapshot;
     this.importedAiSkills = createImportedAiSkills(this.plugin.settings.importedAiSkills);
     this.selectedSkillIds = normalizeAiSkillIds(this.plugin.settings.defaultAiSkillIds, this.plugin.settings.defaultAiSkillId, this.importedAiSkills, this.plugin.settings.aiSkillOverrides);
@@ -332,6 +355,20 @@ export class LifeOSChatView extends ItemView {
     const service = this.service();
     this.contextCards = await this.contextService().collectStatusCards();
     this.renderConversation(root, service);
+    this.chatStateUnsubscribe = this.plugin.chatContinuity.subscribe((state, _run, source) => {
+      if (!this.isViewOpen || source === this || state.sessionId !== this.agentSessionId) return;
+      this.restoreActiveChatState();
+      this.renderMessages();
+      this.renderRuntimeStatus(service);
+      this.syncSharedRunControls();
+    });
+    // A reply may have advanced while the view awaited context/status cards.
+    // Re-read after subscription so that the return view cannot miss the end.
+    if (this.plugin.activeChatState.sessionId === this.agentSessionId) {
+      this.restoreActiveChatState();
+      this.renderMessages();
+    }
+    this.syncSharedRunControls();
     const pending = this.plugin.consumePendingChatPrompt();
     if (pending) {
       this.inputEl.value = pending;
@@ -350,12 +387,18 @@ export class LifeOSChatView extends ItemView {
     this.selectionListenerDocument?.removeEventListener("selectionchange", this.onChatSelectionChange);
     this.selectionListenerDocument = null;
     this.persistActiveChatState();
+    this.isViewOpen = false;
+    this.chatStateUnsubscribe?.();
+    this.chatStateUnsubscribe = null;
     this.detachMobileViewportListener();
     this.detachComposerResizeDrag();
     this.containerEl.removeClass("lifeos-chat-view-host");
   }
 
   private restoreActiveChatState(): void {
+    // Obsidian may remount the same view while its request is still running.
+    // Keep the live assistant object; replacing it with persisted clones would detach streaming updates.
+    if (this.abortController && this.plugin.chatContinuity.activeRun?.controller === this.abortController) return;
     const restoredSessionId = String(this.plugin.activeChatState.sessionId || "").trim();
     if (restoredSessionId) this.agentSessionId = restoredSessionId;
     this.memoryMode = normalizeAgentMemoryMode(
@@ -366,7 +409,6 @@ export class LifeOSChatView extends ItemView {
     this.compressedContextSourceCount = Math.max(0, Math.floor(Number(this.plugin.activeChatState.compressedSourceCount) || 0));
     this.compressedContextUpdatedAt = String(this.plugin.activeChatState.compressedUpdatedAt || "");
     const messages = this.plugin.activeChatState.messages ?? [];
-    if (messages.length === 0) return;
     this.messages = messages
       .filter((message): message is ChatMessage => {
         return Boolean(message)
@@ -378,9 +420,11 @@ export class LifeOSChatView extends ItemView {
   }
 
   private persistActiveChatState(): void {
-    this.plugin.activeChatState = {
-      messages: this.messages.map((message) => ({ role: message.role, content: message.content })),
-      draftInput: this.inputEl?.value ?? "",
+    const sharedRun = this.plugin.chatContinuity.activeRun;
+    const remoteRun = sharedRun?.sessionId === this.agentSessionId && sharedRun.controller !== this.abortController;
+    this.plugin.chatContinuity.publish({
+      messages: remoteRun ? this.plugin.activeChatState.messages : this.messages.map((message) => ({ role: message.role, content: message.content })),
+      draftInput: this.isViewOpen ? this.inputEl?.value ?? "" : this.plugin.activeChatState.draftInput,
       updatedAt: Date.now(),
       sessionId: this.agentSessionId,
       memoryMode: this.memoryMode,
@@ -388,11 +432,11 @@ export class LifeOSChatView extends ItemView {
       compressedMessageCount: this.compressedContextMessageCount,
       compressedSourceCount: this.compressedContextSourceCount,
       compressedUpdatedAt: this.compressedContextUpdatedAt
-    };
+    }, this);
   }
 
   private clearActiveChatState(): void {
-    this.plugin.activeChatState = {
+    this.plugin.chatContinuity.publish({
       messages: [],
       draftInput: "",
       updatedAt: Date.now(),
@@ -402,7 +446,18 @@ export class LifeOSChatView extends ItemView {
       compressedMessageCount: 0,
       compressedSourceCount: 0,
       compressedUpdatedAt: ""
-    };
+    }, this);
+  }
+
+  private syncSharedRunControls(): void {
+    const active = this.plugin.chatContinuity.activeRun?.sessionId === this.agentSessionId;
+    this.isStreaming = active;
+    if (this.sendButtonEl) this.sendButtonEl.disabled = active;
+    if (this.stopButtonEl) active ? this.stopButtonEl.show() : this.stopButtonEl.hide();
+    if (this.loadingEl) {
+      if (active) { this.loadingEl.setText("回答正在后台继续生成，切换页面不会中断…"); this.loadingEl.show(); }
+      else this.loadingEl.hide();
+    }
   }
 
   private renderConversation(parent: HTMLElement, service: ChatService): void {
@@ -473,7 +528,7 @@ export class LifeOSChatView extends ItemView {
     const composerToolbar = composer.createDiv({ cls: "lifeos-chat-composer-toolbar" });
     composerToolbar.dataset.accept = CHAT_IMPORT_ACCEPT;
     const options = composerToolbar.createEl("details", { cls: "lifeos-chat-options" });
-    options.createEl("summary", { text: "会话选项 · 模型、Skill、联网与记忆" });
+    options.createEl("summary", { text: "会话选项" });
     this.renderComposerControls(options.createDiv({ cls: "lifeos-chat-options-body" }));
     this.attachmentListEl = composer.createDiv({ cls: "lifeos-chat-attachment-list" });
     this.renderAttachmentList();
@@ -488,7 +543,7 @@ export class LifeOSChatView extends ItemView {
     });
     this.inputEl = composer.createEl("textarea", {
       cls: "lifeos-input",
-      attr: { placeholder: "输入问题、修改要求，或粘贴需要继续处理的内容…" }
+      attr: { placeholder: "输入问题，@ 引用文档，/ 选择 Skill…", "aria-autocomplete": "list" }
     });
     this.bindComposerResizeHandle(resizeHandle);
     composer.addEventListener("dragover", (event) => {
@@ -511,6 +566,11 @@ export class LifeOSChatView extends ItemView {
       this.composerCompositionEndedAt = Date.now();
       this.resizeComposer();
       this.persistActiveChatState();
+      // Some IMEs commit the final value before `compositionend`, others dispatch
+      // one last input afterwards. Refresh after this event so both orders work.
+      queueMicrotask(() => {
+        if (this.inputEl?.isConnected) this.renderComposerSuggestions();
+      });
     });
     this.inputEl.addEventListener("keydown", (event) => {
       const isFinishingComposition = event.isComposing
@@ -518,6 +578,7 @@ export class LifeOSChatView extends ItemView {
         || event.keyCode === 229
         || (event.key === "Enter" && Date.now() - this.composerCompositionEndedAt < 40);
       if (isFinishingComposition) return;
+      if (this.handleComposerSuggestionKey(event)) return;
       const modEnter = event.key === "Enter" && (event.ctrlKey || event.metaKey);
       const plainEnter = event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey;
       const shouldSend = this.plugin.settings.chatSendBehavior === "modEnterToSend" ? modEnter : plainEnter;
@@ -533,6 +594,7 @@ export class LifeOSChatView extends ItemView {
     });
     this.inputEl.addEventListener("input", () => {
       this.resizeComposer();
+      this.renderComposerSuggestions();
       this.persistActiveChatState();
     });
     this.inputEl.addEventListener("focus", () => this.keepComposerVisible(true));
@@ -541,20 +603,33 @@ export class LifeOSChatView extends ItemView {
       this.keepComposerVisible();
     };
     window.visualViewport?.addEventListener("resize", this.visualViewportHandler);
-    const sendActions = composer.createDiv({ cls: "lifeos-chat-send-actions" });
-    const attachButton = createButton(sendActions, "添加文件", () => this.fileInputEl?.click(), {
+    const bottomBar = composer.createDiv({ cls: "lifeos-chat-composer-bottom" });
+    const leftActions = bottomBar.createDiv({ cls: "lifeos-chat-composer-bottom-left" });
+    const attachButton = createButton(leftActions, "添加文件", () => this.fileInputEl?.click(), {
       ghost: true,
-      icon: "paperclip",
+      icon: "plus",
       className: "lifeos-chat-send-attach"
     });
     attachButton.title = "添加文本、Markdown、CSV、JSON、PDF、DOCX 或图片；扫描版 PDF 自动 OCR";
+    attachButton.setAttribute("aria-label", "添加文件");
+    leftActions.appendChild(composerToolbar);
+    const rightActions = bottomBar.createDiv({ cls: "lifeos-chat-composer-bottom-right" });
+    this.renderQuickComposerControls(rightActions.createDiv({ cls: "lifeos-chat-quick-controls" }));
+    const sendActions = rightActions.createDiv({ cls: "lifeos-chat-send-actions" });
     this.sendButtonEl = createButton(sendActions, "发送问题", () => void this.send(service), { primary: true, icon: "send", className: "lifeos-chat-send" });
     this.sendButtonEl.title = this.plugin.settings.chatSendBehavior === "modEnterToSend" ? "Ctrl/Cmd + Enter 发送" : "Enter 发送，Shift + Enter 换行";
     this.stopButtonEl = createButton(sendActions, "停止生成", () => this.stopGeneration(), { ghost: true, icon: "square", className: "lifeos-chat-stop" });
     this.stopButtonEl.hide();
 
+    this.composerSuggestionEl = panel.createDiv({ cls: "lifeos-chat-composer-suggestions", attr: { role: "listbox", "aria-label": "输入建议" } });
+    this.composerSuggestionEl.id = randomId("lifeos-chat-suggestions");
+    this.inputEl.setAttribute("aria-controls", this.composerSuggestionEl.id);
+    this.inputEl.setAttribute("aria-expanded", "false");
+    this.composerSuggestionEl.hide();
+
     this.runtimeStatusEl = panel.createDiv({ cls: "lifeos-chat-runtime-status", attr: { "aria-live": "polite" } });
     panel.insertBefore(this.runtimeStatusEl, composer);
+    panel.insertBefore(this.composerSuggestionEl, composer);
     this.renderRuntimeStatus(service);
   }
 
@@ -579,6 +654,218 @@ export class LifeOSChatView extends ItemView {
     context.createSpan({ text: CHAT_WRITEBACK_MODE_LABELS[this.currentWritebackMode()] });
   }
 
+  private renderQuickComposerControls(parent: HTMLElement): void {
+    const options = getAvailableAiProviderOptions(this.plugin.settings);
+    const active = options.find((option) => option.active) ?? options[0];
+    this.renderComposerSelect(parent, "model", "模型", options.map((option) => ({
+      value: option.id,
+      label: `${option.label} · ${option.model || "未设置模型"}`,
+      disabled: !option.configured
+    })), active?.id ?? "openai", (value, element) => {
+      const option = options.find((candidate) => candidate.id === value);
+      if (!option || option.active) return;
+      element.disabled = true;
+      void this.switchAiProvider(option).finally(() => { if (element.isConnected) element.disabled = false; });
+    }, "选择本轮 AI 模型");
+    this.webSearchSelectEl = this.renderComposerSelect(parent, "web", "联网", [
+      { value: "auto", label: "自动" },
+      { value: "always", label: "开启" },
+      { value: "off", label: "关闭" }
+    ], this.webSearchMode, (value) => this.setWebSearchMode(value));
+  }
+
+  private handleComposerSuggestionKey(event: KeyboardEvent): boolean {
+    const host = this.composerSuggestionEl;
+    if (!host || host.hidden) return false;
+    const entries = Array.from(host.querySelectorAll<HTMLButtonElement>("button[data-suggestion]"));
+    if (event.key === "Escape") { event.preventDefault(); host.hide(); this.inputEl?.setAttribute("aria-expanded", "false"); return true; }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (!entries.length) return false;
+      event.preventDefault();
+      this.composerSuggestionIndex = (this.composerSuggestionIndex + (event.key === "ArrowDown" ? 1 : -1) + entries.length) % entries.length;
+      entries.forEach((entry, index) => entry.setAttribute("aria-selected", String(index === this.composerSuggestionIndex)));
+      entries[this.composerSuggestionIndex]?.scrollIntoView({ block: "nearest" });
+      return true;
+    }
+    if ((event.key === "Enter" || event.key === "Tab") && entries.length) {
+      event.preventDefault(); entries[this.composerSuggestionIndex]?.click(); return true;
+    }
+    return false;
+  }
+
+  private renderComposerSuggestions(): void {
+    const host = this.composerSuggestionEl;
+    // Pre-edit text already lives in the textarea during Chinese/Japanese/Korean
+    // composition. It must update suggestions, while keydown still protects
+    // Enter/Tab from accepting a suggestion before the IME commits its choice.
+    if (!host || !this.inputEl) return;
+    const trigger = readComposerTrigger(this.inputEl.value, this.inputEl.selectionStart);
+    host.empty();
+    if (!trigger) { host.hide(); this.inputEl.setAttribute("aria-expanded", "false"); this.composerSuggestionKey = ""; return; }
+    const query = trigger.query;
+    const suggestionKey = `${trigger.kind}:${query}`;
+    if (suggestionKey !== this.composerSuggestionKey) {
+      this.composerSuggestionKey = suggestionKey;
+      this.composerSuggestionLimit = 20;
+    }
+    let matchCount = 0;
+    let shownCount = 0;
+    if (trigger.kind === "file") {
+      const matches = findComposerFiles(this.app.vault.getFiles(), query);
+      matchCount = matches.length;
+      const visible = matches.slice(0, this.composerSuggestionLimit);
+      shownCount = visible.length;
+      host.createDiv({ cls: "lifeos-chat-suggestion-heading", text: `引用仓库文件 · ${matchCount} 个匹配 · 选择后加入本轮上下文` });
+      for (const file of visible) {
+        const button = host.createEl("button", { cls: "lifeos-chat-suggestion-item", attr: { type: "button", "data-suggestion": "file", role: "option" } });
+        button.createEl("strong", { text: file.basename });
+        button.createSpan({ text: file.path });
+        button.title = file.path;
+        button.onclick = () => void this.selectComposerFile(file, trigger);
+      }
+      if (!matches.length) host.createDiv({ cls: "lifeos-chat-suggestion-empty", text: "没有匹配的可引用文件；可用文件名或目录路径继续搜索" });
+    } else {
+      const commandPosition = !this.inputEl.value.slice(0, trigger.start).trim();
+      const commands = commandPosition
+        ? CHAT_SLASH_SUGGESTIONS.filter(({ command, description }) => !query || `${command} ${description}`.toLocaleLowerCase().includes(query))
+        : [];
+      if (commands.length) {
+        host.createDiv({ cls: "lifeos-chat-suggestion-heading", text: "命令" });
+        for (const { command, description } of commands) {
+          const button = host.createEl("button", { cls: "lifeos-chat-suggestion-item", attr: { type: "button", "data-suggestion": "command", role: "option" } });
+          button.createEl("strong", { text: command });
+          button.createSpan({ text: description });
+          button.onclick = () => this.applyComposerSuggestion(trigger, `${command}${command === "/remember" || command === "/whiteboard-adjust" ? " " : ""}`);
+        }
+      }
+      const matches = findComposerSkills(getAvailableAiSkills(this.importedAiSkills, this.plugin.settings.aiSkillOverrides), query);
+      matchCount = commands.length + matches.length;
+      const visible = matches.slice(0, Math.max(0, this.composerSuggestionLimit - commands.length));
+      shownCount = commands.length + visible.length;
+      if (matches.length) host.createDiv({ cls: "lifeos-chat-suggestion-heading", text: `Skill · ${matches.length} 个匹配 · 选择后本轮生效` });
+      for (const skill of visible) {
+        const button = host.createEl("button", { cls: "lifeos-chat-suggestion-item", attr: { type: "button", "data-suggestion": "skill", role: "option" } });
+        button.createEl("strong", { text: skill.name });
+        button.createSpan({ text: skill.description || skill.id });
+        button.title = `${skill.name} · ${skill.description || skill.id}`;
+        button.onclick = () => this.selectComposerSkill(skill, trigger);
+      }
+      if (!commands.length && !matches.length) host.createDiv({ cls: "lifeos-chat-suggestion-empty", text: "没有匹配的命令或 Skill" });
+    }
+    if (shownCount < matchCount) {
+      const more = host.createEl("button", { cls: "lifeos-chat-suggestion-more", text: `显示更多（${shownCount}/${matchCount}）`,
+        attr: { type: "button", "data-suggestion": "more", role: "option" } });
+      more.onclick = () => {
+        const top = host.scrollTop;
+        this.composerSuggestionLimit += 20;
+        this.renderComposerSuggestions();
+        host.scrollTop = top;
+      };
+    }
+    host.createDiv({ cls: "lifeos-chat-suggestion-footer", text: "输入内容搜索文档或 Skill · ↑↓ 选择 · Enter 确认 · Esc 关闭" });
+    this.composerSuggestionIndex = 0;
+    host.querySelector("button[data-suggestion]")?.setAttribute("aria-selected", "true");
+    host.show();
+    this.inputEl.setAttribute("aria-expanded", "true");
+  }
+
+  private applyComposerSuggestion(trigger: ComposerTrigger, replacement: string): void {
+    const next = replaceComposerTrigger(this.inputEl.value, trigger, replacement);
+    this.inputEl.value = next.value;
+    this.inputEl.focus();
+    this.inputEl.setSelectionRange(next.caret, next.caret);
+    this.composerSuggestionEl?.hide();
+    this.inputEl.setAttribute("aria-expanded", "false");
+    this.resizeComposer();
+    this.persistActiveChatState();
+  }
+
+  private composerTriggerStillCurrent(trigger: ComposerTrigger): boolean {
+    if (!this.inputEl?.isConnected) return false;
+    const current = readComposerTrigger(this.inputEl.value, this.inputEl.selectionStart);
+    return current?.kind === trigger.kind
+      && current.start === trigger.start
+      && current.end === trigger.end
+      && current.query === trigger.query;
+  }
+
+  private async selectComposerFile(file: TFile, trigger: ComposerTrigger): Promise<void> {
+    if (!requireProFeature(this.plugin, "knowledgeImport")) return;
+    const maxCount = Math.max(1, this.plugin.settings.maxChatAttachmentCount ?? 5);
+    const maxBytes = Math.max(256 * 1024, this.plugin.settings.maxChatAttachmentBytes ?? 6 * 1024 * 1024);
+    if (this.importedDocuments.length >= maxCount) { new Notice(`最多引用 ${maxCount} 个文件。`); return; }
+    if (this.importedDocuments.some((document) => document.vaultPath === file.path)) { new Notice("该文件已加入本轮上下文。"); return; }
+    if (file.stat.size > maxBytes) { new Notice(`文件超过 ${formatAttachmentSize(maxBytes)} 上限，请改用按页读取。`); return; }
+    if (!this.composerTriggerStillCurrent(trigger)) return;
+    const previousValue = this.inputEl.value;
+    this.applyComposerSuggestion(trigger, composerFileLabel(file.name));
+    const selectedValue = this.inputEl.value;
+    this.composerFileImportsPending += 1;
+    try {
+      let imported: ImportedDocument;
+      const extension = file.extension.toLocaleLowerCase();
+      if (extension === "pdf" || extension === "docx") {
+        const cache = new DocumentRecognitionCacheService(this.app,
+          new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage));
+        const cached = (await cache.currentCaches()).get(file.path);
+        if (extension === "docx") {
+          const result = await cache.readDocx(file);
+          imported = { id: randomId("vault-docx"), name: file.name, mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            size: file.stat.size, kind: "word", text: result.text.slice(0, 24_000), warnings: [] };
+          if (result.text.length > 24_000) imported.warnings.push("正文较长，本轮先引用前段；可以继续指定章节深入读取。");
+        } else {
+          const page = cached ? null : await cache.readPdfPage(file, 1);
+          const cacheFile = cached ?? (page?.cachePath ? this.app.vault.getAbstractFileByPath(page.cachePath) : null);
+          const text = cacheFile instanceof TFile ? await this.app.vault.cachedRead(cacheFile) : page?.text ?? "";
+          imported = { id: randomId("vault-pdf"), name: file.name, mimeType: "application/pdf",
+            size: file.stat.size, kind: "pdf", text: text.slice(0, 24_000), warnings: [
+              "本轮仅引用已识别的 PDF 页面；如需未识别页或整本内容，请明确要求继续按页读取。"
+            ] };
+          if (page?.requiresOcr) imported.warnings.push("首页没有可提取文字，可能需要视觉识别。");
+        }
+      } else {
+        imported = await readImportedFile({
+          name: file.name, size: file.stat.size,
+          text: () => this.app.vault.cachedRead(file),
+          arrayBuffer: () => this.app.vault.readBinary(file)
+        }, { maxBytes, allowImageVision: this.canUseVisionModel(), enablePdfOcr: false });
+        if (imported.text.length >= 24_000) imported.warnings.push("正文较长，本轮先引用前段；可以继续指定章节深入读取。");
+      }
+      imported.vaultPath = file.path;
+      imported.obsidianLink = `[[${file.path}]]`;
+      this.importedDocuments.push(imported);
+      this.renderAttachmentList();
+      this.persistActiveChatState();
+    } catch (error) {
+      if (this.inputEl.value === selectedValue) {
+        this.inputEl.value = previousValue;
+        this.inputEl.setSelectionRange(trigger.end, trigger.end);
+        this.resizeComposer();
+        this.persistActiveChatState();
+      }
+      new Notice(`引用文件失败，输入中的标记${this.inputEl.value === previousValue ? "已撤回" : "尚未绑定，请手动移除"}：${error instanceof Error ? error.message : String(error)}`, 7000);
+    } finally {
+      this.composerFileImportsPending -= 1;
+    }
+  }
+
+  private selectComposerSkill(skill: AiSkill, trigger: ComposerTrigger): void {
+    const previousSkill = getAiSkills(this.selectedSkillIds, this.importedAiSkills, this.plugin.settings.aiSkillOverrides)[0];
+    this.selectedSkillIds = [skill.id];
+    this.persistSelectedSkills();
+    this.syncSkillSelectionUi();
+    this.applyComposerSuggestion(trigger, composerSkillLabel(skill.name));
+    if (previousSkill && previousSkill.id !== skill.id && previousSkill.name !== skill.name) {
+      const withoutOldMarker = promptWithoutSelectedSkill(this.inputEl.value, previousSkill.name);
+      if (withoutOldMarker !== this.inputEl.value.trim()) {
+        this.inputEl.value = withoutOldMarker;
+        this.inputEl.setSelectionRange(withoutOldMarker.length, withoutOldMarker.length);
+        this.resizeComposer();
+        this.persistActiveChatState();
+      }
+    }
+  }
+
   private currentWritebackMode(): ChatWritebackMode {
     return normalizeChatWritebackMode(
       this.diaryToggleEl?.value ?? this.plugin.settings.chatWritebackMode,
@@ -599,6 +886,7 @@ export class LifeOSChatView extends ItemView {
     if (before && before.parentNode === parent) parent.insertBefore(controls, before);
     this.composerControlsEl = controls;
     for (const controlId of CHAT_COMPOSER_CONTROL_ORDER) {
+      if (controlId === "model" || controlId === "web") continue; // Visible below the input instead.
       switch (controlId) {
         case "mode":
           this.renderComposerSelect(controls, "mode", "模式", [
@@ -625,32 +913,8 @@ export class LifeOSChatView extends ItemView {
           void this.loadProjectScopeOptions(select);
           break;
         }
-        case "model": {
-          const options = getAvailableAiProviderOptions(this.plugin.settings);
-          const active = options.find((option) => option.active) ?? options[0];
-          this.renderComposerSelect(controls, "model", "AI 模型", options.map((option) => ({
-            value: option.id,
-            label: `${option.label} · ${option.model || "未设置模型"}`,
-            disabled: !option.configured
-          })), active?.id ?? "openai", (value, element) => {
-            const option = options.find((candidate) => candidate.id === value);
-            if (!option || option.active) return;
-            element.disabled = true;
-            void this.switchAiProvider(option).finally(() => {
-              if (element.isConnected) element.disabled = false;
-            });
-          }, "切换本轮使用的 AI Provider 与模型");
-          break;
-        }
         case "skill":
           this.renderSkillDropdown(controls);
-          break;
-        case "web":
-          this.webSearchSelectEl = this.renderComposerSelect(controls, "web", "联网", [
-            { value: "auto", label: "自动" },
-            { value: "always", label: "开启" },
-            { value: "off", label: "关闭" }
-          ], this.webSearchMode, (value) => this.setWebSearchMode(value), "自动：仅在实时、最新或明确要求搜索时联网");
           break;
         case "reasoning":
           this.renderComposerSelect(controls, "reasoning", "推理强度", AI_REASONING_EFFORT_OPTIONS.map((option) => ({
@@ -1630,10 +1894,19 @@ export class LifeOSChatView extends ItemView {
   }
 
   private toggleSkill(id: string, dropdown?: HTMLElement): void {
+    const previousSkill = getAiSkills(this.selectedSkillIds, this.importedAiSkills, this.plugin.settings.aiSkillOverrides)[0];
     const next = new Set(this.selectedSkillIds);
     if (next.has(id)) next.delete(id);
     else next.add(id);
     this.selectedSkillIds = normalizeAiSkillIds(Array.from(next), undefined, this.importedAiSkills, this.plugin.settings.aiSkillOverrides);
+    if (previousSkill && this.inputEl) {
+      const withoutOldMarker = promptWithoutSelectedSkill(this.inputEl.value, previousSkill.name);
+      if (withoutOldMarker !== this.inputEl.value.trim()) {
+        this.inputEl.value = withoutOldMarker;
+        this.resizeComposer();
+        this.persistActiveChatState();
+      }
+    }
     this.persistSelectedSkills();
     this.syncSkillSelectionUi(dropdown);
   }
@@ -2224,7 +2497,7 @@ export class LifeOSChatView extends ItemView {
     const card = parent.createDiv({ cls: "lifeos-context-source-card" });
     const head = card.createDiv({ cls: "lifeos-context-source-head" });
     head.createSpan({ cls: "lifeos-context-citation-id", text: source.citationId ? `[${source.citationId}]` : "来源" });
-    head.createEl("strong", { text: source.title || source.path, attr: { title: source.path } });
+    head.createEl("strong", { text: source.title || source.originalPath || source.path, attr: { title: source.originalPath || source.path } });
     const locator = this.contextSourceLocator(source);
     if (locator) card.createDiv({ cls: "lifeos-context-source-locator", text: locator });
     if (source.excerpt) {
@@ -2234,7 +2507,7 @@ export class LifeOSChatView extends ItemView {
     }
     const footer = card.createDiv({ cls: "lifeos-context-source-footer" });
     footer.createSpan({ text: this.contextSourceTypeLabel(source.type) });
-    const open = footer.createEl("button", { text: "打开来源", attr: { type: "button", title: source.path } });
+    const open = footer.createEl("button", { text: "打开来源", attr: { type: "button", title: source.originalPath || source.path } });
     open.onclick = () => void this.openContextSource(source);
   }
 
@@ -2278,7 +2551,9 @@ export class LifeOSChatView extends ItemView {
       window.open(source.path, "_blank", "noopener,noreferrer");
       return;
     }
-    const link = source.heading ? `${source.path}#${source.heading}` : source.path;
+    const link = source.originalPath
+      ? source.page ? `${source.originalPath}#page=${source.page}` : source.originalPath
+      : source.heading ? `${source.path}#${source.heading}` : source.path;
     await this.app.workspace.openLinkText(link, "", false);
   }
 
@@ -2356,6 +2631,11 @@ export class LifeOSChatView extends ItemView {
       });
       remove.onclick = () => {
         this.importedDocuments = this.importedDocuments.filter((item) => item.id !== document.id);
+        if (document.vaultPath && this.inputEl) {
+          this.inputEl.value = promptWithoutFileLabel(this.inputEl.value, document.name);
+          this.resizeComposer();
+          this.persistActiveChatState();
+        }
         this.renderAttachmentList();
       };
     }
@@ -2972,6 +3252,8 @@ export class LifeOSChatView extends ItemView {
   }
 
   private async send(service: ChatService): Promise<void> {
+    if (this.plugin.chatContinuity.activeRun) { new Notice("上一轮回答仍在生成，请等待完成或先停止生成。"); return; }
+    if (this.composerFileImportsPending > 0) { new Notice("引用文件仍在读取，请稍等片刻再发送。"); return; }
     if (this.isStreaming || this.dispatchingMessage || this.managingSession) return;
     this.dispatchingMessage = true;
     try { await this.sendInternal(service); }
@@ -2981,7 +3263,8 @@ export class LifeOSChatView extends ItemView {
 
   private async sendInternal(service: ChatService): Promise<void> {
     if (this.isStreaming) return;
-    const content = this.inputEl.value.trim();
+    const selectedSkill = getAiSkills(this.selectedSkillIds, this.importedAiSkills, this.plugin.settings.aiSkillOverrides)[0];
+    const content = promptWithoutSelectedSkill(this.inputEl.value, selectedSkill?.name);
     if (await this.manageAgentSession(content)) return;
     const documents = [...this.importedDocuments];
     if (!content && documents.length === 0) {
@@ -3044,6 +3327,7 @@ export class LifeOSChatView extends ItemView {
     let assistantContent = this.renderedMessageEls.get(assistant)?.bubble.querySelector(".lifeos-chat-bubble-content") as HTMLElement | null;
     this.abortController = new AbortController();
     this.isStreaming = true;
+    this.plugin.chatContinuity.beginRun(this.agentSessionId, this.abortController, this);
     this.stopNoticeShown = false;
     this.streamTimedOut = false;
     this.sendButtonEl.disabled = true;
@@ -3269,11 +3553,14 @@ export class LifeOSChatView extends ItemView {
         ]
       );
       requestStartedAt = Date.now();
+      if (this.plugin.agent.isBulkPdfRecognitionRequest(preparedAgentTurn)) {
+        new Notice("将按你的要求逐页识别整本 PDF。扫描页会调用视觉模型并可能产生费用；可点停止中断，已完成页会缓存。", 10000);
+      }
       timeoutHandle = window.setTimeout(() => {
         if (!this.abortController || !this.isStreaming) return;
         this.streamTimedOut = true;
         this.abortController.abort();
-      }, 90000);
+      }, this.plugin.agent.isBulkPdfRecognitionRequest(preparedAgentTurn) ? 20 * 60 * 1000 : 90000);
       const result = await this.plugin.agent.completeStream(
         preparedAgentTurn,
         {
@@ -3768,15 +4055,18 @@ export class LifeOSChatView extends ItemView {
   }
 
   private stopGeneration(): void {
-    if (!this.abortController || !this.isStreaming) return;
-    this.abortController.abort();
+    const controller = this.abortController ?? this.plugin.chatContinuity.activeRun?.controller;
+    if (!controller || !this.isStreaming) return;
+    controller.abort();
     this.stopNoticeShown = true;
     new Notice("已停止生成。已生成内容会保留。", 4000);
   }
 
   private finishStreaming(): void {
+    const controller = this.abortController;
     this.isStreaming = false;
     this.abortController = null;
+    if (controller) this.plugin.chatContinuity.endRun(controller, this);
     if (this.sendButtonEl) this.sendButtonEl.disabled = false;
     if (this.loadingEl) {
       this.loadingEl.hide();
@@ -4735,12 +5025,12 @@ export class LifeOSChatView extends ItemView {
     }
     if (paneWidth <= 520) {
       return {
-        min: 64,
+        min: 52,
         max: Math.round(Math.min(160, Math.max(112, viewportHeight * 0.2)))
       };
     }
     return {
-      min: 64,
+      min: 52,
       max: Math.round(Math.min(420, Math.max(180, viewportHeight * 0.42)))
     };
   }

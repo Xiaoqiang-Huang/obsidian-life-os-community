@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.24 - 2026-09-30
+
+### Added and fixed
+
+- Keep the selected `/Skill` and `@「file」` references visible in the AI composer while binding the actual Skill or Vault file. Wait for file reads before sending; retract an unchanged marker if import fails.
+- Let the Agent read PDF pages and DOCX text with source references, reuse user-visible recognition Markdown, and use configured vision recognition for image-only PDF pages when requested.
+- Preview DOCX in Obsidian and send selected text to the same read-only AI selection workflow as PDF.
+- Show the affected path, real file line and validated repair example for malformed knowledge-note properties without rewriting the original note.
+
+### Validation and limits
+
+- TypeScript, production build, composer interaction, light/dark layout, document-recognition tests, patch replay and rollback checks passed in the isolated candidate. The experience-vault user document and AI configuration were not changed.
+- Obsidian host click-through for the new composer behavior was not available while the host process was closed; no production payment or account service change is part of this release.
+
 ## 0.3.23 - 2026-09-29
 
 ### Added

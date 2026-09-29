@@ -1,7 +1,9 @@
 import type { FileSystemService } from "./FileSystemService";
 import { isManagedOriginalOnlyPath } from "../utils/managed-original-documents";
+import { isDocumentRecognitionPath } from "./DocumentRecognitionCacheService";
 /** User documents, not pipeline receipts, generated indexes or internal logs. */
 export function isManagedKnowledgePath(path: string, fs: FileSystemService): boolean {
+  if (isDocumentRecognitionPath(path, fs)) return false;
   const normalized = path.replace(/\\/g, "/");
   const projects = fs.path("Projects").replace(/\\/g, "/").replace(/\/+$/u, "");
   const root = fs.path("Knowledge").replace(/\\/g, "/").replace(/\/+$/u, "");

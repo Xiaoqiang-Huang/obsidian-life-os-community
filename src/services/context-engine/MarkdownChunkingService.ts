@@ -59,7 +59,7 @@ export class MarkdownChunkingService {
 
     for (const block of blocks) {
       const headingChanged = group.length > 0 && block.heading !== group[group.length - 1].heading;
-      if (headingChanged && groupChars >= 280) flush();
+      if (headingChanged && (groupChars >= 280 || /^第 \d+ 页 \[(?:native|vision|empty)\]$/u.test(block.heading))) flush();
 
       if (block.content.length > HARD_MAX_CHARS) {
         flush();

@@ -1,8 +1,9 @@
 import { ResourceBatchModal } from "../modals/ResourceBatchModal";
 import { LifeOSModal as Modal } from "../components/LifeOSModal";
 import { isManagedKnowledgePath } from "../services/knowledge-document-scope";
+import { DocumentRecognitionCacheService, isDocumentRecognitionPath } from "../services/DocumentRecognitionCacheService";
 import { readPageSession, savePageSession, savePageScroll, restorePageScroll } from "../utils/page-session-state";
-import { readManagedKnowledgeFrontmatter } from "../utils/managed-knowledge-frontmatter";
+import { readManagedKnowledgeFrontmatter, type ManagedKnowledgeFrontmatter } from "../utils/managed-knowledge-frontmatter";
 import { isManagedOriginalOnlyPath, managedOriginalSourcePath } from "../utils/managed-original-documents";
 import { archiveOriginalFiles as archiveOnly } from "../utils/archive-original-files";
 import { App, ItemView, Notice, TFile, TFolder, WorkspaceLeaf, parseYaml, requestUrl, setIcon, type TAbstractFile } from "obsidian";
@@ -83,9 +84,11 @@ interface ManagedKnowledgeDocument {
   snippet: string;
   searchText: string;
   metadataWarning?: string;
+  metadataIssue?: ManagedKnowledgeFrontmatter["issue"];
   originalFile?: TFile;
   originalPath?: string;
   originalOnly?: boolean;
+  recognitionFile?: TFile;
 }
 
 interface KnowledgePipelineSection {
@@ -1332,6 +1335,7 @@ export class KnowledgeView extends ItemView {
         const path = file.path.replace(/\\/g, "/");
         return path.startsWith(prefix)
           && path.endsWith(".md")
+          && !isDocumentRecognitionPath(path, fs)
           && file.basename !== "index"
           && !this.isUnderAnyNormalizedPrefix(this.normalizeLlmWikiPath(path), excludedPrefixes);
       })
@@ -1415,14 +1419,32 @@ export class KnowledgeView extends ItemView {
     const invalidMetadata = documents.filter((document) => document.metadataWarning);
     if (invalidMetadata.length) {
       const warning = card.createEl("details", { cls: "lifeos-knowledge-metadata-warning" });
-      warning.createEl("summary", { text: `${invalidMetadata.length} 篇文档的属性格式有误，资料仍可浏览` });
-      warning.createEl("p", { text: "原文件未被修改。可打开下列文档修正属性区；其他资料不受影响。" });
+      warning.open = invalidMetadata.length <= 3;
+      warning.createEl("summary", { text: `${invalidMetadata.length} 篇文档的属性格式有误；展开查看位置和修复方法` });
+      warning.createEl("p", { text: "资料正文仍可浏览，原文件未被修改。只需修正下列文档的属性区；保存后点击“重新检查”。" });
       const list = warning.createEl("ul");
       for (const document of invalidMetadata.slice(0, 10)) {
-        const item = list.createEl("li");
-        createButton(item, document.file.basename, () => void this.app.workspace.getLeaf(false).openFile(document.file), { icon: "file-text" });
+        const item = list.createEl("li", { cls: "lifeos-knowledge-metadata-issue" });
+        item.createEl("strong", { text: document.file.name });
+        item.createEl("div", { cls: "lifeos-knowledge-metadata-path", text: document.file.path });
+        item.createEl("p", { text: document.metadataWarning });
+        if (document.metadataIssue?.fileLine) {
+          item.createEl("p", { text: `请在文件第 ${document.metadataIssue.fileLine} 行检查属性区；行号包含开头的 ---。` });
+        }
+        if (document.metadataIssue?.sourceLine) {
+          item.createEl("span", { text: "当前内容：" });
+          item.createEl("code", { text: document.metadataIssue.sourceLine });
+        }
+        if (document.metadataIssue?.suggestedLine) {
+          item.createEl("p", { text: "建议仅将这一行改为（已验证修改后的属性区可解析）：" });
+          item.createEl("code", { text: document.metadataIssue.suggestedLine });
+        } else {
+          item.createEl("p", { text: "检查该行及相邻行的缩进、引号和冒号；含特殊字符的值需整体加引号。修改前可先备份原文。" });
+        }
+        createButton(item, "打开出错文档", () => void this.app.workspace.getLeaf(false).openFile(document.file), { icon: "file-text" });
       }
       if (invalidMetadata.length > 10) warning.createEl("p", { text: `另有 ${invalidMetadata.length - 10} 篇，可在列表中搜索文件名。` });
+      createButton(warning, "重新检查", () => void this.render(), { icon: "refresh-cw" });
     }
 
     const toolbar = card.createDiv({ cls: "lifeos-knowledge-doc-toolbar" });
@@ -1482,9 +1504,17 @@ export class KnowledgeView extends ItemView {
           createButton(rowActions, "查看原文档", () => {
             const file = this.app.vault.getAbstractFileByPath(document.originalPath!);
             if (!(file instanceof TFile)) { new Notice("原文档已移动或删除，请核对附件路径。", 6000); return; }
+            if (file.extension.toLowerCase() === "doc") {
+              new Notice("旧版 .doc 暂不支持插件内预览，请先转换为 .docx。");
+              return;
+            }
             void this.app.workspace.getLeaf("tab").openFile(file, { active: true });
           }, { ghost: true, icon: "file" })
             .setAttr("aria-label", `查看原文档 ${document.originalFile?.name ?? document.originalPath}`);
+        }
+        if (document.recognitionFile) {
+          createButton(rowActions, "查看识别文本", () => void this.openManagedKnowledgeFile(document.recognitionFile!), { ghost: true, icon: "file-text" })
+            .setAttr("aria-label", `查看 ${document.file.name} 的识别文本`);
         }
         createButton(rowActions, "重命名", () => void this.renameManagedKnowledgeFile(document.file), { ghost: true, icon: "pencil" })
           .setAttr("aria-label", `重命名 ${document.file.name}`);
@@ -1588,6 +1618,13 @@ export class KnowledgeView extends ItemView {
         originalFile: file, originalOnly: true
       });
     }
+    const recognitionByOriginal = await new DocumentRecognitionCacheService(this.app, fs).currentCaches();
+    for (const document of documents) {
+      document.recognitionFile = recognitionByOriginal.get(document.originalPath || document.file.path);
+      if (document.originalOnly && document.recognitionFile) {
+        document.snippet = "已识别正文；识别文本在 Vault 中可见，不作为独立资料列出。";
+      }
+    }
     documents.sort((a, b) => b.file.stat.mtime - a.file.stat.mtime);
     throwIfReadAborted(signal);
     return documents;
@@ -1607,7 +1644,7 @@ export class KnowledgeView extends ItemView {
     throwIfReadAborted(signal);
     // Parse the same snapshot as the body: Obsidian's metadata index may still
     // describe the previous revision when its Vault modify event arrives.
-    const { frontmatter, warning: metadataWarning } = readManagedKnowledgeFrontmatter(content, parseYaml);
+    const { frontmatter, warning: metadataWarning, issue: metadataIssue } = readManagedKnowledgeFrontmatter(content, parseYaml);
     const heading = content.match(/^#\s+(.+)$/mu)?.[1]?.trim();
     const title = String(frontmatter?.title ?? heading ?? file.basename).replace(/^['"]|['"]$/g, "").trim() || file.basename;
     const category = this.managedKnowledgeCategory(file.path, fs);
@@ -1637,6 +1674,7 @@ export class KnowledgeView extends ItemView {
       source,
       snippet,
       metadataWarning,
+      metadataIssue,
       originalFile: originalCandidate instanceof TFile ? originalCandidate : undefined,
       originalPath: originalPath ?? undefined,
       searchText: `${title}\n${category}\n${source}\n${file.path}\n${content}`.toLocaleLowerCase()
@@ -1756,7 +1794,11 @@ export class KnowledgeView extends ItemView {
   }
 
   private async openManagedKnowledgeFile(file: TFile): Promise<void> {
-    await this.app.workspace.getLeaf(false).openFile(file);
+    if (file.extension.toLowerCase() === "doc") {
+      new Notice("旧版 .doc 暂不支持插件内预览，请先转换为 .docx。");
+      return;
+    }
+    await this.app.workspace.getLeaf(file.extension.toLowerCase() === "docx" ? "tab" : false).openFile(file);
   }
 
   private async renameManagedKnowledgeFile(file: TFile): Promise<void> {
@@ -2643,6 +2685,9 @@ export class KnowledgeView extends ItemView {
 
   private buildDirectoryIndexBlock(directoryPath: string, indexPath: string, options: DirectoryIndexOptions = {}): string {
     const normalizedDirectory = directoryPath.replace(/\\/g, "/").replace(/\/+$/g, "");
+    const fs = new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage);
+    const knowledgeRoot = fs.path("Knowledge").replace(/\\/g, "/");
+    const recognitionRoot = fs.path("Knowledge", "DocumentRecognition").replace(/\\/g, "/");
     const prefix = `${normalizedDirectory}/`;
     const indexNormalized = indexPath.replace(/\\/g, "/");
     const excludedFolders = new Set((options.excludeFolders ?? []).map((folder) => folder.replace(/^\/+|\/+$/g, "")));
@@ -2654,6 +2699,7 @@ export class KnowledgeView extends ItemView {
         return path.startsWith(prefix)
           && path !== indexNormalized
           && path.endsWith(".md")
+          && !path.startsWith(`${recognitionRoot}/`)
           && file.basename !== "index"
           && !excludedFolders.has(firstSegment);
       })
@@ -2663,6 +2709,7 @@ export class KnowledgeView extends ItemView {
       ? directory.children
         .filter((child): child is TFolder => child instanceof TFolder)
         .map((child) => child.name)
+        .filter((name) => normalizedDirectory !== knowledgeRoot || name !== "DocumentRecognition")
         .filter((name) => !excludedFolders.has(name))
       : [];
     const folders = Array.from(new Set(directFolders.concat(files

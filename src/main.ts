@@ -1,4 +1,5 @@
 import { capturePdfTextSelection } from "./ui/pdf-selection";
+import { captureWordTextSelection } from "./ui/word-selection";
 import { DocumentTagsModal } from "./modals/DocumentTagsModal";
 import { GENERATED_NOTE_TAG_RULE, normalizeGeneratedNoteMarkdown } from "./utils/generated-note-markdown";
 import { resolveVisionSettings } from "./settings";
@@ -7,6 +8,8 @@ import { refreshExperienceTheme, syncThemeClassNames } from "./ui/theme";
 import { persistSettingsSnapshot } from "./ui/theme-selection";
 import { applyDocumentAppearance, clearDocumentAppearance, documentBackgroundUrl } from "./ui/document-appearance";
 import { shouldDecorateLifeOsMarkdownLeaf } from "./utils/lifeos-document-leaf";
+import { WordPreviewView, WORD_PREVIEW_VIEW_TYPE } from "./views/WordPreviewView";
+import { ChatContinuity } from "./services/chat/ChatContinuity";
 import { prepareDailyAnalysisSource } from "./services/DailyAnalysisSource";
 import { USER_SAVED_CONVERSATION_LABEL, USER_SAVED_CONVERSATION_SOURCE, type EvidenceOrigin } from "./services/context-engine/ContextSourcePolicyService";
 import { snapshotWritebackUndo } from "./services/writeback-undo";
@@ -207,7 +210,8 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   settings: PersonalLifeSystemSettings;
   ai: AiClient;
   agent: LifeOSAgentService;
-  activeChatState: ActiveChatRuntimeState = { messages: [], draftInput: "", updatedAt: 0 };
+  readonly chatContinuity = new ChatContinuity<ActiveChatRuntimeState>({ messages: [], draftInput: "", updatedAt: 0 });
+  get activeChatState(): ActiveChatRuntimeState { return this.chatContinuity.state; }
   private dailyMaintenancePromise: Promise<void> | null = null;
   private dailyMaintenanceRunDate = "";
   private agentMemoryQueueRunning = false;
@@ -347,6 +351,13 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.registerView(TASKS_VIEW_TYPE, (leaf) => new TaskManagerView(leaf, this));
     this.registerView(DAILY_VIEW_TYPE, (leaf) => new DailyView(leaf, this));
     this.registerView(KNOWLEDGE_VIEW_TYPE, (leaf) => new KnowledgeView(leaf, this));
+    this.registerView(WORD_PREVIEW_VIEW_TYPE, (leaf) => new WordPreviewView(leaf, (file, selection) => {
+      const view = leaf.view;
+      if (view.getViewType() !== WORD_PREVIEW_VIEW_TYPE || this.settings.aiSelectionAutoOpen !== true) return;
+      const snapshot = this.captureReadonlySelectionSnapshot(file, view.containerEl, selection, "word-preview");
+      if (snapshot) this.showAutomaticSelectionAction(snapshot);
+    }));
+    this.registerExtensions(["docx"], WORD_PREVIEW_VIEW_TYPE);
     this.registerView(MEMORY_VIEW_TYPE, (leaf) => new MemoryView(leaf, this));
     this.registerView(REVIEW_VIEW_TYPE, (leaf) => new ReviewView(leaf, this));
     this.registerView(CHECKIN_VIEW_TYPE, (leaf) => new CheckinView(leaf, this));
@@ -2629,8 +2640,9 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   private showAutomaticSelectionAction(snapshot: AiEditDomSelectionSnapshot): void {
     this.automaticSelectionButton?.remove();this.automaticSelectionButton=null;
     if(this.settings.aiSelectionAutoOpen!==true)return;
-    const view=snapshot.file.extension === "pdf" ? null : this.findMarkdownViewForAiEditTarget(snapshot.target);
-    const target: AiEditTarget | null = snapshot.file.extension === "pdf"
+    const readOnlyDocument = snapshot.file.extension === "pdf" || snapshot.file.extension === "docx";
+    const view=readOnlyDocument ? null : this.findMarkdownViewForAiEditTarget(snapshot.target);
+    const target: AiEditTarget | null = readOnlyDocument
       ? { kind: "readonly-selection", file: snapshot.file, text: snapshot.text }
       : view ? this.captureDocumentToolbarSelection(view) : null;
     if(!target)return;
@@ -2731,7 +2743,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.addCommand({id:"lifeos-selection-sidebar",name:"将当前选段送到 AI 侧边栏",callback:()=>{
       const view=this.app.workspace.getActiveViewOfType(MarkdownView);
       const snapshot = this.captureAiEditDomSelectionSnapshot("manual-command");
-      const target: AiEditTarget | null = snapshot?.file.extension === "pdf"
+       const target: AiEditTarget | null = snapshot && (snapshot.file.extension === "pdf" || snapshot.file.extension === "docx")
         ? { kind: "readonly-selection", file: snapshot.file, text: snapshot.text }
         : view ? this.captureDocumentToolbarSelection(view) : null;
       if(target)void this.openAiEditTargetInResidentPanel(target,this.defaultAiEditAnchor());
@@ -2964,19 +2976,18 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     const text = selection?.toString() ?? "";
     if (!selection || selection.isCollapsed || selection.rangeCount === 0 || text.trim().length < 2) return null;
     const pdfViews: Array<{ file: TFile | null; containerEl: HTMLElement }> = [];
+    const wordViews: Array<{ file: TFile | null; containerEl: HTMLElement }> = [];
     this.app.workspace.iterateAllLeaves(leaf => {
-      if (leaf.view.getViewType() !== "pdf") return;
+      const type = leaf.view.getViewType();
+      if (type !== "pdf" && type !== WORD_PREVIEW_VIEW_TYPE) return;
       const view = leaf.view as unknown as { file?: TFile; containerEl: HTMLElement };
-      if (view.file instanceof TFile) pdfViews.push({ file: view.file, containerEl: view.containerEl });
+      if (!(view.file instanceof TFile)) return;
+      if (type === "pdf") pdfViews.push({ file: view.file, containerEl: view.containerEl });
+      else if (view.file.extension.toLowerCase() === "docx") wordViews.push({ file: view.file, containerEl: view.containerEl });
     });
-    const pdf = capturePdfTextSelection(pdfViews, selection);
-    if (pdf) {
-      const range = selection.getRangeAt(0), rect = range.getBoundingClientRect();
-      const selectionRects = this.selectionRectsFromRange(range).slice(0, 80);
-      return { file: pdf.file, text: pdf.text, target: pdf.element, source,
-        key: pdf.file.path + ":" + pdf.text.trim(), createdAt: Date.now(),
-        anchor: { x: rect.left + rect.width / 2, y: rect.bottom,
-          avoidRect: this.selectionAvoidRectFromRects(selectionRects), selectionRects } };
+    const readonlyDocument = capturePdfTextSelection(pdfViews, selection) ?? captureWordTextSelection(wordViews, selection);
+    if (readonlyDocument) {
+      return this.readonlySelectionSnapshot(readonlyDocument, selection, source);
     }
     const range = selection.getRangeAt(0);
     const target = this.currentSelectionElement(range) ?? fallbackTarget ?? null;
@@ -3008,6 +3019,20 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       createdAt: Date.now(),
       anchor
     };
+  }
+
+  private captureReadonlySelectionSnapshot(file: TFile, containerEl: HTMLElement, selection: Selection, source: string): AiEditDomSelectionSnapshot | null {
+    const captured = captureWordTextSelection([{ file, containerEl }], selection);
+    return captured ? this.readonlySelectionSnapshot(captured, selection, source) : null;
+  }
+
+  private readonlySelectionSnapshot(captured: { file: TFile; text: string; element: HTMLElement }, selection: Selection, source: string): AiEditDomSelectionSnapshot {
+    const range = selection.getRangeAt(0), rect = range.getBoundingClientRect();
+    const selectionRects = this.selectionRectsFromRange(range).slice(0, 80);
+    return { file: captured.file, text: captured.text, target: captured.element, source,
+      key: captured.file.path + ":" + captured.text.trim(), createdAt: Date.now(),
+      anchor: { x: rect.left + rect.width / 2, y: rect.bottom,
+        avoidRect: this.selectionAvoidRectFromRects(selectionRects), selectionRects } };
   }
 
   private selectionRectsFromRange(range: Range): NonNullable<AiEditAnchor["selectionRects"]> {

@@ -881,7 +881,9 @@ export class AiEditPopoverController {
     this.applying = true; this.syncActionState("正在应用…");
     try {
       if (target.kind === "readonly-selection") {
-        new Notice("阅读模式选区不能直接写回；请切到源码/编辑模式后重新选择，或复制这段预览。");
+        new Notice(target.file.extension === "md"
+          ? "阅读模式选区不能直接写回；请切到源码/编辑模式后重新选择，或复制这段预览。"
+          : "PDF/Word 原件为只读预览，不能直接写回；请复制这段结果。");
         return;
       }
       await applyAiSelectionEdit(this.app, target, targetPath, preview);
@@ -1553,7 +1555,9 @@ export class AiEditPopoverController {
         return `将围绕 ${target.text.trim().length} 个字符回答；问答不会写回当前文档。`;
       }
       return target.kind === "readonly-selection"
-        ? `将改写 ${target.text.trim().length} 个字符；阅读模式只能复制预览，切到编辑模式重新选中后可确认替换。`
+        ? target.file.extension === "md"
+          ? `将改写 ${target.text.trim().length} 个字符；阅读模式只能复制预览，切到编辑模式重新选中后可确认替换。`
+          : `将围绕 ${target.text.trim().length} 个字符生成预览；PDF/Word 原件只读，结果可复制，不会写回原件。`
         : `将改写 ${target.text.trim().length} 个字符，只替换当前选区。`;
     }
     if (target.kind === "canvas") {

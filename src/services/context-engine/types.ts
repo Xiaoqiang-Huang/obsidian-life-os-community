@@ -41,6 +41,8 @@ export interface ContextRetrievalPlan {
 
 export interface ContextSource {
   path: string;
+  /** The binary original behind a user-visible recognition Markdown; path remains the citable cache note. */
+  originalPath?: string;
   title: string;
   type: "current-note" | "daily" | "task" | "project" | "memory" | "summary" | "knowledge" | "llm-wiki" | "graph" | "url";
   excerpt?: string;

@@ -95,6 +95,16 @@
 .lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-preview { order:2; min-height:150px; flex:1 0 auto; padding:12px; background:var(--v3-raised); border-radius:8px; }
 .lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-context { order:0; }
 .lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-answer-toolbar { order:1; display:flex; flex-direction:column; gap:8px; min-width:0; padding:8px; }
+/* Closed answer options should be one compact row, not a mostly empty card. */
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-answer-toolbar {
+  flex: 0 0 auto !important;
+  min-height: 0 !important;
+  height: auto !important;
+  display: block !important;
+}
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-answer-copy:not(:has(.lifeos-ai-study-modes)) { display: none !important; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-answer-settings { min-height: 0; height: auto; padding: 0; }
+.lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-answer-settings > summary { min-height: 34px; display: flex; align-items: center; }
 .lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-answer-copy { display:grid; gap:4px; }
 .lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-answer-copy span { white-space:normal; font-size:12px; }
 .lifeos-ai-edit-popover.lifeos-v3 .lifeos-ai-edit-skill-panel { order:3; }

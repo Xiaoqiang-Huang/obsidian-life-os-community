@@ -620,7 +620,13 @@ function median(values: number[]): number {
 
 async function extractDocxText(file: ReadableImportFile): Promise<string> {
   const bytes = await readFileBytes(file);
-  const archive = unzipSync(bytes);
+  let oversizedXml = false;
+  const archive = unzipSync(bytes, { filter: (entry) => {
+    if (entry.name !== "word/document.xml") return false;
+    if (entry.originalSize > 8 * 1024 * 1024) { oversizedXml = true; return false; }
+    return true;
+  } });
+  if (oversizedXml) throw new Error("DOCX 正文 XML 超过 8 MB 安全上限，未解压。");
   const documentXml = archive["word/document.xml"];
   if (!documentXml) return "";
   return docxXmlToMarkdown(strFromU8(documentXml));

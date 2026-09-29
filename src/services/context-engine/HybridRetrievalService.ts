@@ -186,7 +186,11 @@ export class HybridRetrievalService {
       const indexed = await Promise.all(batch.map(async (item) => {
         const markdown = await this.metadata.readFile(item.path);
         const safeItem = this.metadata.citableInventoryItem(item);
-        const chunks = this.chunker.chunk(item.path, safeItem.title, markdown).map((chunk) => this.indexChunk(chunk, item.mtime));
+        const extracted = this.chunker.chunk(item.path, safeItem.title, markdown);
+        const citable = safeItem.frontmatter.type === "lifeos-document-recognition"
+          ? extracted.filter((chunk) => /^第 \d+ 页 \[(?:native|vision)\]$|^正文 \[native\]$/u.test(chunk.heading))
+          : extracted;
+        const chunks = citable.map((chunk) => this.indexChunk(chunk, item.mtime));
         return { item, chunks };
       }));
       for (const { item, chunks } of indexed) {

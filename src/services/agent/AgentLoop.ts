@@ -309,6 +309,7 @@ export class AgentLoop {
         }
 
       }
+      const requestsBeforeTools = input.toolContext.requestBudget?.used ?? 0;
       const results = await this.tools.executeBatch(pendingCalls, { ...input.toolContext, signal }, {
         ...input.toolOptions,
         onToolStart: async call => {
@@ -317,7 +318,10 @@ export class AgentLoop {
           await input.toolOptions?.onToolStart?.(call);
         }
       });
-      modelCalls += nestedModelCalls;
+      // A read tool can conditionally invoke the vision model only for an uncached scan.
+      // Count observed requests as well as statically declared subagent costs.
+      const observedNestedCalls = Math.max(0, (input.toolContext.requestBudget?.used ?? requestsBeforeTools) - requestsBeforeTools);
+      modelCalls += Math.max(nestedModelCalls, observedNestedCalls);
       spentToolCalls += pendingCalls.reduce((sum, call) => sum + this.callCost(call).tools, 0);
       toolResults.push(...results);
       for (const result of results) {
@@ -354,10 +358,10 @@ export class AgentLoop {
         const summary = results.map(result => `${result.ok ? "已完成" : "未完成"} [${result.callId}] ${this.toolLabel(result.toolId)}：${result.ok ? result.output : result.error}`).join("\n");
         return { messages, events, toolResults, modelCalls, compaction: compacted, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "partial", `本次部分完成，未将失败项标记成功。仅重试未完成项。\n${summary}`, true) };
       }
-      pendingCalls = [];
+      pendingCalls = this.followupDocumentRead(results);
       // Deterministic preflight intentionally ends after evidence collection;
       // the final model call synthesizes it. Forced planner mode may continue.
-      if (!plannerEnabled) break;
+      if (!plannerEnabled && pendingCalls.length === 0) break;
     }
     if (step >= budget.maxSteps && plannerEnabled) return { messages, events, toolResults, modelCalls, compaction: compacted, terminal: await this.terminal(input, events, toolResults, messages, modelCalls, "max-steps", "已达到本轮最大执行步数，请把任务拆小后继续。") };
     return { messages, events, toolResults, modelCalls, compaction: compacted };
@@ -390,11 +394,15 @@ export class AgentLoop {
       add("task-clear-all", {});
       return calls;
     }
-    if (!input.hasWebEvidence && /(?:联网|上网|网页|官网|官方|最新|新闻|搜索|检索|查一下|核实).{0,40}(?:消息|规则|价格|新闻|资料|官网|最新)?/iu.test(text)) {
+    if (!input.hasWebEvidence && (!/(?:我的|本地|资料库|仓库|附件|PDF|DOCX|Word)/iu.test(text) || /(?:联网|上网|网页|官网)/iu.test(text))
+      && /(?:联网|上网|网页|官网|官方|最新|新闻|搜索|检索|查一下|核实).{0,40}(?:消息|规则|价格|新闻|资料|官网|最新)?/iu.test(text)) {
       add("web-search", { query: text, officialOnly: /官网|官方/iu.test(text) });
     }
     if (!input.hasLocalEvidence && /(?:我的|Life\s*OS|日记|待办|任务|复盘|知识库|项目上下文|项目记忆|会话记录|科研进展)/iu.test(text)) {
       add(/项目上下文|项目记忆|科研进展/iu.test(text) ? "project-search" : "lifeos-search", { query: text, projectScopeId: input.toolContext.projectScopeId });
+    }
+    if (this.isDocumentContentQuestion(text)) {
+      add("document-file-find", { query: text });
     }
     if (/^(?:看|查看|读|打开|总结)?\s*(?:今天|昨天|\d{4}-\d{2}-\d{2})?\s*(?:的)?日记/iu.test(text)) {
       add("diary-read", { date: /昨天/u.test(text) ? "yesterday" : "today" });
@@ -403,6 +411,28 @@ export class AgentLoop {
     if (/(?:有哪些|查看|列出|查询).{0,10}(?:工具|能力)|(?:能做什么|可以做什么)/u.test(text)) add("tool-capabilities", { query: "" });
     if (input.toolContext.imageParts.length > 0 && /(?:ocr|识别文字|提取文字|读取图片文字|表格识别)/iu.test(text)) add("ocr-read", { instruction: text });
     return calls.slice(0, 3);
+  }
+
+  /** A uniquely named original can be read without spending a model request to rediscover its path. */
+  private followupDocumentRead(results: LifeOSAgentToolResult[]): LifeOSAgentToolCall[] {
+    const found = results.find(result => result.ok && result.toolId === "document-file-find");
+    if (!found) return [];
+    try {
+      const data = JSON.parse(found.output) as { candidates?: Array<{ path?: string; kind?: string; score?: number }> };
+      const exact = (data.candidates || []).filter(candidate => candidate.score === 100);
+      if (exact.length !== 1 || typeof exact[0].path !== "string") return [];
+      const candidate = exact[0];
+      const name = candidate.kind === "pdf" ? "pdf-page-read" : candidate.kind === "docx" ? "docx-text-read" : "";
+      if (!name || !this.tools.hasExecutor(name)) return [];
+      return [{ id: `read-${found.callId || "document"}`, name, input: name === "pdf-page-read"
+        ? { path: candidate.path, page: 1 }
+        : { path: candidate.path } }];
+    } catch { return []; }
+  }
+
+  private isDocumentContentQuestion(value: string): boolean {
+    return /(?:\.pdf|\.docx|\bpdf\b|\bdocx\b|\bword\b|文档|文件|附件|资料)/iu.test(value)
+      && /(?:写了什么|讲了什么|说了什么|写的什么|主要内容|内容|引用|读取|阅读|总结|回答|识别|问答|介绍|概述|概括|包括什么|是什么|有什么)/u.test(value);
   }
 
   private async plan(
@@ -571,7 +601,8 @@ export class AgentLoop {
   }
 
   private shouldPlanToolUse(value: string): boolean {
-    return /(?:写入|记入|保存|存入|收藏|归档|创建|新增|添加|修改|更新|删除|清空|清除|移除|隐藏|显示|设置|配置|移动|重命名|完成|恢复|提醒|生成.{0,10}(?:日记|复盘|报告|文档|任务|工具)|自定义工具|自己造工具|自动执行)/u.test(value);
+    return /(?:写入|记入|保存|存入|收藏|归档|创建|新增|添加|修改|更新|删除|清空|清除|移除|隐藏|显示|设置|配置|移动|重命名|完成|恢复|提醒|生成.{0,10}(?:日记|复盘|报告|文档|任务|工具)|自定义工具|自己造工具|自动执行)/u.test(value)
+      || this.isDocumentContentQuestion(value);
   }
 
   private normalizeBudget(value: Partial<LifeOSAgentLoopBudget> | undefined): LifeOSAgentLoopBudget {

@@ -331,7 +331,9 @@ function escapeWikiLinkTarget(value: string): string {
 function yamlScalar(value: string): string {
   const clean = String(value || "").replace(/\r?\n/g, " ").trim();
   if (!clean) return "\"\"";
-  if (/[:#\[\]{}]|^\s|\s$|^(true|false|null|~)$/i.test(clean)) {
+  // A quoted keyword is not a valid YAML plain scalar. Always quote it so
+  // generated metadata remains parseable after a title contains quotes.
+  if (/["':#\[\]{}]|^\s|\s$|^(true|false|null|~)$/i.test(clean)) {
     return JSON.stringify(clean);
   }
   return clean;

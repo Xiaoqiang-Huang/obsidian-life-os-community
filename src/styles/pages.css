@@ -86,6 +86,11 @@
 .lifeos-v3 .lifeos-knowledge-metadata-warning { margin: 8px 0 12px; padding: 10px 12px; border: 1px solid var(--v3-line); border-radius: 8px; overflow-wrap: anywhere; }
 .lifeos-v3 .lifeos-knowledge-metadata-warning summary { cursor: pointer; font-weight: 600; }
 .lifeos-v3 .lifeos-knowledge-metadata-warning ul { margin: 8px 0 0; padding-inline-start: 20px; }
+.lifeos-v3 .lifeos-knowledge-metadata-issue { margin-block: 8px; padding: 8px; border: 1px solid var(--v3-line); border-radius: 6px; }
+.lifeos-v3 .lifeos-knowledge-metadata-issue p { margin: 5px 0; }
+.lifeos-v3 .lifeos-knowledge-metadata-path, .lifeos-v3 .lifeos-knowledge-metadata-issue code { display: block; max-width: 100%; overflow-wrap: anywhere; white-space: pre-wrap; }
+.lifeos-v3 .lifeos-knowledge-metadata-path { color: var(--text-muted); font-size: 12px; }
+.lifeos-v3 .lifeos-knowledge-metadata-issue code { margin: 4px 0; padding: 4px 6px; background: var(--background-secondary); border-radius: 4px; }
 .lifeos-v3 .lifeos-chat-main { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; padding: 0; gap: 0; background: var(--v3-surface); border: 1px solid var(--v3-line); border-radius: 10px; }
 .lifeos-v3 .lifeos-chat-top { flex: none; display: flex; flex-wrap: nowrap; gap: 12px; padding: 14px 16px; align-items: center; justify-content: space-between; background: none; }
 .lifeos-v3 .lifeos-chat-top-copy h1 { font-size: 20px; }
@@ -113,6 +118,16 @@
 .lifeos-v3 .lifeos-chat-composer { flex: none; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 8px 12px 12px; height: auto; min-height: 0; max-height: 65%; background: var(--v3-surface); border: 0; border-radius: 0; box-shadow: none; position: relative; overflow: auto; }
 .lifeos-v3 .lifeos-chat-file-input { display: none; }
 .lifeos-v3 .lifeos-chat-composer-toolbar { grid-column: 1 / -1; padding: 0; overflow: visible; background: none; height: auto; }
+.lifeos-v3 .lifeos-chat-quick-controls { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.lifeos-v3 .lifeos-chat-quick-controls .lifeos-chat-compact-control { flex: 0 1 260px; min-width: 150px; }
+.lifeos-v3 .lifeos-chat-quick-controls .lifeos-chat-compact-label { width: auto; }
+.lifeos-v3 .lifeos-chat-composer-suggestions { grid-column: 1 / -1; max-height: 220px; overflow-y: auto; padding: 6px; border: 1px solid var(--v3-line); border-radius: 8px; background: var(--v3-surface); }
+.lifeos-v3 .lifeos-chat-composer-suggestions[style*="display: none"] { display: none; }
+.lifeos-v3 .lifeos-chat-suggestion-heading { padding: 4px 8px; font-size: 12px; color: var(--v3-muted); }
+.lifeos-v3 button.lifeos-chat-suggestion-item { display: grid; width: 100%; justify-items: start; gap: 2px; padding: 7px 8px; border: 0; text-align: left; white-space: normal; }
+.lifeos-v3 .lifeos-chat-suggestion-item span { max-width: 100%; overflow: hidden; color: var(--v3-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.lifeos-v3 button.lifeos-chat-suggestion-item[aria-selected="true"] { background: var(--v3-raised); outline: 1px solid var(--v3-accent); }
+.lifeos-v3 .lifeos-chat-suggestion-empty { padding: 8px; color: var(--v3-muted); font-size: 12px; }
 .lifeos-v3 .lifeos-chat-options > summary { padding: 4px 0; font-size: 12px; color: var(--v3-muted); }
 .lifeos-v3 .lifeos-chat-options-body { max-height: min(40vh, 340px); overflow: auto; padding: 8px 0; }
 .lifeos-v3 .lifeos-chat-compact-toolbar { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); width: 100%; gap: 8px; height: auto; padding: 0; overflow: visible; }
@@ -142,6 +157,113 @@
 .lifeos-v3 .lifeos-chat-composer > textarea { width: 100%; height: auto; min-height: 68px; max-height: 180px; resize: vertical; font-size: 15px; }
 .lifeos-v3 .lifeos-chat-send-actions { display: flex; flex-direction: column; gap: 6px; width: auto; align-self: end; }
 .lifeos-v3 .lifeos-chat-send-actions button { width: 100%; }
+/* One composer surface: text above a quiet action row, suggestions immediately above it. */
+.lifeos-v3 .lifeos-chat-composer {
+  display: flex; flex-direction: column; align-items: stretch; gap: 5px;
+  margin: 0 14px 9px; padding: 8px 12px 7px; min-width: 0; max-height: none; overflow: visible;
+  container-type: inline-size;
+  border: 1px solid var(--v3-line); border-radius: 16px;
+  background: var(--v3-surface); box-shadow: 0 2px 12px rgba(0, 0, 0, .045);
+}
+.lifeos-v3 .lifeos-chat-composer:focus-within {
+  border-color: var(--v3-accent); box-shadow: 0 0 0 2px var(--background-modifier-border-focus, var(--v3-line));
+}
+.lifeos-v3 .lifeos-chat-composer > textarea.lifeos-input,
+.lifeos-v3 .lifeos-chat-composer > textarea.lifeos-input:focus {
+  display: block; flex: 0 0 auto; width: 100%; min-height: 52px; max-height: 180px;
+  margin: 0; padding: 2px; resize: none;
+  border: 0; border-radius: 0; outline: 0; box-shadow: none;
+  background: transparent; color: var(--v3-ink); font-size: 15px; line-height: 1.5;
+}
+.lifeos-v3 .lifeos-chat-composer-bottom,
+.lifeos-v3 .lifeos-chat-composer-bottom-left,
+.lifeos-v3 .lifeos-chat-composer-bottom-right {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+}
+.lifeos-v3 .lifeos-chat-composer-bottom { justify-content: space-between; flex-wrap: wrap; }
+.lifeos-v3 .lifeos-chat-composer-bottom-right { margin-inline-start: auto; flex-wrap: wrap; justify-content: flex-end; }
+.lifeos-v3 .lifeos-chat-composer-toolbar { width: auto; padding: 0; }
+.lifeos-v3 .lifeos-chat-options { position: relative; }
+.lifeos-v3 .lifeos-chat-options > summary {
+  min-height: 34px; display: flex; align-items: center; padding: 4px 8px;
+  border-radius: 8px; color: var(--v3-muted); cursor: pointer;
+}
+.lifeos-v3 .lifeos-chat-options > summary:hover { background: var(--v3-raised); color: var(--v3-ink); }
+.lifeos-v3 .lifeos-chat-options-body {
+  position: absolute; inset-inline-start: 0; bottom: calc(100% + 9px); z-index: 35;
+  width: min(520px, calc(100cqw - 32px)); max-width: none;
+  max-height: min(34vh, 270px); overflow: auto;
+  padding: 10px; border: 1px solid var(--v3-line); border-radius: 12px;
+  background: var(--v3-surface); box-shadow: 0 14px 35px rgba(0, 0, 0, .14);
+}
+.lifeos-v3 .lifeos-chat-options-body .lifeos-chat-compact-toolbar {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px;
+  min-height: 0; max-height: none;
+}
+.lifeos-v3 .lifeos-chat-options-body .lifeos-chat-compact-control { min-width: 0; }
+.lifeos-v3 .lifeos-chat-options-body .lifeos-chat-skill-dropdown-summary {
+  min-width: 0; padding: 5px 8px;
+}
+.lifeos-v3 .lifeos-chat-options-body .lifeos-chat-skill-dropdown-value {
+  min-width: 0; white-space: normal; overflow-wrap: anywhere; text-overflow: clip;
+}
+.lifeos-v3 .lifeos-chat-quick-controls { gap: 6px; }
+.lifeos-v3 .lifeos-chat-quick-controls .lifeos-chat-compact-control { flex: none; width: auto; min-width: 0; }
+.lifeos-v3 .lifeos-chat-quick-controls .lifeos-chat-compact-label { width: auto; font-size: 11px; }
+.lifeos-v3 .lifeos-chat-quick-controls .lifeos-chat-compact-select {
+  width: auto; max-width: min(24vw, 190px); min-height: 34px; padding: 3px 8px;
+  border: 1px solid transparent; border-radius: 8px; background: transparent;
+  color: var(--v3-ink); text-overflow: ellipsis;
+}
+.lifeos-v3 .lifeos-chat-quick-controls .lifeos-chat-compact-select:hover,
+.lifeos-v3 .lifeos-chat-quick-controls .lifeos-chat-compact-select:focus-visible {
+  border-color: var(--v3-line); background: var(--v3-raised);
+}
+.lifeos-v3 .lifeos-chat-send-actions { display: flex; flex-direction: row; align-items: center; width: auto; gap: 6px; }
+.lifeos-v3 .lifeos-chat-send-actions button,
+.lifeos-v3 button.lifeos-chat-send-attach {
+  display: inline-flex; justify-content: center; align-items: center;
+  flex: 0 0 36px; width: 36px; height: 36px; min-width: 36px; min-height: 36px;
+  padding: 0; border-radius: 10px;
+}
+.lifeos-v3 :is(.lifeos-chat-send, .lifeos-chat-stop, .lifeos-chat-send-attach) .lifeos-v2-button-label { display: none; }
+.lifeos-v3 button.lifeos-chat-send-attach { border: 0; background: transparent; color: var(--v3-muted); }
+.lifeos-v3 button.lifeos-chat-send-attach:hover { background: var(--v3-raised); color: var(--v3-ink); }
+.lifeos-v3 .lifeos-chat-composer-suggestions {
+  flex: 0 1 auto; align-self: stretch; min-width: 0; max-height: min(28vh, 220px); margin: 0 14px 6px;
+  padding: 5px 6px 0; overflow-y: auto; border: 1px solid var(--v3-line);
+  border-radius: 15px; background: var(--v3-surface); box-shadow: 0 10px 28px rgba(0, 0, 0, .11);
+}
+.lifeos-v3 .lifeos-chat-composer-suggestions[style*="display: none"] { display: none; }
+.lifeos-v3 .lifeos-chat-suggestion-heading { padding: 3px 10px; font-weight: 600; }
+.lifeos-v3 button.lifeos-chat-suggestion-item {
+  display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch;
+  justify-items: stretch; align-content: center; width: 100%; max-width: none;
+  min-height: 36px; gap: 1px; padding: 5px 10px; border-radius: 9px;
+  text-align: start; white-space: normal;
+}
+.lifeos-v3 .lifeos-chat-suggestion-item > :is(strong, span) {
+  display: block; min-width: 0; max-width: none; width: 100%;
+  text-align: start; white-space: normal; overflow-wrap: anywhere;
+  overflow: visible; text-overflow: clip;
+}
+.lifeos-v3 button.lifeos-chat-suggestion-item:hover { background: var(--v3-raised); }
+.lifeos-v3 button.lifeos-chat-suggestion-more {
+  display: flex; width: 100%; max-width: none; min-height: 32px;
+  justify-content: flex-start; margin: 2px 0; padding: 5px 10px;
+  border: 0; border-radius: 8px; background: var(--v3-raised);
+  color: var(--v3-ink); text-align: start; white-space: normal;
+}
+.lifeos-v3 button.lifeos-chat-suggestion-more:hover { outline: 1px solid var(--v3-accent); }
+.lifeos-v3 .lifeos-chat-suggestion-footer {
+  position: sticky; bottom: 0; margin-top: 3px; padding: 5px 10px;
+  border-top: 1px solid var(--v3-line); background: var(--v3-surface);
+  color: var(--v3-muted); font-size: 12px;
+}
+@media (max-width: 620px) {
+  .lifeos-v3 .lifeos-chat-options-body { width: min(420px, calc(100cqw - 32px)); }
+  .lifeos-v3 .lifeos-chat-options-body .lifeos-chat-compact-toolbar { grid-template-columns: minmax(0, 1fr); }
+}
 .lifeos-v3 .lifeos-history-entry { display: grid; grid-template-columns: minmax(0, 1fr) 32px; gap: 4px; margin-block: 6px; }
 .lifeos-v3 .lifeos-history-item { min-width: 0; width: 100%; display: grid; gap: 4px; text-align: start; padding: 10px; white-space: normal; }
 .lifeos-v3 .lifeos-history-heading, .lifeos-v3 .lifeos-history-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -233,6 +355,18 @@
 .lifeos-v3 .lifeos-library-processing { padding: 12px; border: 1px solid var(--v3-line); border-radius: 8px; }
 .lifeos-v3 .lifeos-library-processing > summary { padding: 6px 0; }
 .lifeos-v3 .lifeos-knowledge-doc-manager { padding: 0; border: 0; background: none; }
+/* Long neighbouring import cards must not stretch a one-line select into an
+   empty column. This also covers the New Knowledge modal's privacy field. */
+.modal.lifeos-modal-host .lifeos-knowledge-capture-field {
+  align-self: start;
+  align-content: start;
+  grid-auto-rows: max-content;
+}
+.modal.lifeos-modal-host .lifeos-knowledge-capture-select {
+  align-self: start;
+  height: auto;
+  min-height: 38px;
+}
 .lifeos-v3 .lifeos-knowledge-doc-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: 10px; margin-bottom: 12px; }
 .lifeos-v3 .lifeos-knowledge-doc-header-copy p { font-size: 12px; color: var(--v3-muted); }
 .lifeos-v3 .lifeos-knowledge-doc-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: 8px; margin-bottom: 12px; }
@@ -572,3 +706,24 @@
 .lifeos-guide-manual-section li { overflow-wrap: anywhere; margin-block: .35rem; }
 .lifeos-guide-ask { margin-top: 1rem; padding: 1rem; }
 .lifeos-guide-ask textarea { display: block; width: 100%; min-height: 5rem; resize: vertical; margin-block: .75rem; }
+
+/* Local Word preview: scoped to its own Obsidian tab, including dark themes. */
+.lifeos-word-preview { height: 100%; overflow: auto; background: var(--background-primary); color: var(--text-normal); }
+.lifeos-word-preview-toolbar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; padding: .7rem 1rem; background: var(--background-primary); border-bottom: 1px solid var(--background-modifier-border); }
+.lifeos-word-preview-title { min-width: 0; flex: 1 1 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.lifeos-word-preview-readonly { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.lifeos-word-preview-external { display: inline-flex; align-items: center; gap: .35rem; min-height: 2rem; border: 1px solid var(--background-modifier-border); background: var(--interactive-normal); color: var(--text-normal); }
+.lifeos-word-preview-external:hover { background: var(--interactive-hover); }
+.lifeos-word-preview-status { padding: 2rem 1rem; color: var(--text-muted); }
+.lifeos-word-preview-document { overflow: auto; padding: 1.5rem; background: var(--background-secondary); }
+.lifeos-word-preview-document-body { width: max-content; min-width: 100%; margin: 0 auto; }
+.workspace-leaf-content[data-type="lifeos-word-preview"] .lifeos-word-preview-document-body,
+.workspace-leaf-content[data-type="lifeos-word-preview"] .lifeos-word-preview-document-body :is(section, article, p, span, strong, em, li, td, th) {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+.workspace-leaf-content[data-type="lifeos-word-preview"] .lifeos-word-preview-document-body :is(p, span, li, td, th) { cursor: text; }
+.workspace-leaf-content[data-type="lifeos-word-preview"] .lifeos-word-preview-document-body ::selection { background: var(--text-selection, rgba(100, 130, 255, .35)); }
+.lifeos-word-preview-document-body .lifeos-word-docx-wrapper { background: transparent; }
+.lifeos-word-preview-document-body section.lifeos-word-docx { max-width: min(100%, 52rem); margin: 0 auto 1rem; color: #20242c; background: #fff; box-shadow: 0 1px 8px rgb(0 0 0 / .12); }
+@media (max-width: 700px) { .lifeos-word-preview-document { padding: .5rem; } .lifeos-word-preview-document-body { width: 100%; } .lifeos-word-preview-document-body section.lifeos-word-docx { max-width: 100%; } }
