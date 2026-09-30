@@ -1,6 +1,7 @@
 import esbuild from "esbuild";
 import { fileURLToPath } from "node:url";
 import { pdfRuntimeIsolation } from "./src/build/pdf-runtime-isolation.mjs";
+import { reviewSafeJsZip } from "./src/build/review-safe-jszip.mjs";
 import { readFileSync } from "node:fs";
 import { builtinModules } from "node:module";
 import process from "process";
@@ -11,6 +12,7 @@ await buildUIStyles();
 
 const context = await esbuild.context({
   ...pdfRuntimeIsolation(fileURLToPath(new URL(".", import.meta.url))),
+  plugins: [reviewSafeJsZip],
   banner: {
     js: "/* Personal Life System Obsidian Plugin */\n/* Mozilla Readability 0.6.0 — Copyright Mozilla contributors.\n" + readFileSync(new URL("./src/vendor/readability/LICENSE.md", import.meta.url), "utf8").replaceAll("*/", "* /") + "\n*/"
   },

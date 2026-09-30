@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.25 - 2026-09-30
+
+### Fixed
+
+- Remove legacy dynamic script-element and function-constructor code from the published bundle by building DOCX's JSZip from its source modules with a timer-based scheduler and native Promise.
+- Gate future release builds against dynamic script creation, function constructors, and direct eval. Keep DOCX preview and text-selection regression coverage.
+
 ## 0.3.24 - 2026-09-30
 
 ### Added and fixed

@@ -26,7 +26,6 @@ jobs:
 
       - name: Verify and build plugin
         run: |
-          npm run build
           npm test
 
       - name: Validate source and release version

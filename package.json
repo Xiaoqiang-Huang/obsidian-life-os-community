@@ -1,13 +1,14 @@
 {
   "name": "obsidian-life-os",
-  "version": "0.3.24",
+  "version": "0.3.25",
   "description": "A local-first personal life system for Obsidian: diary, tasks, knowledge, memory, and AI-assisted reviews.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "check": "tsc -noEmit -skipLibCheck",
-    "test": "npm run check && npm run build"
+    "test": "npm run check && npm run build && npm run review:bundle",
+    "review:bundle": "node scripts/check-community-bundle.mjs"
   },
   "keywords": [
     "obsidian",

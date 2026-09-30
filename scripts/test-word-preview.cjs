@@ -40,6 +40,7 @@ const base64 = Buffer.from(docx).toString('base64');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lifeos-word-smoke-'));
 (async () => {
   try {
+    const { reviewSafeJsZip } = await import('../src/build/review-safe-jszip.mjs');
     const source = `import {renderAsync} from 'docx-preview';
       import {captureWordTextSelection} from './src/ui/word-selection.ts';
       const b=Uint8Array.from(atob('${base64}'),c=>c.charCodeAt(0));
@@ -55,7 +56,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lifeos-word-smoke-'));
         const toolbar=captureWordTextSelection([{file,containerEl:document.body}],selection);
         document.body.dataset.result=JSON.stringify({heading:el.textContent.includes('Life OS Word heading'),paragraph:el.textContent.includes('Read only paragraph'),table:el.querySelectorAll('table').length,cell:el.textContent.includes('Table cell'),image:el.querySelectorAll('img').length,owned:owned?.file===file&&owned?.text==='Read only paragraph',ownedText:owned?.text??null,foreign:foreign===null,collapsed:collapsed===null,toolbar:toolbar===null});})
       .catch(e=>{document.body.dataset.error=String(e);});`;
-    const build = await esbuild.build({ stdin: { contents: source, resolveDir: path.join(__dirname, '..'), loader: 'js' }, bundle: true, platform: 'browser', format: 'iife', write: false });
+    const build = await esbuild.build({ stdin: { contents: source, resolveDir: path.join(__dirname, '..'), loader: 'js' }, bundle: true, platform: 'browser', format: 'iife', write: false, plugins: [reviewSafeJsZip], external: ['stream'] });
     const html = `<!doctype html><html><body><div id="toolbar">Open original</div><div id="foreign"></div><div id="styles"></div><div id="body" class="lifeos-word-preview-document-body"></div><script>${build.outputFiles[0].text.replaceAll('</script>', '<\\/script>')}</script></body></html>`;
     const file = path.join(tmp, 'preview.html');
     fs.writeFileSync(file, html);
