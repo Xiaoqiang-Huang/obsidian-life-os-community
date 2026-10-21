@@ -298,6 +298,7 @@ export class AiWorkspaceImportModal extends Modal {
     retainRawSnapshot: true,
     redactSecrets: true
   };
+  private forceRawSnapshotOverLimit = false;
   private listEl: HTMLElement | null = null;
   private progressEl: HTMLElement | null = null;
   private searchEl: HTMLElement | null = null;
@@ -389,29 +390,57 @@ export class AiWorkspaceImportModal extends Modal {
     details.createEl("summary", { text: "导入范围与隐私设置" });
     const section = details.createDiv({ cls: "lifeos-ai-workspace-import-options" });
     section.createEl("strong", { text: "导入内容" });
+    const retentionLabel = this.plugin.settings.aiWorkspaceRawRetention === "three"
+      ? "最新 3 个"
+      : this.plugin.settings.aiWorkspaceRawRetention === "all"
+        ? "全部（不自动清理）"
+        : "最新 1 个";
+    const maxSourceMB = this.plugin.settings.aiWorkspaceRawMaxSourceMB;
+    const thresholdLabel = maxSourceMB > 0 ? `${maxSourceMB} MB` : "不限";
     const items: Array<{ key: keyof AiWorkspaceImportOptions; label: string; description: string }> = [
       { key: "includeProjectMemory", label: "保存项目记忆", description: "版本化保存已绑定目录中的 AGENTS.md、CLAUDE.md 和工具规则，交接给其他 AI 时一并带上。" },
       { key: "includeToolMemory", label: "保存工具全局记忆", description: "可选保存 WorkBuddy memory 等已启用工具的全局记忆；不导入身份、账号、连接器和设置文件。" },
       { key: "includeFileReferences", label: "保留文件引用", description: "记录对话涉及的文件路径，正文按需读取。" },
       { key: "includeToolCalls", label: "保留工具调用", description: "默认关闭，开启后工具调用也成为可追溯节点。" },
-      { key: "retainRawSnapshot", label: "保留只读原始快照", description: "保留选中会话的原始 JSONL/导出，不扫描整库。" },
+      { key: "retainRawSnapshot", label: "保留只读原始快照", description: `保留选中会话的原始 JSONL/导出，不扫描整库。当前策略：每会话保留${retentionLabel}；源超过 ${thresholdLabel} 时默认跳过，可在本区底部强制保留。` },
       { key: "redactSecrets", label: "标准化内容自动脱敏", description: "隐藏常见 API Key、Token 和密码；原始快照不改写。" }
     ];
     const grid = section.createDiv({ cls: "lifeos-ai-workspace-option-grid" });
     for (const item of items) {
       const label = grid.createEl("label", { cls: "lifeos-ai-workspace-check-option" });
       const checkbox = label.createEl("input", { attr: { type: "checkbox" } });
-      checkbox.checked = this.options[item.key];
+      checkbox.checked = this.options[item.key] !== false;
       const copy = label.createDiv();
       copy.createEl("strong", { text: item.label });
       copy.createEl("span", { text: item.description });
       checkbox.addEventListener("change", () => {
-        this.options[item.key] = checkbox.checked;
+        if (item.key === "retainRawSnapshot") {
+          this.options.retainRawSnapshot = checkbox.checked
+            ? this.forceRawSnapshotOverLimit ? "force" : true
+            : false;
+        } else {
+          this.options[item.key] = checkbox.checked;
+        }
         this.prepared = [];
         this.renderCandidates();
         this.syncPrimaryButton();
       });
     }
+    const forceRow = section.createEl("label", { cls: "lifeos-ai-workspace-check-option lifeos-ai-workspace-check-option-force" });
+    const forceCheckbox = forceRow.createEl("input", { attr: { type: "checkbox" } });
+    forceCheckbox.checked = this.options.retainRawSnapshot === "force";
+    const forceCopy = forceRow.createDiv();
+    forceCopy.createEl("strong", { text: "超过阈值也保留快照（强制）" });
+    forceCopy.createEl("span", { text: `仅在明确需要完整原件时勾选；勾选后忽略 ${thresholdLabel} 的大小限制，仍按当前保留策略自动清理旧快照。` });
+    forceCheckbox.addEventListener("change", () => {
+      this.forceRawSnapshotOverLimit = forceCheckbox.checked;
+      if (this.options.retainRawSnapshot !== false) {
+        this.options.retainRawSnapshot = forceCheckbox.checked ? "force" : true;
+      }
+      this.prepared = [];
+      this.renderCandidates();
+      this.syncPrimaryButton();
+    });
   }
 
   private renderManualImport(parent: HTMLElement): void {

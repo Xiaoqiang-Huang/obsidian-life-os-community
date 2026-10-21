@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.4.0 - 2026-10-21
+
+### Breaking
+
+- Replaced the legacy dual-engine AI path with the Claude Agent SDK as the sole engine. The old `AgentLoop`/native HTTP execution path is removed; old queued agent jobs are paused and must be explicitly resubmitted instead of being replayed automatically.
+- Old task or receipt state is not silently migrated across the engine change. Review the paused-task guidance before resubmitting work.
+
+### Added
+
+- FastPath routing for simple questions: concept answers can use a single low-effort call, while diary/task and project retrieval questions can use a source-bearing `fast_context` call with a bounded project prefetch.
+- Desktop and Weixin automatically detect when `fast_context` is eligible. Weixin uses it only when a project is bound, a bounded prefetch returns sources, and no image/web/attachment/skill blocker applies; otherwise it falls back to deep.
+- Weixin send preflight blocks stale or missing conversation context and asks the user to refresh the bot conversation instead of sending or overwriting the transcript.
+- Transcript writes merge by prefix/suffix alignment, preserve unknown frontmatter and context sources, and use an atomic temporary-file rename. Repeated messages are not dropped by content hashing.
+- Project and explicit-path scope guard for agent reads; out-of-scope reads fail with `sdk-scope-denied` instead of silently reading the vault.
+- Tool-budget exhaustion now returns a bounded notice so the model can answer from already-read evidence instead of failing the whole turn.
+
+### Fixed
+
+- Removed the full-vault context scan from the fast path. Fast context now uses the bounded ProjectPrefetchService with a short timeout and falls back to deep when sources are unavailable.
+- Fast-context citation verification accepts the source-path format used by the fast prompt while deep answers keep strict inline citation verification.
+- Added a fixed diagnostic for tool-budget and tool-failure exhaustion instead of a generic "AI request incomplete" message.
+- Preserved the release guard that excludes the experience vault from default delivery synchronization.
+
+### Validation
+
+- Full TypeScript check and the complete local test suite pass, including SDK sole-engine/bundled validation, WeChat preflight, transcript merge, scope guard, and FastPath tests.
+- Native desktop scenarios cover diary/search fast_context and concept fast; Weixin real-send remains pending a refreshed context token.
+
+### Known limitations
+
+- Weixin real send, iLink ACK/idempotency, and real transcript writes remain pending a refreshed context token and an isolated-write test.
+- Local-fact, multi-source, PDF, web, and refusal questions remain on the deep path.
+- Fast responses still vary with provider latency; do not treat a single run as a stable speed guarantee.
+- The community release workflow publishes only `main.js`, `manifest.json`, and `styles.css`; the separate SDK runtime redistribution review is not approved by this release entry.
+
 ## 0.3.25 - 2026-09-30
 
 ### Fixed

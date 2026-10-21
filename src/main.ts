@@ -1,9 +1,15 @@
 import { capturePdfTextSelection } from "./ui/pdf-selection";
+import type { ProjectAnalysisService } from "./services/ProjectAnalysisService";
+import { sdkDesktopOnlyMessage } from "./services/sdk/SdkInternalBootstrap";
 import { captureWordTextSelection } from "./ui/word-selection";
 import { DocumentTagsModal } from "./modals/DocumentTagsModal";
 import { GENERATED_NOTE_TAG_RULE, normalizeGeneratedNoteMarkdown } from "./utils/generated-note-markdown";
 import { resolveVisionSettings } from "./settings";
 import { TaskSuggestionService, normalizeTaskSuggestionDailyLimit } from "./services/TaskSuggestionService";
+import { ContextEngine } from "./services/ContextEngine";
+import { scheduleContextIndexWarmup, type ContextWarmupHandle } from "./services/context-warmup";
+import { sanitizeAnswerMetric } from "./services/answer/AnswerMetrics";
+import { RuntimePrewarm, prepareSdkRuntime, type RuntimePreparation } from "./services/answer/RuntimePrewarm";
 import { refreshExperienceTheme, syncThemeClassNames } from "./ui/theme";
 import { persistSettingsSnapshot } from "./ui/theme-selection";
 import { applyDocumentAppearance, clearDocumentAppearance, documentBackgroundUrl } from "./ui/document-appearance";
@@ -13,7 +19,7 @@ import { ChatContinuity } from "./services/chat/ChatContinuity";
 import { prepareDailyAnalysisSource } from "./services/DailyAnalysisSource";
 import { USER_SAVED_CONVERSATION_LABEL, USER_SAVED_CONVERSATION_SOURCE, type EvidenceOrigin } from "./services/context-engine/ContextSourcePolicyService";
 import { snapshotWritebackUndo } from "./services/writeback-undo";
-import { Menu, MarkdownView, Notice, Plugin, TFile, type Editor, type WorkspaceLeaf } from "obsidian";
+import { Menu, MarkdownView, Notice, Platform, Plugin, TFile, type Editor, type WorkspaceLeaf } from "obsidian";
 import { installVaultReadCache } from "./utils/vault-read-cache";
 import {
   AI_EDIT_PANEL_VIEW_TYPE,
@@ -56,6 +62,8 @@ import {
   normalizeChatWritebackMode,
   normalizePaddleOcrEndpoint,
   normalizePdfOcrEngine,
+  normalizeAiWorkspaceRawRetention,
+  normalizeAiWorkspaceRawMaxSourceMB,
   normalizeHiddenSidebarItems,
   normalizeAiTaskExtractionLimit,
   normalizeProjectContextTaskExtractionLimit,
@@ -209,7 +217,25 @@ interface AiEditDomSelectionSnapshot {
 export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin {
   settings: PersonalLifeSystemSettings;
   ai: AiClient;
+  modelMetadata: AiClient;
+  automaticAi: AiClient;
   agent: LifeOSAgentService;
+  private projectAnalysisService?: ProjectAnalysisService;
+  private disposedForAnalysis = false;
+  async openProjectAnalysis(projectId?: string, request?: string): Promise<void> {
+    if (!requireProFeature(this, "aiChat")) return;
+    // S5: the analysis hard-depends on the desktop host (base path, host lock,
+    // SDK). Explain at the entry instead of opening a modal that can only fail.
+    if (!Platform.isDesktopApp) { new Notice(sdkDesktopOnlyMessage(), 8000); return; }
+    try {
+      const [{ ProjectAnalysisService }, { ProjectAnalysisModal }] = await Promise.all([
+        import("./services/ProjectAnalysisService"), import("./components/ProjectAnalysisModal")]);
+      if (this.disposedForAnalysis) return;
+      this.projectAnalysisService ||= new ProjectAnalysisService(this.app, () => this.settings, this.agent.projectAnalysis);
+      new ProjectAnalysisModal(this.app, this.projectAnalysisService, projectId, request).open();
+    } catch (error) { new Notice(error instanceof Error && /^sdk-[a-z-]+$/.test(error.message)
+      ? error.message : "项目全文分析入口未就绪。请检查普通 AI 配置、Pro 授权和插件运行时诊断。"); }
+  }
   readonly chatContinuity = new ChatContinuity<ActiveChatRuntimeState>({ messages: [], draftInput: "", updatedAt: 0 });
   get activeChatState(): ActiveChatRuntimeState { return this.chatContinuity.state; }
   private dailyMaintenancePromise: Promise<void> | null = null;
@@ -217,6 +243,8 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   private agentMemoryQueueRunning = false;
   private agentMemoryMaintenanceRunning = false;
   private midnightTimer: number | null = null;
+  private contextWarmup: ContextWarmupHandle | null = null;
+  private readonly aiRuntimePrewarm = new RuntimePrewarm<RuntimePreparation>(signal => prepareSdkRuntime(signal));
   private modalTextareaObserver: MutationObserver | null = null;
   private liquidGlassObserver: MutationObserver | null = null;
   private liquidGlassRefreshTimer: number | null = null;
@@ -309,20 +337,24 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.applyTheme();
     this.installMobileViewportVariables();
     this.registerModalTextareaEnhancer();
-    this.ai = new AiClient(() => this.settings);
+    this.modelMetadata = new AiClient(() => this.settings);
     this.agent = new LifeOSAgentService(
       this.app,
       () => this.settings,
-      this.ai,
+      this.modelMetadata,
       () => hasSettingsProAccess(this.settings),
-      () => this.saveSettings()
+      () => this.saveSettings(),
+      () => (this.app.vault.adapter as unknown as { getFullPath?: (relative: string) => string }).getFullPath?.(this.manifest.dir || `${this.app.vault.configDir}/plugins/${this.manifest.id}`) || ""
     );
+    this.ai = this.agent.workflowClient({ purpose: "plugin-text" });
+    this.automaticAi = this.agent.workflowClient({ purpose: "scheduled-text", automatic: true, approval: () => hasSettingsProAccess(this.settings) });
     this.autoReviewService = new AutoReviewService(
       this.app,
       this.fileSystem(),
       this.settings,
-      this.ai,
+      this.agent.workflowClient({ purpose: "auto-review", automatic: true, approval: () => this.settings.autoReviewEnabled && hasSettingsProAccess(this.settings) }),
       {
+        manualAi: this.ai,
         hasEntitlement: () => hasSettingsProAccess(this.settings),
         onDraftCreated: (draft) => new Notice(`已生成待确认的今日复盘草稿：${draft.window.start}`, 7000)
       }
@@ -642,6 +674,11 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
 
     // ── 报告命令 ──
     this.addCommand({
+      id: "project-full-analysis",
+      name: "项目全文观点分析（先核对范围和额度）",
+      callback: () => void this.openProjectAnalysis()
+    });
+    this.addCommand({
       id: "generate-daily-report",
       name: "生成日报",
       callback: () => void this.generateReport("daily")
@@ -705,9 +742,31 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.registerInterval(window.setInterval(() => {
       void this.runAgentMemoryMaintenancePass();
     }, 6 * 60 * 60_000));
+    // Desktop-only idle warm-up: move the one-time retrieval index build out of
+    // the first search (F-01) without changing retrieval scope or call count.
+    // The helper owns the 30s delay/requestIdleCallback policy and stays
+    // cancellable on unload; failures are silent. D-14: a live chat/agent
+    // request defers the build (read-only probe) so index work never competes
+    // with a real turn.
+    this.contextWarmup = scheduleContextIndexWarmup({
+      isDesktop: Platform.isDesktopApp,
+      isBusy: () => this.agent?.isBusy() === true,
+      warm: async () => { await new ContextEngine(this.app, this.settings, this.ai).warmIndex(); }
+    });
+    this.register(() => { this.contextWarmup?.cancel(); this.contextWarmup = null; });
+    // Local-only SDK module load after an idle window. No query(), credential
+    // lookup, socket or Vault write; mobile never starts it.
+    this.aiRuntimePrewarm.schedule(Platform.isDesktopApp, () => "sdk-0.3.293", 20_000);
+    this.register(() => this.aiRuntimePrewarm.dispose());
   }
 
   onunload(): void {
+    this.disposedForAnalysis = true;
+    this.contextWarmup?.cancel();
+    this.contextWarmup = null;
+    this.aiRuntimePrewarm.dispose();
+    this.projectAnalysisService?.dispose();
+    this.agent?.dispose();
     if (this.midnightTimer) {
       window.clearTimeout(this.midnightTimer);
       this.midnightTimer = null;
@@ -761,7 +820,29 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     const needsChatWritebackModeMigration = storedChatWritebackMode !== "off"
       && storedChatWritebackMode !== "confirm"
       && storedChatWritebackMode !== "explicit-auto";
+    // KB-12: raw snapshots used to be copied whole for every revision; the new
+    // governance defaults (retain latest 1 per session, 20 MB source threshold)
+    // must land in settings once for existing users. Explicitly stored
+    // `retainRawSnapshot` options on sessions stay authoritative.
+    const storedRawGovernanceVersion = Number((storedData as Record<string, unknown>).aiWorkspaceRawGovernanceVersion || 0);
+    const needsAiWorkspaceRawGovernanceMigration = storedRawGovernanceVersion < 1;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, storedData);
+    this.settings.fastPathMode = this.settings.fastPathMode === "off" ? "off" : "auto";
+    this.settings.fastPathShadow = this.settings.fastPathShadow !== false;
+    this.settings.fastPathDisabledIntents = Array.isArray(this.settings.fastPathDisabledIntents)
+      ? this.settings.fastPathDisabledIntents.filter((value): value is string => typeof value === "string").slice(0, 8)
+      : [];
+    this.settings.prefetchEnabled = this.settings.prefetchEnabled !== false;
+    this.settings.speculativeEnabled = this.settings.speculativeEnabled === true;
+    this.settings.speculativeConsentAt = Number.isFinite(this.settings.speculativeConsentAt) ? Math.max(0, this.settings.speculativeConsentAt) : 0;
+    {
+      const now = Date.now();
+      this.settings.answerMetrics = (Array.isArray(storedData.answerMetrics) ? storedData.answerMetrics : [])
+        .map(sanitizeAnswerMetric)
+        .filter(row => row.at > now - 7 * 86400_000 && row.at <= now)
+        .slice(-1000);
+    }
+    this.settings.instantAnswerMode = this.settings.instantAnswerMode === "off" ? "off" : "auto";
     this.settings.firstRunState = { ...DEFAULT_SETTINGS.firstRunState, ...(this.settings.firstRunState || {}) };
     this.settings.firstRunState.draft = String(this.settings.firstRunState.draft || "").slice(0, 16000);
     this.settings.sidebarPinnedItems = Array.isArray(this.settings.sidebarPinnedItems) ? [...new Set(this.settings.sidebarPinnedItems.filter(item => typeof item === "string"))].slice(0, 14) : [];
@@ -822,6 +903,13 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       : storedData.browserCaptureEnabled !== false;
     this.settings.browserCaptureSetupVersion = 1;
     this.settings.browserCapturePort = normalizeBrowserCapturePort(storedData.browserCapturePort);
+    this.settings.aiWorkspaceRawRetention = normalizeAiWorkspaceRawRetention(
+      (storedData as Record<string, unknown>).aiWorkspaceRawRetention
+    );
+    this.settings.aiWorkspaceRawMaxSourceMB = normalizeAiWorkspaceRawMaxSourceMB(
+      (storedData as Record<string, unknown>).aiWorkspaceRawMaxSourceMB
+    );
+    this.settings.aiWorkspaceRawGovernanceVersion = 1;
     this.settings.webSearchProvider = normalizeWebSearchProvider(legacyBotData.webSearchProvider);
     this.settings.webSearchApiKey = String(legacyBotData.webSearchApiKey || "").trim();
     this.settings.webSearchEndpoint = String(legacyBotData.webSearchEndpoint || "").trim();
@@ -900,12 +988,13 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       setStoredAiApiKey(this.settings, this.settings.aiProvider, this.settings.aiApiKey);
     }
     setStoredAiProviderConfig(this.settings, this.settings.aiProvider, getCurrentAiProviderConfig(this.settings));
-    if (needsInitialLicenseSave || needsImportedAiSkillMigration || needsAiSkillOverrideMigration || needsBrowserCaptureTokenSave || needsBrowserCaptureSetupMigration || needsWeixinSetupMigration || needsChatWritebackModeMigration) {
+    if (needsInitialLicenseSave || needsImportedAiSkillMigration || needsAiSkillOverrideMigration || needsBrowserCaptureTokenSave || needsBrowserCaptureSetupMigration || needsWeixinSetupMigration || needsChatWritebackModeMigration || needsAiWorkspaceRawGovernanceMigration) {
       await this.saveSettings();
     }
   }
 
   async saveSettings(themeRevision?: number): Promise<void> {
+    this.agent?.refreshChannelConfiguration();
     this.settings.autoReviewTime = normalizeAutoReviewTime(this.settings.autoReviewTime);
     // Snapshot at invocation; rapid controls cannot persist an older selection last.
     await persistSettingsSnapshot(this, themeRevision);
@@ -1032,8 +1121,9 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       }, request).allowed,
       canAnalyzeImages: () => Boolean(resolveVisionSettings(this.settings)),
       stageInboundMessage: (request) => this.getWeixinAssistantService().stageInboundMessage(request),
-      handleMessage: (request) => this.getWeixinAssistantService().handleMessage(request),
+      handleMessage: (request, stream) => this.getWeixinAssistantService().handleMessage(request, stream),
       recoverPendingMessages: (accountId) => this.getWeixinAssistantService().recoverPendingMessages(accountId),
+      recoverStoredReply: (accountId, messageId) => this.getWeixinAssistantService().recoverStoredReply(accountId, messageId),
       markMessageDelivered: (request) => this.getWeixinAssistantService().markMessageDelivered(request),
       markMessageDeliveryFailed: (request, error) => this.getWeixinAssistantService().markMessageDeliveryFailed(request, error)
     });
@@ -1179,8 +1269,9 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
         }, request).allowed,
         canAnalyzeImages: () => Boolean(resolveVisionSettings(this.settings)),
         stageInboundMessage: (request) => this.getWeixinAssistantService().stageInboundMessage(request),
-        handleMessage: (request) => this.getWeixinAssistantService().handleMessage(request),
+        handleMessage: (request, stream) => this.getWeixinAssistantService().handleMessage(request, stream),
         recoverPendingMessages: (accountId) => this.getWeixinAssistantService().recoverPendingMessages(accountId),
+        recoverStoredReply: (accountId, messageId) => this.getWeixinAssistantService().recoverStoredReply(accountId, messageId),
         markMessageDelivered: (request) => this.getWeixinAssistantService().markMessageDelivered(request),
         markMessageDeliveryFailed: (request, error) => this.getWeixinAssistantService().markMessageDeliveryFailed(request, error)
       });
@@ -1200,7 +1291,8 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       this.app,
       new FileSystemService(this.app, this.getRoot(), this.settings.directoryLanguage),
       this.settings,
-      this.ai
+      this.ai,
+      this.automaticAi
     );
   }
 
@@ -2078,10 +2170,11 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
   }
 
   private async generateDailyArchive(file: TFile, date: string, requireAiSummary = false): Promise<{ summary: string; nextSteps: string[] }> {
+    const client = requireAiSummary ? this.ai : this.automaticAi;
     const source = prepareDailyAnalysisSource(file.path, await this.app.vault.read(file), this.getRoot());
     const content = source.content;
     if (requireAiSummary && !content) throw new Error("没有可用于复盘的用户内容；自动聊天和历史 AI 整理不会作为事实来源。");
-    if ((!requireAiSummary && !this.settings.enableAutoAnalysis) || !this.ai.isConfigured() || !hasSettingsProAccess(this.settings)) {
+    if ((!requireAiSummary && !this.settings.enableAutoAnalysis) || !client.isConfigured() || !hasSettingsProAccess(this.settings)) {
       if (requireAiSummary) throw new Error("请先配置并启用 AI 模型，原日记未改动。");
       return {
         summary: "自动归档：AI 未启用或未配置，已保留原始日记内容与未完成待办。",
@@ -2089,7 +2182,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
       };
     }
 
-    const response = await this.ai.complete({
+    const response = await client.complete({
       responseFormat: "json",
       temperature: 0.25,
       messages: [
@@ -2305,6 +2398,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
 
   /** Generate weekly summary for the PREVIOUS complete ISO week */
   private async generatePreviousWeekSummary(): Promise<void> {
+    if (!this.automaticAi.isConfigured()) return;
     const today = new Date();
     const prevWeekStart = new Date(today);
     const dayOfWeek = today.getDay() || 7; // 1=Mon ... 7=Sun
@@ -2330,7 +2424,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
 
     if (summaryLines.length < 2) return;
 
-    const response = await this.ai.complete({
+    const response = await this.automaticAi.complete({
       temperature: 0.3,
       messages: [
         { role: "system", content: buildSystemPrompt(this.settings) },
@@ -2357,6 +2451,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
 
   /** Generate monthly summary for the PREVIOUS calendar month */
   private async generatePreviousMonthSummary(): Promise<void> {
+    if (!this.automaticAi.isConfigured()) return;
     const today = new Date();
     const year = today.getFullYear();
     const month = today.getMonth(); // 0-indexed
@@ -2411,7 +2506,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
 
     if (monthlySummaryLines.length === 0) return;
 
-    const response = await this.ai.complete({
+    const response = await this.automaticAi.complete({
       temperature: 0.35,
       messages: [
         { role: "system", content: buildSystemPrompt(this.settings) },
@@ -2445,6 +2540,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
 
   /** Generate yearly summary for the PREVIOUS calendar year */
   private async generatePreviousYearSummary(): Promise<void> {
+    if (!this.automaticAi.isConfigured()) return;
     const today = new Date();
     const prevYear = today.getFullYear() - 1;
     const summaryPath = this.path("Memory", "Summaries", "Yearly", `${prevYear}.md`);
@@ -2471,7 +2567,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
 
     if (yearlySummaryLines.length === 0) return;
 
-    const response = await this.ai.complete({
+    const response = await this.automaticAi.complete({
       temperature: 0.4,
       messages: [
         { role: "system", content: buildSystemPrompt(this.settings) },
@@ -3636,13 +3732,16 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
-  async activateChat(initialPrompt = ""): Promise<void> {
+  /** `fresh` isolates the injected prompt from the current conversation. Only
+   * the help entry uses it; every other caller keeps appending to the session. */
+  async activateChat(initialPrompt = "", options: { fresh?: boolean } = {}): Promise<void> {
     if (initialPrompt.trim()) this.pendingChatPrompt = initialPrompt.trim();
     const leaf = this.getLifeOsLeaf();
     await leaf.setViewState({ type: CHAT_VIEW_TYPE, active: true });
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
     if (leaf.view instanceof LifeOSChatView) {
       const pending = this.consumePendingChatPrompt();
+      if (options.fresh) await leaf.view.startGuideConversation();
       if (pending) leaf.view.setDraftPrompt(pending);
     }
   }

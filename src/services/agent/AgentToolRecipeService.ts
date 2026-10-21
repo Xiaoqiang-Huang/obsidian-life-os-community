@@ -6,6 +6,7 @@ import type {
 import { FileSystemService } from "../FileSystemService";
 import { ensureFolder, readFile, writeFile } from "../../utils/vault";
 import type { LifeOSAgentToolExecutionContext, LifeOSAgentToolResult } from "./LifeOSAgentTypes";
+import { isAgentWebToolAllowed } from "./AgentToolRuntime";
 
 export interface LifeOSAgentToolRecipeStep {
   toolId: string;
@@ -150,6 +151,7 @@ export class AgentToolRecipeService {
       modelCallCost: primitiveDescriptors.reduce((sum, descriptor) => sum + Math.max(0, descriptor.modelCallCost || 0), 0),
       input: { ...recipe.inputSchema },
       risk: hasWrite ? "local-write" : hasNetwork ? "network" : primitiveDescriptors.some((item) => item.risk === "local-read") ? "local-read" : "none",
+      requiresWeb: primitiveDescriptors.some((item) => !isAgentWebToolAllowed(item, { webSearchMode: "off" })),
       confirmation: requiresConfirmation ? "always" : "default"
     };
   }

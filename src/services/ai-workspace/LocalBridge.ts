@@ -395,6 +395,162 @@ export class AiWorkspaceLocalBridge {
     await fs.promises.writeFile(destinationPath, content, "utf8");
   }
 
+  /**
+   * KB-12 storage governance: streaming sha256 of a raw snapshot source so
+   * identical sources can reuse one copy without loading huge files fully
+   * into memory.
+   */
+  async hashRawSnapshotFile(filePath: string): Promise<string> {
+    const fs = this.fs();
+    const crypto = this.nodeRequire()!("crypto") as typeof import("crypto");
+    const hash = crypto.createHash("sha256");
+    await new Promise<void>((resolve, reject) => {
+      const stream = fs.createReadStream(filePath);
+      stream.on("data", (chunk) => hash.update(chunk));
+      stream.on("error", reject);
+      stream.on("end", () => resolve());
+    });
+    return hash.digest("hex");
+  }
+
+  /** Hash of a snapshot payload composed in memory (SQLite sessions). */
+  hashRawSnapshotText(content: string): string {
+    const crypto = this.nodeRequire()!("crypto") as typeof import("crypto");
+    return crypto.createHash("sha256").update(content, "utf8").digest("hex");
+  }
+
+  /** Byte size of the snapshot source file; 0 when it cannot be read. */
+  async rawSnapshotSourceSize(filePath: string): Promise<number> {
+    const fs = this.fs();
+    try {
+      const stat = await fs.promises.stat(filePath);
+      return stat.isFile() ? stat.size : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Copies a snapshot source to its destination in one streaming pass while
+   * hashing it, so stored snapshots carry a content hash for later dedup
+   * without an extra full read of large transcripts.
+   */
+  async copyRawSnapshotWithHash(
+    sourcePath: string,
+    destinationPath: string
+  ): Promise<{ hash: string; size: number }> {
+    const fs = this.fs();
+    const path = this.path();
+    const crypto = this.nodeRequire()!("crypto") as typeof import("crypto");
+    await fs.promises.mkdir(path.dirname(destinationPath), { recursive: true });
+    const hash = crypto.createHash("sha256");
+    let size = 0;
+    await new Promise<void>((resolve, reject) => {
+      const read = fs.createReadStream(sourcePath);
+      const write = fs.createWriteStream(destinationPath);
+      read.on("data", (chunk) => {
+        size += chunk.length;
+        hash.update(chunk);
+      });
+      read.on("error", (error) => {
+        write.destroy();
+        reject(error);
+      });
+      write.on("error", (error) => {
+        read.destroy();
+        reject(error);
+      });
+      write.on("finish", () => resolve());
+      read.pipe(write);
+    });
+    return { hash: hash.digest("hex"), size };
+  }
+
+  /** Immediate non-hidden subdirectory names of a raw snapshot directory. */
+  async listRawSnapshotDirectories(dir: string): Promise<string[]> {
+    const fs = this.fs();
+    try {
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+      return entries
+        .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+        .map((entry) => entry.name)
+        .sort((left, right) => left.localeCompare(right));
+    } catch {
+      return [];
+    }
+  }
+
+  async rawSnapshotPathExists(targetPath: string): Promise<boolean> {
+    const fs = this.fs();
+    try {
+      await fs.promises.stat(targetPath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Lists the revision directories of one session under `.lifeos/raw` with
+   * their recursive byte size and relative file names. Missing directories
+   * simply yield an empty list; this method never creates or writes anything.
+   */
+  async listRawSnapshotRevisions(
+    sessionDir: string
+  ): Promise<Array<{ revisionId: string; bytes: number; files: string[] }>> {
+    const fs = this.fs();
+    const path = this.path();
+    let entries: Array<{ name: string; isDirectory(): boolean }> = [];
+    try {
+      entries = await fs.promises.readdir(sessionDir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    const revisions: Array<{ revisionId: string; bytes: number; files: string[] }> = [];
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      const revisionDir = path.join(sessionDir, entry.name);
+      const files: string[] = [];
+      let bytes = 0;
+      const walk = async (current: string, prefix: string): Promise<void> => {
+        let children: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }> = [];
+        try {
+          children = await fs.promises.readdir(current, { withFileTypes: true });
+        } catch {
+          return;
+        }
+        for (const child of children) {
+          const childPath = path.join(current, child.name);
+          const relative = prefix ? `${prefix}/${child.name}` : child.name;
+          if (child.isDirectory()) {
+            await walk(childPath, relative);
+            continue;
+          }
+          if (!child.isFile()) continue;
+          try {
+            const stat = await fs.promises.stat(childPath);
+            bytes += stat.size;
+          } catch {
+            // A snapshot file removed concurrently still counts as no bytes.
+          }
+          files.push(relative);
+        }
+      };
+      await walk(revisionDir, "");
+      revisions.push({ revisionId: entry.name, bytes, files });
+    }
+    return revisions;
+  }
+
+  /**
+   * Deletes one raw snapshot directory (revision or orphaned session folder).
+   * Only called for paths the caller built under `.lifeos/raw`.
+   */
+  async removeRawSnapshotPath(targetPath: string): Promise<void> {
+    const fs = this.fs();
+    await fs.promises.rm(targetPath, { recursive: true, force: true });
+  }
+
   async readFileSegment(
     filePath: string,
     startLine = 1,

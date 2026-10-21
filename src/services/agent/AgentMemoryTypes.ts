@@ -98,6 +98,9 @@ export interface AgentMemoryCandidate {
 }
 
 export interface AgentMemoryExtractionJob {
+  /** Legacy untagged jobs belong to the native queue; never silently borrow SDK credentials. */
+  modelBackend?: "native-api" | "claude-sdk" | "unsupported";
+  sdkWorkflowIdentity?: string;
   id: string;
   fingerprint: string;
   sessionId: string;
@@ -108,7 +111,7 @@ export interface AgentMemoryExtractionJob {
   userContent: string;
   assistantContent: string;
   toolSummaries: string[];
-  status: "queued" | "processing" | "completed" | "failed";
+  status: "queued" | "processing" | "completed" | "failed" | "paused";
   attempts: number;
   createdAt: string;
   updatedAt: string;

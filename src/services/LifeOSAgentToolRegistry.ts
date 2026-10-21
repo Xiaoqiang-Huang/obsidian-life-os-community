@@ -20,6 +20,8 @@ export interface LifeOSAgentToolDescriptor {
   modelCallCost?: number;
   toolCallCost?: number;
   risk?: "none" | "local-read" | "local-write" | "network";
+  /** Declarative recipes inherit this when any primitive needs public web I/O. */
+  requiresWeb?: boolean;
   /** Destructive writes stay behind a confirmation even in explicit-auto mode. */
   confirmation?: "default" | "always";
 }
@@ -38,7 +40,9 @@ export const LIFEOS_AGENT_TOOL_REGISTRY: readonly LifeOSAgentToolDescriptor[] = 
   { id: "docx-text-read", mode: "read", family: "vault", description: "读取 DOCX 正文，首次写入 Vault 内可见的识别 Markdown，后续复用；使用 nextOffset 分段续读；旧版 .doc 不支持", channels: ["desktop", "weixin"], parallelSafe: true, risk: "local-read", input: { path: { type: "string", description: "Life OS 内 DOCX 文件路径", required: true }, offset: { type: "number", description: "正文字符偏移" }, limit: { type: "number", description: "单段字符上限" } } },
   { id: "web-page-read", mode: "read", family: "web", description: "读取公开网页正文快照并分段续读；续读必须提供返回的 snapshot，不能把搜索摘要当正文", channels: ["desktop", "weixin"], parallelSafe: true, risk: "network", input: { url: { type: "string", description: "公开网页 URL", required: true }, offset: { type: "number", description: "正文偏移" }, limit: { type: "number", description: "单段字符数" }, snapshot: { type: "string", description: "首次读取返回的快照编号" } } },
   { id: "web-search", mode: "read", family: "web", description: "搜索多个公开网页来源并读取正文，适合最新外部事实、官网、新闻和公开资料", channels: ["desktop", "weixin"], deferred: true, parallelSafe: true, risk: "network", input: { query: { type: "string", description: "独立、完整的检索问题", required: true }, officialOnly: { type: "boolean", description: "是否优先官方来源" } } },
+  { id: "memory-search", mode: "read", family: "memory", description: "按需检索当前账号/项目/渠道允许使用的长期记忆；未启用记忆时不读取", channels: ["desktop", "weixin"], parallelSafe: true, risk: "local-read", input: { query: { type: "string", description: "需要回忆的偏好、约定或事实", required: true } } },
   { id: "lifeos-search", mode: "read", family: "rag", description: "混合检索 Life OS 日记、任务、记忆、项目、知识库和 LLM Wiki", channels: ["desktop", "weixin"], deferred: true, parallelSafe: true, risk: "local-read", input: { query: { type: "string", description: "要在 Life OS 中查找的内容", required: true }, projectScopeId: { type: "string", description: "可选项目范围" } } },
+  { id: "project-list", mode: "read", family: "project", description: "列出当前授权范围的真实项目目录（名称、ID、状态），仅读取项目索引，不读取文档正文；hasMore 时使用 nextOffset 续页", channels: ["desktop", "weixin"], parallelSafe: true, risk: "local-read", input: { query: { type: "string", description: "可选名称关键词，列出所有时留空" }, offset: { type: "number", description: "首次为 0，续页用 nextOffset" }, limit: { type: "number", description: "单页 1–100，默认 50" } } },
   { id: "project-search", mode: "read", family: "project", description: "在项目上下文、会话交接、任务和项目文档中检索", channels: ["desktop", "weixin"], deferred: true, parallelSafe: true, risk: "local-read", input: { query: { type: "string", description: "项目问题", required: true }, projectScopeId: { type: "string", description: "项目标识" } } },
   { id: "diary-read", mode: "read", family: "diary", description: "读取指定日期的日记", channels: ["desktop", "weixin"], parallelSafe: true, risk: "local-read", input: { date: { type: "string", description: "today、yesterday 或 YYYY-MM-DD" } } },
   { id: "diary-add", mode: "write", family: "diary", description: "把用户记录追加到日记", channels: ["desktop", "weixin"], risk: "local-write", input: { content: { type: "string", description: "要写入的内容", required: true }, date: { type: "string", description: "可选日期" } } },
@@ -87,12 +91,12 @@ export const LIFEOS_AGENT_TOOL_REGISTRY: readonly LifeOSAgentToolDescriptor[] = 
     id: "vault-file-list",
     mode: "read",
     family: "vault",
-    description: "列出 Life OS 根目录内的文件；不能访问 Vault 其他区域",
+    description: "列出 Life OS 根目录内的文件；不能访问 Vault 其他区域。folder 可写完整 Vault 相对路径（如 PersonalLifeSystem/知识库）或 Life OS 根内相对路径（如 知识库）；留空表示根目录",
     channels: ["desktop", "weixin"],
     parallelSafe: true,
     risk: "local-read",
     input: {
-      folder: { type: "string", description: "Life OS 根目录内的相对目录，留空表示根目录" },
+      folder: { type: "string", description: "Life OS 根目录内的相对目录（两种写法均可），留空表示根目录" },
       recursive: { type: "boolean", description: "是否递归列出子目录" }
     }
   },
@@ -100,12 +104,12 @@ export const LIFEOS_AGENT_TOOL_REGISTRY: readonly LifeOSAgentToolDescriptor[] = 
     id: "vault-file-read",
     mode: "read",
     family: "vault",
-    description: "分段读取 Life OS 文本文件；hasMore 为 true 时用 nextOffset 继续读取，不把部分正文当全文",
+    description: "分段读取 Life OS 文本文件；hasMore 为 true 时用 nextOffset 继续读取，不把部分正文当全文。path 可写完整 Vault 相对路径（如 PersonalLifeSystem/日记/2026-10-18.md）或 Life OS 根内相对路径（如 日记/2026-10-18.md）",
     channels: ["desktop", "weixin"],
     parallelSafe: true,
     risk: "local-read",
     input: {
-      path: { type: "string", description: "Life OS 根目录内的相对文件路径", required: true },
+      path: { type: "string", description: "Life OS 根目录内的相对文件路径（两种写法均可）", required: true },
       offset: { type: "number", description: "UTF-16 字符偏移，首次为 0，续读使用 nextOffset" },
       limit: { type: "number", description: "单段字符数，默认 12000，上限 24000" }
     }
@@ -118,7 +122,7 @@ export const LIFEOS_AGENT_TOOL_REGISTRY: readonly LifeOSAgentToolDescriptor[] = 
     channels: ["desktop", "weixin"],
     risk: "local-write",
     input: {
-      path: { type: "string", description: "Life OS 根目录内的相对文件路径", required: true },
+      path: { type: "string", description: "Life OS 根目录内的相对文件路径（两种写法均可）", required: true },
       content: { type: "string", description: "文件正文", required: true }
     }
   },
@@ -130,7 +134,7 @@ export const LIFEOS_AGENT_TOOL_REGISTRY: readonly LifeOSAgentToolDescriptor[] = 
     channels: ["desktop", "weixin"],
     risk: "local-write",
     input: {
-      path: { type: "string", description: "Life OS 根目录内的相对文件路径", required: true },
+      path: { type: "string", description: "Life OS 根目录内的相对文件路径（两种写法均可）", required: true },
       content: { type: "string", description: "要追加的正文", required: true }
     }
   },
@@ -143,7 +147,7 @@ export const LIFEOS_AGENT_TOOL_REGISTRY: readonly LifeOSAgentToolDescriptor[] = 
     risk: "local-write",
     confirmation: "always",
     input: {
-      path: { type: "string", description: "Life OS 根目录内的相对文件路径", required: true },
+      path: { type: "string", description: "Life OS 根目录内的相对文件路径（两种写法均可）", required: true },
       find: { type: "string", description: "必须匹配的原文", required: true },
       replace: { type: "string", description: "替换后的正文", required: true },
       replaceAll: { type: "boolean", description: "是否替换全部匹配；默认要求唯一匹配" }
@@ -158,8 +162,8 @@ export const LIFEOS_AGENT_TOOL_REGISTRY: readonly LifeOSAgentToolDescriptor[] = 
     risk: "local-write",
     confirmation: "always",
     input: {
-      from: { type: "string", description: "原相对路径", required: true },
-      to: { type: "string", description: "目标相对路径", required: true }
+      from: { type: "string", description: "原相对路径（两种写法均可）", required: true },
+      to: { type: "string", description: "目标相对路径（两种写法均可）", required: true }
     }
   },
   {

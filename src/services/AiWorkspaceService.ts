@@ -47,6 +47,12 @@ import type {
   AiWorkspaceProjectMemoryCandidate,
   AiWorkspaceProjectMemoryScope,
   AiWorkspacePromptAsset,
+  AiWorkspaceRawRetention,
+  AiWorkspaceRawSnapshotPruneResult,
+  AiWorkspaceRawSnapshotProjectUsage,
+  AiWorkspaceRawSnapshotSessionUsage,
+  AiWorkspaceRawSnapshotSkipReason,
+  AiWorkspaceRawSnapshotUsage,
   AiWorkspaceRevisionManifest,
   AiWorkspaceRevisionSummary,
   AiWorkspaceSessionAnalysis,
@@ -78,6 +84,27 @@ interface StagedBrowserConversation {
   inboxPath: string;
 }
 
+interface RawSnapshotWriteResult {
+  status: "stored" | "deduped" | "skipped";
+  vaultPath?: string;
+  hash?: string;
+  size?: number;
+  reason?: AiWorkspaceRawSnapshotSkipReason;
+}
+
+interface RawSnapshotRetentionSweep {
+  removedRevisions: number;
+  reclaimedBytes: number;
+  keptRevisions: Array<{ revisionId: string; path: string; bytes: number }>;
+  metadataChanged: boolean;
+}
+
+interface RawSnapshotCandidateRef {
+  vaultPath: string;
+  hash?: string;
+  size?: number;
+}
+
 export class AiWorkspaceService {
   private static mutationQueue: Promise<void> = Promise.resolve();
   readonly bridge = new AiWorkspaceLocalBridge();
@@ -87,7 +114,8 @@ export class AiWorkspaceService {
     private app: App,
     private fs: FileSystemService,
     private settings: PersonalLifeSystemSettings,
-    private ai?: AiClient
+    private ai?: AiClient,
+    private automaticAi?: AiClient
   ) {}
 
   async ensureStructure(): Promise<void> {
@@ -2220,8 +2248,34 @@ export class AiWorkspaceService {
     });
     const notePath = existing?.notePath ?? this.sessionNotePath(prepared.projectId, prepared.candidate.tool, sessionId, prepared.parsed.source.title);
     let rawSnapshotPath = existing?.rawSnapshotPath;
-    if (options.retainRawSnapshot) {
-      rawSnapshotPath = await this.retainRawSnapshot(sessionId, revisionId, prepared);
+    let rawSnapshotHash = existing?.rawSnapshotHash;
+    let rawSnapshotSize = existing?.rawSnapshotSize;
+    let rawSnapshotDeduped = existing?.rawSnapshotDeduped;
+    let rawSnapshotSkipped = existing?.rawSnapshotSkipped;
+    if (options.retainRawSnapshot !== false) {
+      const snapshot = await this.retainRawSnapshot(
+        sessionId,
+        revisionId,
+        prepared,
+        existing,
+        options.retainRawSnapshot === "force"
+      );
+      if (snapshot.status === "skipped") {
+        // KB-12: over-threshold sources are skipped by default; the session
+        // keeps its previous snapshot reference and records the reason.
+        rawSnapshotSkipped = snapshot.reason ?? "over-size";
+        rawSnapshotDeduped = undefined;
+      } else {
+        rawSnapshotPath = snapshot.vaultPath;
+        rawSnapshotHash = snapshot.hash;
+        rawSnapshotSize = snapshot.size;
+        rawSnapshotDeduped = snapshot.status === "deduped" ? true : undefined;
+        rawSnapshotSkipped = undefined;
+        revision.rawSnapshotPath = snapshot.vaultPath;
+        revision.rawSnapshotHash = snapshot.hash;
+        revision.rawSnapshotSize = snapshot.size;
+        if (snapshot.status === "deduped") revision.rawSnapshotDeduped = true;
+      }
     }
     const analysis = status === "append" && existing?.analysis.method === "ai"
       ? buildRuleSessionAnalysis(messages)
@@ -2263,6 +2317,10 @@ export class AiWorkspaceService {
       fileReferences: prepared.parsed.fileReferences,
       notePath,
       rawSnapshotPath,
+      rawSnapshotHash,
+      rawSnapshotSize,
+      rawSnapshotDeduped,
+      rawSnapshotSkipped,
       analysis,
       activity: existing?.activity,
       handoff: existing?.handoff,
@@ -2278,6 +2336,7 @@ export class AiWorkspaceService {
           : "已导入并开始自动跟踪。"
       }
     };
+    await this.enforceRawSnapshotRetention(session);
     state.sessions = [...state.sessions.filter((item) => item.id !== sessionId), session];
     this.upsertDailyFact(state, session);
     await this.saveState(state);
@@ -2346,9 +2405,9 @@ export class AiWorkspaceService {
     const rule = this.buildRuleActivitySummary(session, revisionId, evidenceMessages);
     let activity = rule;
     let nodeSummaries: Array<{ nodeId: string; summary: string }> = [];
-    if (this.ai?.isConfigured() && evidenceMessages.length > 0) {
+    if ((this.automaticAi || this.ai)?.isConfigured() && evidenceMessages.length > 0) {
       const evidence = this.activityEvidence(evidenceMessages);
-      const response = await this.ai.complete({
+      const response = await (this.automaticAi || this.ai)!.complete({
         responseFormat: "json",
         temperature: 0.1,
         messages: [
@@ -2614,25 +2673,468 @@ export class AiWorkspaceService {
     };
   }
 
+  /**
+   * KB-12: read-only storage report for `.lifeos/raw`. Aggregates per project
+   * and per session, and reports how many bytes the active retention policy
+   * can reclaim without touching session notes, Sessions manifests or the
+   * knowledge base.
+   */
+  async rawSnapshotUsage(projectId?: string): Promise<AiWorkspaceRawSnapshotUsage> {
+    const state = await this.loadState(true);
+    const usage: AiWorkspaceRawSnapshotUsage = {
+      root: this.rawRoot(),
+      retention: this.normalizedRawRetention(),
+      maxSourceMB: this.normalizedRawMaxSourceMB(),
+      totalRevisions: 0,
+      totalBytes: 0,
+      reclaimableRevisions: 0,
+      reclaimableBytes: 0,
+      projects: [],
+      unknownRevisionDirs: 0,
+      unknownBytes: 0,
+      scannedAt: new Date().toISOString(),
+      indexStatus: "ok",
+      safeToPrune: true
+    };
+    if (!this.bridge.isAvailable()) return usage;
+    const sessions = state.sessions.filter((session) => !projectId || session.projectId === projectId);
+    const sessionsByKey = new Map(sessions.map((session) => [
+      this.rawSessionKey(session.projectId, session.tool, session.id),
+      session
+    ]));
+    const keep = this.rawRetentionKeepCount();
+    const rootDir = this.rawRoot();
+    const rootAbs = this.absoluteVaultPath(rootDir);
+    const projectDirs = await this.bridge.listRawSnapshotDirectories(rootAbs);
+    for (const projectValue of projectDirs) {
+      const projectUsage: AiWorkspaceRawSnapshotProjectUsage = {
+        projectId: projectValue,
+        revisions: 0,
+        bytes: 0,
+        reclaimableRevisions: 0,
+        reclaimableBytes: 0,
+        sessions: []
+      };
+      const toolDirs = await this.bridge.listRawSnapshotDirectories(`${rootAbs}/${projectValue}`);
+      for (const toolValue of toolDirs) {
+        const sessionDirs = await this.bridge.listRawSnapshotDirectories(`${rootAbs}/${projectValue}/${toolValue}`);
+        for (const sessionValue of sessionDirs) {
+          const sessionDir = `${rootDir}/${projectValue}/${toolValue}/${sessionValue}`;
+          const revisionsOnDisk = await this.bridge.listRawSnapshotRevisions(this.absoluteVaultPath(sessionDir));
+          if (revisionsOnDisk.length === 0) continue;
+          const bytes = revisionsOnDisk.reduce((sum, item) => sum + item.bytes, 0);
+          usage.totalRevisions += revisionsOnDisk.length;
+          usage.totalBytes += bytes;
+          const session = sessionsByKey.get(this.rawSessionKey(projectValue, toolValue, sessionValue));
+          if (!session) {
+            // Orphaned snapshot folders are fully reclaimable by prune.
+            usage.unknownRevisionDirs += revisionsOnDisk.length;
+            usage.unknownBytes += bytes;
+            usage.reclaimableRevisions += revisionsOnDisk.length;
+            usage.reclaimableBytes += bytes;
+            continue;
+          }
+          const keepIds = this.rawSnapshotKeepIds(session, sessionDir, revisionsOnDisk, keep);
+          const reclaimable = revisionsOnDisk.filter((item) => !keepIds.includes(item.revisionId));
+          const reclaimableBytes = reclaimable.reduce((sum, item) => sum + item.bytes, 0);
+          const sessionUsage: AiWorkspaceRawSnapshotSessionUsage = {
+            sessionId: session.id,
+            projectId: session.projectId,
+            tool: session.tool,
+            revisions: revisionsOnDisk.length,
+            bytes,
+            reclaimableRevisions: reclaimable.length,
+            reclaimableBytes,
+            rawSnapshotPath: session.rawSnapshotPath
+          };
+          projectUsage.sessions.push(sessionUsage);
+          projectUsage.revisions += revisionsOnDisk.length;
+          projectUsage.bytes += bytes;
+          projectUsage.reclaimableRevisions += reclaimable.length;
+          projectUsage.reclaimableBytes += reclaimableBytes;
+          usage.reclaimableRevisions += reclaimable.length;
+          usage.reclaimableBytes += reclaimableBytes;
+        }
+      }
+      if (projectUsage.sessions.length > 0) usage.projects.push(projectUsage);
+    }
+    const indexStatus = await this.rawIndexStatus();
+    usage.indexStatus = indexStatus === "ok" && state.sessions.length === 0 && usage.totalRevisions > 0
+      ? "corrupt"
+      : indexStatus;
+    usage.safeToPrune = usage.indexStatus === "ok";
+    return usage;
+  }
+
+  /**
+   * KB-12.1: the AI workspace state file is the only index prune trusts.
+   * A malformed/empty index must never be treated as "all snapshots are
+   * orphaned": that would delete every revision instead of keeping the newest.
+   */
+  private async rawIndexStatus(): Promise<"ok" | "corrupt" | "unavailable"> {
+    try {
+      const raw = await readFile(this.app, this.statePath());
+      if (!raw || !raw.trim()) return "unavailable";
+      JSON.parse(raw);
+      return "ok";
+    } catch (error) {
+      return String(error).includes("not found") ? "unavailable" : "corrupt";
+    }
+  }
+
+  /**
+   * KB-12: deletes only raw snapshot directories under `.lifeos/raw` — the
+   * per-session revisions beyond the retention limit (or beyond the newest one
+   * with `keepLatestOnly`) plus orphaned session folders no index entry
+   * references. Session notes, Sessions manifests and the knowledge base are
+   * never modified; only the AI workspace index metadata is repointed.
+   */
+  async pruneRawSnapshots(
+    options: { projectId?: string; keepLatestOnly?: boolean; filesystemKeepLatest?: boolean } = {}
+  ): Promise<AiWorkspaceRawSnapshotPruneResult> {
+    const state = await this.loadState(true);
+    const result: AiWorkspaceRawSnapshotPruneResult = {
+      removedRevisions: 0,
+      reclaimedBytes: 0,
+      projects: []
+    };
+    if (!this.bridge.isAvailable()) return result;
+    // KB-12.1: never run the index-driven sweep on a broken/empty index — with
+    // no indexed sessions every folder looks orphaned and would be deleted
+    // whole. Callers may still ask for the filesystem-safe mode explicitly.
+    const indexStatus = await this.rawIndexStatus();
+    if (indexStatus !== "ok" && !options.filesystemKeepLatest) {
+      return { ...result, refused: "index-corrupt" };
+    }
+    if (options.filesystemKeepLatest) return this.pruneRawSnapshotsByFilesystem(options);
+    const touched = new Set<string>();
+    const keep = options.keepLatestOnly ? 1 : this.rawRetentionKeepCount();
+    let metadataChanged = false;
+    const sessions = state.sessions.filter((session) =>
+      !options.projectId || session.projectId === options.projectId
+    );
+    for (const session of sessions) {
+      const sweep = await this.enforceRawSnapshotRetention(session, keep);
+      if (sweep.removedRevisions === 0) continue;
+      metadataChanged = metadataChanged || sweep.metadataChanged;
+      result.removedRevisions += sweep.removedRevisions;
+      result.reclaimedBytes += sweep.reclaimedBytes;
+      touched.add(session.projectId);
+    }
+    const knownSessionDirs = new Set(state.sessions.map((session) =>
+      `${session.projectId}/${session.tool}/${session.id}`
+    ));
+    const rootDir = this.rawRoot();
+    const rootAbs = this.absoluteVaultPath(rootDir);
+    const projectDirs = await this.bridge.listRawSnapshotDirectories(rootAbs);
+    for (const projectValue of projectDirs) {
+      if (options.projectId && projectValue !== options.projectId) continue;
+      const toolDirs = await this.bridge.listRawSnapshotDirectories(`${rootAbs}/${projectValue}`);
+      for (const toolValue of toolDirs) {
+        const sessionDirs = await this.bridge.listRawSnapshotDirectories(`${rootAbs}/${projectValue}/${toolValue}`);
+        for (const sessionValue of sessionDirs) {
+          if (knownSessionDirs.has(`${projectValue}/${toolValue}/${sessionValue}`)) continue;
+          const relativeDir = `${rootDir}/${projectValue}/${toolValue}/${sessionValue}`;
+          const revisionsOnDisk = await this.bridge.listRawSnapshotRevisions(this.absoluteVaultPath(relativeDir));
+          if (revisionsOnDisk.length === 0) continue;
+          result.removedRevisions += revisionsOnDisk.length;
+          result.reclaimedBytes += revisionsOnDisk.reduce((sum, item) => sum + item.bytes, 0);
+          await this.bridge.removeRawSnapshotPath(this.absoluteVaultPath(relativeDir));
+          touched.add(projectValue);
+        }
+      }
+    }
+    if (metadataChanged) await this.saveState(state);
+    result.projects = Array.from(touched);
+    return result;
+  }
+
+  /**
+   * KB-12.1 safe mode: keep the newest revision of every physical session
+   * folder under `.lifeos/raw` and delete the older ones, without consulting
+   * (or rewriting) the index. Sessions manifests, session notes and the
+   * knowledge base are never touched.
+   */
+  private async pruneRawSnapshotsByFilesystem(
+    options: { projectId?: string } = {}
+  ): Promise<AiWorkspaceRawSnapshotPruneResult> {
+    const result: AiWorkspaceRawSnapshotPruneResult = { removedRevisions: 0, reclaimedBytes: 0, projects: [] };
+    const touched = new Set<string>();
+    const rootDir = this.rawRoot();
+    const rootAbs = this.absoluteVaultPath(rootDir);
+    const projectDirs = await this.bridge.listRawSnapshotDirectories(rootAbs);
+    for (const projectValue of projectDirs) {
+      if (options.projectId && projectValue !== options.projectId) continue;
+      const toolDirs = await this.bridge.listRawSnapshotDirectories(`${rootAbs}/${projectValue}`);
+      for (const toolValue of toolDirs) {
+        const sessionDirs = await this.bridge.listRawSnapshotDirectories(`${rootAbs}/${projectValue}/${toolValue}`);
+        for (const sessionValue of sessionDirs) {
+          const sessionDir = `${rootDir}/${projectValue}/${toolValue}/${sessionValue}`;
+          const revisionsOnDisk = await this.bridge.listRawSnapshotRevisions(this.absoluteVaultPath(sessionDir));
+          if (revisionsOnDisk.length <= 1) continue;
+          const sorted = [...revisionsOnDisk].sort((a, b) =>
+            String(a.revisionId).localeCompare(String(b.revisionId), undefined, { numeric: true })
+          );
+          for (const item of sorted.slice(0, -1)) {
+            await this.bridge.removeRawSnapshotPath(this.absoluteVaultPath(`${sessionDir}/${item.revisionId}`));
+            result.removedRevisions += 1;
+            result.reclaimedBytes += item.bytes;
+            touched.add(projectValue);
+          }
+        }
+      }
+    }
+    result.projects = Array.from(touched);
+    return result;
+  }
+
+  /**
+   * KB-12: governed retention of one raw snapshot. Sources above
+   * `aiWorkspaceRawMaxSourceMB` are skipped unless the caller explicitly
+   * forces retention; identical content (same session, same sha256) reuses
+   * the existing path instead of copying the file again.
+   */
   private async retainRawSnapshot(
     sessionId: string,
     revisionId: string,
-    prepared: AiWorkspacePreparedImport
-  ): Promise<string> {
+    prepared: AiWorkspacePreparedImport,
+    existing: AiWorkspaceSessionSummary | undefined,
+    force: boolean
+  ): Promise<RawSnapshotWriteResult> {
     const extension = prepared.candidate.sourceKind === "jsonl"
       ? "jsonl"
       : "json";
-    const vaultPath = `${this.rawRoot()}/${prepared.projectId}/${prepared.candidate.tool}/${sessionId}/${revisionId}/source.${extension}`;
+    const sessionDir = this.sessionRawDir(prepared.projectId, prepared.candidate.tool, sessionId);
+    const vaultPath = `${sessionDir}/${revisionId}/source.${extension}`;
     const absolute = this.absoluteVaultPath(vaultPath);
+    const maxBytes = this.rawSnapshotMaxSourceBytes();
     if (prepared.candidate.sourceKind === "sqlite") {
-      await this.bridge.writeRawSnapshot(absolute, JSON.stringify({
+      const payload = JSON.stringify({
         session: prepared.parsed.source,
         messages: prepared.parsed.messages
-      }, null, 2));
-    } else {
-      await this.bridge.copyRawSnapshot(prepared.candidate.sourcePath, absolute);
+      }, null, 2);
+      const size = new TextEncoder().encode(payload).byteLength;
+      if (!force && maxBytes > 0 && size > maxBytes) {
+        return { status: "skipped", reason: "over-size" };
+      }
+      const hash = this.bridge.hashRawSnapshotText(payload);
+      const reusedPath = await this.findDedupedRawSnapshot(existing, hash, size);
+      if (reusedPath) return { status: "deduped", vaultPath: reusedPath, hash, size };
+      await this.bridge.writeRawSnapshot(absolute, payload);
+      return { status: "stored", vaultPath, hash, size };
     }
-    return vaultPath;
+    const declaredSize = Number(prepared.candidate.size) > 0
+      ? Number(prepared.candidate.size)
+      : await this.bridge.rawSnapshotSourceSize(prepared.candidate.sourcePath);
+    if (!force && maxBytes > 0 && declaredSize > maxBytes) {
+      return { status: "skipped", reason: "over-size" };
+    }
+    const sameSize = this.rawSnapshotCandidateRefs(existing).filter((item) =>
+      item.hash && (item.size === undefined || item.size === declaredSize)
+    );
+    if (sameSize.length > 0) {
+      const hash = await this.bridge.hashRawSnapshotFile(prepared.candidate.sourcePath);
+      const reused = sameSize.find((item) => item.hash === hash);
+      if (reused && await this.bridge.rawSnapshotPathExists(this.absoluteVaultPath(reused.vaultPath))) {
+        return { status: "deduped", vaultPath: reused.vaultPath, hash, size: declaredSize };
+      }
+      const copied = await this.bridge.copyRawSnapshotWithHash(prepared.candidate.sourcePath, absolute);
+      return { status: "stored", vaultPath, hash: copied.hash, size: copied.size };
+    }
+    const copied = await this.bridge.copyRawSnapshotWithHash(prepared.candidate.sourcePath, absolute);
+    return { status: "stored", vaultPath, hash: copied.hash, size: copied.size };
+  }
+
+  private normalizedRawRetention(): AiWorkspaceRawRetention {
+    return this.settings.aiWorkspaceRawRetention === "all"
+      || this.settings.aiWorkspaceRawRetention === "three"
+      ? this.settings.aiWorkspaceRawRetention
+      : "latest";
+  }
+
+  private normalizedRawMaxSourceMB(): number {
+    const value = Number(this.settings.aiWorkspaceRawMaxSourceMB);
+    if (!Number.isFinite(value) || value < 0) return 20;
+    return Math.min(10240, Math.floor(value));
+  }
+
+  private rawSnapshotMaxSourceBytes(): number {
+    const mb = this.normalizedRawMaxSourceMB();
+    return mb > 0 ? Math.round(mb * 1024 * 1024) : 0;
+  }
+
+  private rawRetentionKeepCount(retention = this.normalizedRawRetention()): number {
+    if (retention === "all") return Number.POSITIVE_INFINITY;
+    return retention === "three" ? 3 : 1;
+  }
+
+  private sessionRawDir(projectId: string, tool: AiWorkspaceTool, sessionId: string): string {
+    return `${this.rawRoot()}/${projectId}/${tool}/${sessionId}`;
+  }
+
+  private rawSessionKey(projectId: string, tool: string, sessionId: string): string {
+    return `${projectId}\u0000${tool}\u0000${sessionId}`;
+  }
+
+  private rawSnapshotCandidateRefs(session?: AiWorkspaceSessionSummary): RawSnapshotCandidateRef[] {
+    if (!session) return [];
+    const refs: RawSnapshotCandidateRef[] = [];
+    for (const revision of session.revisions) {
+      if (!revision.rawSnapshotPath) continue;
+      refs.push({
+        vaultPath: revision.rawSnapshotPath,
+        hash: revision.rawSnapshotHash,
+        size: revision.rawSnapshotSize
+      });
+    }
+    if (
+      session.rawSnapshotPath
+      && !refs.some((item) => item.vaultPath === session.rawSnapshotPath)
+    ) {
+      refs.push({
+        vaultPath: session.rawSnapshotPath,
+        hash: session.rawSnapshotHash,
+        size: session.rawSnapshotSize
+      });
+    }
+    return refs;
+  }
+
+  private async findDedupedRawSnapshot(
+    existing: AiWorkspaceSessionSummary | undefined,
+    hash: string,
+    size: number
+  ): Promise<string | undefined> {
+    const candidates = this.rawSnapshotCandidateRefs(existing).filter((item) =>
+      item.hash === hash && (item.size === undefined || item.size === size)
+    );
+    for (const candidate of candidates) {
+      if (await this.bridge.rawSnapshotPathExists(this.absoluteVaultPath(candidate.vaultPath))) {
+        return candidate.vaultPath;
+      }
+    }
+    return undefined;
+  }
+
+  private compareRawRevisionIds(left: string, right: string): number {
+    const leftNumber = /^r\d+$/u.test(left) ? Number(left.slice(1)) : Number.NaN;
+    const rightNumber = /^r\d+$/u.test(right) ? Number(right.slice(1)) : Number.NaN;
+    if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber) && leftNumber !== rightNumber) {
+      return leftNumber - rightNumber;
+    }
+    return left.localeCompare(right);
+  }
+
+  private rawSnapshotRevisionIdFromPath(value: string | undefined, sessionDir: string): string | undefined {
+    if (!value || !value.startsWith(`${sessionDir}/`)) return undefined;
+    const match = value.slice(sessionDir.length + 1).match(/^([^/]+)\//u);
+    return match ? match[1] : undefined;
+  }
+
+  /**
+   * Revision directories to keep: newest revisions first (deduplicated paths
+   * count for the revision that references them), then the newest remaining
+   * directories for legacy snapshots that carry no metadata reference.
+   */
+  private rawSnapshotKeepIds(
+    session: AiWorkspaceSessionSummary | undefined,
+    sessionDir: string,
+    revisionsOnDisk: Array<{ revisionId: string; bytes: number; files: string[] }>,
+    keep: number
+  ): string[] {
+    const available = new Set(revisionsOnDisk.map((item) => item.revisionId));
+    const keepIds: string[] = [];
+    const push = (revisionId: string | undefined): void => {
+      if (!revisionId || !available.has(revisionId) || keepIds.includes(revisionId)) return;
+      if (keepIds.length >= keep) return;
+      keepIds.push(revisionId);
+    };
+    if (session) {
+      for (let index = session.revisions.length - 1; index >= 0; index -= 1) {
+        if (keepIds.length >= keep) break;
+        push(this.rawSnapshotRevisionIdFromPath(session.revisions[index].rawSnapshotPath, sessionDir));
+      }
+    }
+    const newestFirst = [...revisionsOnDisk].sort((left, right) =>
+      this.compareRawRevisionIds(right.revisionId, left.revisionId)
+    );
+    for (const item of newestFirst) {
+      if (keepIds.length >= keep) break;
+      push(item.revisionId);
+    }
+    return keepIds;
+  }
+
+  /**
+   * Applies the per-session retention limit to one session and repoints the
+   * session/revision metadata at the kept directories. Only called right
+   * after an import and from `pruneRawSnapshots`.
+   */
+  private async enforceRawSnapshotRetention(
+    session: AiWorkspaceSessionSummary,
+    keepOverride?: number
+  ): Promise<RawSnapshotRetentionSweep> {
+    const sweep: RawSnapshotRetentionSweep = {
+      removedRevisions: 0,
+      reclaimedBytes: 0,
+      keptRevisions: [],
+      metadataChanged: false
+    };
+    if (!this.bridge.isAvailable()) return sweep;
+    const keep = keepOverride ?? this.rawRetentionKeepCount();
+    const sessionDir = this.sessionRawDir(session.projectId, session.tool, session.id);
+    const revisionsOnDisk = await this.bridge.listRawSnapshotRevisions(this.absoluteVaultPath(sessionDir));
+    if (revisionsOnDisk.length === 0) return sweep;
+    const keepIds = this.rawSnapshotKeepIds(session, sessionDir, revisionsOnDisk, keep);
+    const byId = new Map(revisionsOnDisk.map((item) => [item.revisionId, item]));
+    for (const item of revisionsOnDisk) {
+      if (keepIds.includes(item.revisionId)) continue;
+      await this.bridge.removeRawSnapshotPath(this.absoluteVaultPath(`${sessionDir}/${item.revisionId}`));
+      sweep.removedRevisions += 1;
+      sweep.reclaimedBytes += item.bytes;
+    }
+    const keptRevisions = keepIds.flatMap((revisionId) => {
+      const item = byId.get(revisionId);
+      if (!item || item.files.length === 0) return [];
+      return [{
+        revisionId,
+        path: `${sessionDir}/${revisionId}/${item.files[0]}`,
+        bytes: item.bytes
+      }];
+    });
+    sweep.keptRevisions = keptRevisions;
+    const keptPaths = new Set(keptRevisions.map((item) => item.path));
+    for (const revision of session.revisions) {
+      if (!revision.rawSnapshotPath || keptPaths.has(revision.rawSnapshotPath)) continue;
+      delete revision.rawSnapshotPath;
+      delete revision.rawSnapshotHash;
+      delete revision.rawSnapshotSize;
+      delete revision.rawSnapshotDeduped;
+      sweep.metadataChanged = true;
+    }
+    const newestKept = keptRevisions[0];
+    if (newestKept) {
+      const previousPath = session.rawSnapshotPath;
+      session.rawSnapshotPath = newestKept.path;
+      const keptRevision = session.revisions.find((revision) =>
+        revision.rawSnapshotPath === newestKept.path
+      );
+      if (keptRevision) {
+        session.rawSnapshotHash = keptRevision.rawSnapshotHash;
+        session.rawSnapshotSize = keptRevision.rawSnapshotSize;
+      } else if (previousPath !== newestKept.path) {
+        delete session.rawSnapshotHash;
+        delete session.rawSnapshotSize;
+      }
+      if (previousPath !== newestKept.path) sweep.metadataChanged = true;
+    } else if (sweep.removedRevisions > 0) {
+      delete session.rawSnapshotPath;
+      delete session.rawSnapshotHash;
+      delete session.rawSnapshotSize;
+      delete session.rawSnapshotDeduped;
+      sweep.metadataChanged = true;
+    }
+    return sweep;
   }
 
   private async writeSessionNote(session: AiWorkspaceSessionSummary): Promise<void> {
@@ -3231,6 +3733,13 @@ export class AiWorkspaceService {
     const sourceKind = String(rawTracking.sourceKind || this.inferSourceKind(session));
     return {
       ...session,
+      rawSnapshotPath: session.rawSnapshotPath ? String(session.rawSnapshotPath) : undefined,
+      rawSnapshotHash: session.rawSnapshotHash ? String(session.rawSnapshotHash) : undefined,
+      rawSnapshotSize: Number.isFinite(Number(session.rawSnapshotSize)) && Number(session.rawSnapshotSize) >= 0
+        ? Number(session.rawSnapshotSize)
+        : undefined,
+      rawSnapshotDeduped: session.rawSnapshotDeduped === true ? true : undefined,
+      rawSnapshotSkipped: session.rawSnapshotSkipped === "over-size" ? "over-size" : undefined,
       activity: this.normalizeActivitySummary(session.activity),
       handoff: this.normalizeHandoffSnapshot(session.handoff),
       tracking: {
@@ -3245,7 +3754,11 @@ export class AiWorkspaceService {
           includeFileReferences: rawOptions.includeFileReferences !== false,
           includeProjectMemory: rawOptions.includeProjectMemory !== false,
           includeToolMemory: rawOptions.includeToolMemory === true,
-          retainRawSnapshot: rawOptions.retainRawSnapshot === true,
+          // KB-12: legacy `true` still retains under the governance policy;
+          // `"force"` is the explicit over-threshold override.
+          retainRawSnapshot: rawOptions.retainRawSnapshot === "force"
+            ? "force"
+            : rawOptions.retainRawSnapshot === true,
           redactSecrets: rawOptions.redactSecrets !== false
         },
         status: status === "up-to-date"

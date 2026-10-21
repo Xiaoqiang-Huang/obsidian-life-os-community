@@ -681,7 +681,7 @@ export class PeriodReviewService {
 
 function cleanDailyContent(content: string): string {
   const evidence = prepareCitableMarkdown("review-daily.md", content);
-  if (!evidence.allowed) return "";
+  if (!evidence.allowed || !evidence.aiEligible) return "";
   const withoutFrontmatter = (evidence.origin === "user-saved-conversation" ? `说明：${USER_SAVED_CONVERSATION_LABEL}\n\n` : "") + evidence.markdown.replace(/^---[\s\S]*?---\s*/m, "");
   const withoutGeneratedArchive = withoutFrontmatter
     .replace(/<!-- lifeos-weixin-daily-inputs:start -->([\s\S]*?)<!-- lifeos-weixin-daily-inputs:end -->/g, (_block, body: string) => body

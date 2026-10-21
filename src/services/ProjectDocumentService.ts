@@ -18,6 +18,7 @@ import {
   type ReadableImportFile
 } from "./DocumentImportService";
 import { buildKeywordLinkedMarkdown, stripKeywordLinksSection } from "./KeywordLinkService";
+import { llmWikiPolicyFrontmatterLines } from "./llm-wiki-logic";
 import { PdfOcrService, type PdfOcrProvider } from "./PdfOcrService";
 import { readVaultSnapshot, throwIfReadAborted } from "../utils/vault-read-cache";
 import { saveGuardedDocument } from "./GuardedDocumentService";
@@ -47,6 +48,14 @@ interface ProjectDocumentCreateInput {
   content?: string;
   /** Explicit native form input, not generated/import-formatting output. */
   preserveInput?: boolean;
+  /** Inherited three-layer policy; omitted means "no marker written", never an upgrade. */
+  policy?: ProjectDocumentPolicy;
+}
+
+/** savable / locally searchable / model-ready, inherited from the source of the write. */
+export interface ProjectDocumentPolicy {
+  privacyLevel: "normal" | "private" | "sensitive";
+  aiProcessingAllowed: boolean;
 }
 
 interface ProjectDocumentListOptions {
@@ -75,6 +84,8 @@ export interface ProjectDocumentImportProgress {
 export interface ProjectDocumentImportOptions {
   textMode?: ProjectDocumentTextImportMode;
   onProgress?: (progress: ProjectDocumentImportProgress) => void;
+  /** Inherited three-layer policy for the generated wrapper note; omitted writes no marker. */
+  policy?: ProjectDocumentPolicy;
 }
 
 export interface ProjectDocumentAiFormatterInput {
@@ -188,7 +199,7 @@ export class ProjectDocumentService {
     const title = this.cleanTitle(input.title);
     const kind = this.normalizeKind(input.kind);
     const path = this.uniquePath(this.documentsPath(project), `${this.slugify(title)}.md`);
-    const file = await this.createFile(path, this.documentMarkdown(project, title, kind, input.content ?? "", input.preserveInput));
+    const file = await this.createFile(path, this.documentMarkdown(project, title, kind, input.content ?? "", input.preserveInput, input.policy));
     return this.describeDocument(project, file, await this.readFile(file));
   }
 
@@ -240,7 +251,8 @@ export class ProjectDocumentService {
         obsidianLink: saved.obsidianLink,
         text: formatted.text,
         textMode,
-        warnings: [...extraction.warnings, ...formatted.warnings]
+        warnings: [...extraction.warnings, ...formatted.warnings],
+        policy: options.policy
       });
       const file = await this.createFile(wrapperPath, wrapper);
       const document = await this.describeDocument(project, file, await this.readFile(file));
@@ -416,11 +428,16 @@ export class ProjectDocumentService {
     title: string,
     kind: LifeOSProjectDocumentKind,
     content: string,
-    preserveInput = false
+    preserveInput = false,
+    policy?: ProjectDocumentPolicy
   ): string {
+    // Only an explicitly inherited policy is written, so existing project documents and
+    // import paths that never declared privacy keep byte-identical output.
+    const policyLines = policy ? llmWikiPolicyFrontmatterLines(policy) : [];
     if (preserveInput) {
       return ["---", `type: ${PROJECT_DOCUMENT_TYPE}`, `project_id: ${yamlScalar(project.id)}`,
         `project_name: ${yamlScalar(project.name)}`, `kind: ${yamlScalar(kind)}`,
+        ...policyLines,
         `created: ${formatDate()}`, `updated: ${formatDate()}`, "---", "", `# ${title}`, "", content, ""].join("\n");
     }
     const body = content.trim() ? content.trim() : "";
@@ -430,6 +447,7 @@ export class ProjectDocumentService {
       `project_id: ${yamlScalar(project.id)}`,
       `project_name: ${yamlScalar(project.name)}`,
       `kind: ${yamlScalar(kind)}`,
+      ...policyLines,
       `created: ${formatDate()}`,
       `updated: ${formatDate()}`,
       "---",
@@ -452,6 +470,7 @@ export class ProjectDocumentService {
       text: string;
       textMode: ProjectDocumentTextImportMode;
       warnings: string[];
+      policy?: ProjectDocumentPolicy;
     }
   ): string {
     const lines = [
@@ -460,6 +479,7 @@ export class ProjectDocumentService {
       `project_id: ${yamlScalar(project.id)}`,
       `project_name: ${yamlScalar(project.name)}`,
       "kind: reference",
+      ...(input.policy ? llmWikiPolicyFrontmatterLines(input.policy) : []),
       `source_file: ${yamlScalar(input.attachmentPath)}`,
       `source_name: ${yamlScalar(input.sourceFile.name)}`,
       `source_kind: ${yamlScalar(input.importKind)}`,

@@ -200,6 +200,12 @@ Life OS 已把微信 iLink Bot 连接层直接内置到插件中，不需要安�
 
 重载 Obsidian 后启用 **Life OS Assistant**。不要复制其他用户的 `data.json`，其中可能包含模型配置、配对令牌或授权状态。
 
+### 桌面 AI 运行时（单独下载）
+
+社区三文件不包含本机 AI 运行时。Windows x64 使用 AI 功能时，需另外下载匹配的 `lifeos-runtime-0.3.293-win32-x64.zip`，用 `SHA256SUMS-runtime-0.3.293-win32-x64` 校验后解压到 `.obsidian/plugins/personal-life-system/runtime/`，使 `runtime/claude-agent/0.3.293/win32-x64/claude.exe` 存在。运行时缺失时，AI 入口会给出安装指引；插件不会自动下载可执行文件。
+
+安装、升级、回滚与 SHA-256 校验命令见 [`docs/sdk-desktop-installation.md`](docs/sdk-desktop-installation.md)。本版本不声明支持 macOS/Linux 运行时；Linux arm64 需要自托管运行器。运行时为未修改的上游二进制，条款独立，公开分发前需完成再分发审查。
+
 ### 首次配置
 
 1. 打开“设置 → Life OS Assistant”，选择当前 Vault 内的 Life OS 根目录。

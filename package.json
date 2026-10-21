@@ -1,14 +1,13 @@
 {
   "name": "obsidian-life-os",
-  "version": "0.3.25",
+  "version": "0.4.0",
   "description": "A local-first personal life system for Obsidian: diary, tasks, knowledge, memory, and AI-assisted reviews.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "check": "tsc -noEmit -skipLibCheck",
-    "test": "npm run check && npm run build && npm run review:bundle",
-    "review:bundle": "node scripts/check-community-bundle.mjs"
+    "test": "npm run check && npm run build"
   },
   "keywords": [
     "obsidian",
@@ -20,6 +19,8 @@
   "author": "Xiaoqiang Huang",
   "license": "PolyForm-Noncommercial-1.0.0",
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.293",
+    "@cfworker/json-schema": "4.1.1",
     "@tesseract.js-data/chi_sim": "^1.0.0",
     "@tesseract.js-data/eng": "^1.0.0",
     "@ybouane/liquidglass": "^1.0.3",

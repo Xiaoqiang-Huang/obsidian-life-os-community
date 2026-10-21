@@ -49,6 +49,30 @@ available.
 
 ## Runtime Dependencies
 
+### Candidate Claude Agent SDK integration
+
+- `@anthropic-ai/claude-agent-sdk` **0.3.293**, and the explicitly installed
+  candidate-only `@anthropic-ai/claude-agent-sdk-win32-x64` **0.3.293**, are
+  **not MIT-licensed**. The installed license notices state: © Anthropic PBC,
+  all rights reserved; use is subject to its Legal Agreements. Exact installed
+  notices are preserved under `docs/licenses/sdk/`. Their terms are separate
+  from Life OS's license. The Windows executable is not embedded in `main.js`
+  and is not downloaded, installed or upgraded by the plugin at runtime.
+- `@modelcontextprotocol/sdk` **1.32.1**, `zod` **4.6.5** and
+  `@cfworker/json-schema` **4.1.1**: package metadata declares MIT. Installed
+  MCP and Zod license files are preserved in `docs/licenses/sdk/`; the published
+  cfworker package has no LICENSE file, so its missing-file status is recorded
+  rather than inventing a license copy. The exact dependency graph is in
+  `package-lock.json`.
+- Life OS's build adapter replaces the MCP default generated validator with
+  interpreted validation and disables Zod JIT. Validation is retained and
+  tested with positive and negative schemas. It also adapts the SDK core's
+  builtin require anchor for CJS bundling; the executable is still an explicit
+  machine-local choice. These are local build transformations, not upstream
+  endorsements. No Claudian source code has been copied into this candidate.
+- This notice records provenance, not release approval or a grant of additional
+  distribution rights. Community publication remains a separate acceptance gate.
+
 Life OS Assistant bundles or depends on third-party runtime packages through
 the npm dependency graph. Their license metadata is preserved in `package.json`
 and `package-lock.json`. Key runtime packages include:

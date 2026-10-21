@@ -1,6 +1,7 @@
 import { parseSessionCommand } from "../services/AgentSessionService";
+import { sdkDesktopOnlyMessage } from "../services/sdk/SdkInternalBootstrap";
 import { isTaskResumeRequest } from "../services/agent/AgentResume";
-import { App, Editor, Notice, TFile, normalizePath, setIcon, type EditorPosition } from "obsidian";
+import { App, Editor, Notice, Platform, TFile, normalizePath, setIcon, type EditorPosition } from "obsidian";
 import { requireProFeature } from "../licensing/entitlement";
 import type PersonalLifeSystemPlugin from "../main";
 import {
@@ -660,6 +661,7 @@ export class AiEditPopoverController {
 
   private async generatePreview(): Promise<void> {
     if (this.generating || !this.target || !this.commandInput || !this.previewEl) return;
+    if (!Platform.isDesktopApp) { new Notice(sdkDesktopOnlyMessage(), 8000); return; }
     const command = this.commandInput.value.trim();
     if (!command) {
       new Notice("先输入你想让 AI 怎么改。");
@@ -757,6 +759,7 @@ export class AiEditPopoverController {
 
   private async generateAnswer(depth: AiAnswerDepth, automatic: boolean, modeSwitch = false): Promise<void> {
     if (this.generating || !this.target || !this.commandInput || !this.previewEl) return;
+    if (!Platform.isDesktopApp) { new Notice(sdkDesktopOnlyMessage(), 8000); return; }
     if (!requireProFeature(this.plugin, "aiDocumentEdit")) return;
 
     const target = this.target;

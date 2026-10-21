@@ -2,6 +2,7 @@ import { App, TFile } from "obsidian";
 import { ensureFile, readFile } from "../../utils/vault";
 import { FileSystemService } from "../FileSystemService";
 import type { WeixinAssistantResponse, WeixinInboundRequest } from "./WeixinBotLogic";
+import { normalizeWeixinAnswerCheck, normalizeWeixinWebEvidence } from "./WeixinAnswerGuard";
 
 export type WeixinInboundStatus = "pending" | "processing" | "responded" | "delivered" | "failed";
 
@@ -284,9 +285,11 @@ export class WeixinInboundQueueService {
     const route = String(record.route || "").trim().slice(0, 80);
     if (!route) return undefined;
     const failure = String(record.failureKind || "none");
-    const allowedFailures = new Set(["none", "web-evidence-insufficient", "local-citation-check", "model"]);
+    const allowedFailures = new Set(["none", "web-evidence-insufficient", "web-answer-check", "local-citation-check", "model"]);
     return {
       route,
+      groundingMode: ["none", "augment", "strict"].includes(String(record.groundingMode))
+        ? record.groundingMode as "none" | "augment" | "strict" : undefined,
       webSearch: record.webSearch === true,
       boundProjectId: String(record.boundProjectId || "").slice(0, 200) || undefined,
       resolvedProjectId: String(record.resolvedProjectId || "").slice(0, 200) || undefined,
@@ -295,7 +298,9 @@ export class WeixinInboundQueueService {
         ? record.sourcePaths.map((item) => String(item || "").slice(0, 500)).filter(Boolean).slice(0, 24)
         : [],
       retrievalStrategy: String(record.retrievalStrategy || "").slice(0, 160) || undefined,
-      failureKind: (allowedFailures.has(failure) ? failure : "none") as NonNullable<WeixinAssistantResponse["diagnostics"]>["failureKind"]
+      failureKind: (allowedFailures.has(failure) ? failure : "none") as NonNullable<WeixinAssistantResponse["diagnostics"]>["failureKind"],
+      answerCheck: normalizeWeixinAnswerCheck(record.answerCheck),
+      webEvidence: normalizeWeixinWebEvidence(record.webEvidence)
     };
   }
 

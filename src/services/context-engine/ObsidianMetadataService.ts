@@ -59,7 +59,28 @@ interface CachedMarkdownDocument {
   metadata: ParsedMarkdownMetadata;
 }
 
+interface BacklinkSourceRecord {
+  /** Identity of the resolved-links record last read for this source. */
+  reference: object | null;
+  /** Destination paths whose resolved count is positive, in link-record order. */
+  destinations: string[];
+  /** Source mtime last seen in the Vault (undefined when the Vault does not list it). */
+  mtime: number | undefined;
+}
+
+interface BacklinkIndexState {
+  /** Allowed-file stamp (path + mtime) the index below was refreshed for. */
+  stamp: string;
+  /** Allowed file paths and mtimes of the last refresh: file creation/deletion re-links everything. */
+  files: Map<string, number>;
+  /** Per-source link records, so one edited document re-enumerates one record. */
+  sources: Map<string, BacklinkSourceRecord>;
+  /** destination path -> allowed source paths, in resolvedLinks key order. */
+  backlinks: Map<string, string[]>;
+}
+
 const DOCUMENT_CACHE = new WeakMap<object, Map<string, CachedMarkdownDocument>>();
+const BACKLINK_INDEX = new WeakMap<object, Map<string, BacklinkIndexState>>();
 
 export class ObsidianMetadataService {
   private readonly app: AppLike;
@@ -82,6 +103,9 @@ export class ObsidianMetadataService {
 
   async getInventory(): Promise<ContextInventoryItem[]> {
     const files = this.app.vault.getMarkdownFiles?.() ?? [];
+    // KB-09: one traversal of the resolved link graph serves every document below
+    // (V+E), instead of one whole-graph scan per document (V^2).
+    const backlinks = this.backlinksForFiles(files.filter((file) => this.policy.isAllowedPath(file.path)));
     const inventory: ContextInventoryItem[] = [];
 
     for (const file of files) {
@@ -90,6 +114,11 @@ export class ObsidianMetadataService {
       const parsed = await this.metadataForFile(file);
       if (!parsed) continue;
       if (!this.recognitionSourceIsCurrent(parsed.frontmatter)) continue;
+      // Three separated layers: this inventory feeds model-bound retrieval, summaries
+      // and catalogs only. The Knowledge view lists/searches/opens notes by reading the
+      // Vault directly, so excluding a source here keeps it locally visible while its
+      // body and metadata stay out of every prompt. Never auto-upgrade a source.
+      if (!this.policy.isAiEligible(file.path, parsed.frontmatter)) continue;
       if (!this.policy.isAllowedFrontmatter(parsed.frontmatter) && !await this.readCitableSource(file.path)) continue;
 
       inventory.push({
@@ -98,13 +127,165 @@ export class ObsidianMetadataService {
         tags: parsed.tags,
         headings: parsed.headings,
         links: parsed.links,
-        backlinks: this.findBacklinks(file.path),
+        backlinks: this.findBacklinks(backlinks, file.path),
         frontmatter: parsed.frontmatter,
         mtime: file.stat?.mtime ?? 0
       });
     }
 
     return inventory;
+  }
+
+  /**
+   * Reverse index over the resolved link graph, maintained on the same app object as
+   * the document cache but per root folder (the source policy is part of the result).
+   *
+   * A hot inventory (no file added, removed or edited) reuses the index without reading
+   * the graph at all. A content edit re-enumerates only that document's link record; a
+   * file creation/deletion re-links every source because it can change how other
+   * documents resolve their links. Nothing here reads a note body.
+   */
+  private backlinksForFiles(files: FileLike[]): Map<string, string[]> {
+    const state = this.backlinkIndexState();
+    const stamp = this.vaultStamp(files);
+    if (state.stamp === stamp) return state.backlinks;
+    this.refreshBacklinkIndex(state, files, stamp);
+    return state.backlinks;
+  }
+
+  private backlinkIndexState(): BacklinkIndexState {
+    const appKey = this.app as unknown as object;
+    let states = BACKLINK_INDEX.get(appKey);
+    if (!states) {
+      states = new Map<string, BacklinkIndexState>();
+      BACKLINK_INDEX.set(appKey, states);
+    }
+    const key = this.normalizePath(this.rootFolder).replace(/\/+$/u, "").toLowerCase();
+    let state = states.get(key);
+    if (!state) {
+      state = { stamp: "", files: new Map<string, number>(), sources: new Map<string, BacklinkSourceRecord>(), backlinks: new Map<string, string[]>() };
+      states.set(key, state);
+    }
+    return state;
+  }
+
+  /** Fingerprint of the allowed Markdown files (path + mtime): O(V), no graph access. */
+  private vaultStamp(files: FileLike[]): string {
+    let hash = 2166136261;
+    for (const file of files) {
+      const text = `${this.normalizePath(file.path)}|${file.stat?.mtime ?? 0}\n`;
+      for (let index = 0; index < text.length; index += 1) {
+        hash ^= text.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+      }
+    }
+    return `${files.length}:${(hash >>> 0).toString(16)}`;
+  }
+
+  private refreshBacklinkIndex(state: BacklinkIndexState, files: FileLike[], stamp: string): void {
+    const resolvedLinks = this.resolvedLinksOrEmpty();
+    const keys = this.objectKeys(resolvedLinks);
+    const ranks = new Map<string, number>();
+    keys.forEach((key, index) => ranks.set(key, index));
+    const mtimes = new Map<string, number>();
+    for (const file of files) mtimes.set(this.normalizePath(file.path), file.stat?.mtime ?? 0);
+    const fileSetChanged = !this.sameFileSet(state.files, mtimes);
+    const touched = new Set<string>();
+
+    for (const source of Array.from(state.sources.keys())) {
+      if (!ranks.has(source)) this.unlinkBacklinkSource(state, source, touched);
+    }
+    for (const source of keys) {
+      const reference = this.resolvedLinkRecord(resolvedLinks, source);
+      const previous = state.sources.get(source);
+      const mtime = mtimes.get(this.normalizePath(source));
+      if (previous && !fileSetChanged && previous.reference === reference && previous.mtime === mtime) continue;
+      this.unlinkBacklinkSource(state, source, touched);
+      const destinations = this.positiveDestinations(reference);
+      state.sources.set(source, { reference, destinations, mtime });
+      if (!this.policy.isAllowedPath(source)) continue;
+      for (const destination of destinations) this.linkBacklinkSource(state, destination, source, touched);
+    }
+    // Keep the previous contract: sources of one destination follow resolvedLinks key order.
+    for (const destination of touched) {
+      const sources = state.backlinks.get(destination);
+      if (sources && sources.length > 1) {
+        sources.sort((left, right) => (ranks.get(left) ?? Number.MAX_SAFE_INTEGER) - (ranks.get(right) ?? Number.MAX_SAFE_INTEGER));
+      }
+    }
+    state.stamp = stamp;
+    state.files = mtimes;
+  }
+
+  private unlinkBacklinkSource(state: BacklinkIndexState, source: string, touched: Set<string>): void {
+    const record = state.sources.get(source);
+    if (record) {
+      for (const destination of record.destinations) {
+        const sources = state.backlinks.get(destination);
+        if (!sources) continue;
+        const remaining = sources.filter((entry) => entry !== source);
+        if (remaining.length === 0) state.backlinks.delete(destination); else state.backlinks.set(destination, remaining);
+        touched.add(destination);
+      }
+    }
+    state.sources.delete(source);
+  }
+
+  private linkBacklinkSource(state: BacklinkIndexState, destination: string, source: string, touched: Set<string>): void {
+    const sources = state.backlinks.get(destination);
+    if (sources) {
+      if (!sources.includes(source)) sources.push(source);
+    } else {
+      state.backlinks.set(destination, [source]);
+    }
+    touched.add(destination);
+  }
+
+  private resolvedLinksOrEmpty(): Record<string, Record<string, number>> {
+    try {
+      return this.app.metadataCache?.resolvedLinks ?? {};
+    } catch {
+      return {};
+    }
+  }
+
+  private objectKeys(value: object): string[] {
+    try {
+      return Object.keys(value);
+    } catch {
+      return [];
+    }
+  }
+
+  private resolvedLinkRecord(resolvedLinks: Record<string, Record<string, number>>, source: string): object | null {
+    try {
+      const record = (resolvedLinks as Record<string, unknown>)[source];
+      return record && typeof record === "object" ? record : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Destination paths with a positive resolved count, exactly as the per-file scan read them. */
+  private positiveDestinations(record: object | null): string[] {
+    if (!record) return [];
+    const destinations: string[] = [];
+    try {
+      for (const [destination, count] of Object.entries(record as Record<string, unknown>)) {
+        if (Number(count ?? 0) > 0) destinations.push(destination);
+      }
+    } catch {
+      // An unreadable link record contributes no links; the rest of the inventory stays usable.
+    }
+    return destinations;
+  }
+
+  private sameFileSet(previous: Map<string, number>, current: Map<string, number>): boolean {
+    if (previous.size !== current.size) return false;
+    for (const path of current.keys()) {
+      if (!previous.has(path)) return false;
+    }
+    return true;
   }
 
   async readFile(path: string): Promise<string> {
@@ -115,6 +296,10 @@ export class ObsidianMetadataService {
     try {
       const metadata = await this.metadataForFile(file);
       if (!metadata || !this.recognitionSourceIsCurrent(metadata.frontmatter)) return "";
+      // Hard gate for every model-bound reader (orchestrator, retrieval indexes,
+      // summaries, linked notes, current note). Local display/search/open paths read
+      // the Vault through the view layer and are deliberately unaffected.
+      if (!this.policy.isAiEligible(file.path, metadata.frontmatter)) return "";
       const mtime = file.stat?.mtime ?? 0;
       const cached = this.documentCache.get(file.path);
       if (cached && cached.mtime === mtime) {
@@ -322,19 +507,13 @@ export class ObsidianMetadataService {
     return Array.from(body.matchAll(/\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/g), (match) => match[1].trim()).filter(Boolean);
   }
 
-  private findBacklinks(path: string): string[] {
-    let resolvedLinks: Record<string, Record<string, number>> = {};
-    try {
-      resolvedLinks = this.app.metadataCache?.resolvedLinks ?? {};
-    } catch {
-      resolvedLinks = {};
-    }
-    return this.unique(
-      Object.entries(resolvedLinks)
-        .filter(([, destinations]) => Number(destinations[path] ?? 0) > 0)
-        .map(([source]) => source)
-        .filter((source) => this.policy.isAllowedPath(source))
-    );
+  private findBacklinks(index: Map<string, string[]>, path: string): string[] {
+    // Copy so a later incremental refresh can never mutate an inventory snapshot.
+    return [...(index.get(path) ?? [])];
+  }
+
+  private normalizePath(path: string): string {
+    return String(path || "").replace(/\\/gu, "/");
   }
 
   private titleForFile(file: FileLike, headings: string[]): string {

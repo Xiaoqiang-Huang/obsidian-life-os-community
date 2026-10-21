@@ -232,7 +232,9 @@
   min-height: min-content !important;
   max-height: none !important;
   flex-shrink: 0 !important;
-  align-items: start !important;
+  /* A row is as tall as its longest description; all six cell surfaces must
+     fill that height or the short Pro columns leave visible blank strips. */
+  align-items: stretch !important;
 }
 .workspace-leaf-content .lifeos-root .lifeos-pro-compare-view :is(.lifeos-module-compare-header,.lifeos-module-compare-row) > * {
   height: auto !important;
@@ -240,6 +242,553 @@
   white-space: normal !important;
   overflow-wrap: anywhere;
   line-height: 1.6 !important;
+}
+
+/* Task workspace: reference-inspired overview and calm two-column work area.
+   Keep all existing actions and lanes; this only changes their presentation. */
+.lifeos-root .lifeos-task-workspace .lifeos-task-header-search {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+  color: var(--v3-muted); border: 1px solid var(--v3-line);
+  border-radius: 10px; background: var(--v3-surface);
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-header-search input {
+  flex: 1 1 auto; min-width: 0; border: 0; background: transparent;
+}
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-project-option-row {
+  display: grid !important; grid-template-columns: 16px minmax(0, 1fr) auto !important;
+  align-items: center !important; gap: 7px !important;
+}
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-project-option-row strong { min-width: 0; width: auto; }
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-project-option-row .lifeos-project-option-count { font-size: 11px; }
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-project-option-icon svg { width: 14px; height: 14px; }
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-task-header-search {
+  width: 100%; max-width: 100%; min-height: 38px; padding: 0 10px;
+}
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-task-overview {
+  display: grid; gap: 12px; padding: 16px; border: 1px solid var(--v3-line);
+  border-radius: 12px; background: var(--v3-surface);
+}
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-task-overview-heading h2 { margin: 0; font-size: 18px; }
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-task-overview-heading p { margin: 4px 0 0; font-size: 12px; color: var(--v3-muted); }
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-task-overview-body { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-task-overview-ring {
+  display: grid; place-content: center; flex: 0 0 76px; width: 76px; height: 76px;
+  text-align: center; border-radius: 50%;
+  background: radial-gradient(closest-side, var(--v3-surface) 78%, transparent 81%), conic-gradient(var(--v3-accent) var(--lifeos-task-progress), var(--v3-line) 0);
+}
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-task-overview-ring span { font-size: 10px; color: var(--v3-muted); }
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-task-overview-metrics { flex: 1; min-width: 0; display: grid; gap: 5px; }
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-task-overview-stats { display: flex; gap: 6px; }
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-task-overview .lifeos-task-summary-item { min-width: 0; flex: 1; padding: 0; }
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-task-overview .lifeos-task-summary-item .lifeos-muted-text,
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-task-overview-quote { display: none; }
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-task-overview-track { height: 6px; border-radius: 99px; background: var(--v3-line); overflow: hidden; }
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-task-overview-track-fill { height: 100%; width: var(--lifeos-task-progress); background: var(--v3-accent); }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 8px 4px 22px;
+  border: 0;
+  background: transparent;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-page-header h1 {
+  margin: 2px 0 4px;
+  font-size: clamp(22px, 2vw, 30px);
+  letter-spacing: -.035em;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-page-header p { margin: 0; color: var(--v3-muted); }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-page-header .lifeos-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-header-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: clamp(210px, 23vw, 330px);
+  min-height: 38px;
+  padding: 0 12px;
+  color: var(--v3-muted);
+  border: 1px solid var(--v3-line);
+  border-radius: 10px;
+  background: var(--v3-surface);
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-header-search input {
+  width: 100%; min-width: 0; padding: 6px 0; border: 0; box-shadow: none;
+  background: transparent; color: var(--v3-ink);
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-project-task-layout {
+  grid-template-columns: minmax(190px, 220px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-project-panel {
+  padding: 16px !important;
+  border: 1px solid var(--v3-line) !important;
+  border-radius: 14px !important;
+  background: var(--v3-surface) !important;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--v3-ink) 5%, transparent) !important;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-project-panel h2 { margin: 0 0 4px; font-size: 16px; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-project-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-project-panel-heading h2 { margin: 0; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-project-panel-add {
+  display: inline-flex; justify-content: center; min-width: 28px !important;
+  width: 28px !important; height: 28px !important; padding: 3px !important;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-project-panel-add .lifeos-v2-button-label { display: none !important; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-project-panel > p {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-project-options { gap: 5px; margin: 12px 0 0; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace button.lifeos-project-option {
+  min-height: 36px !important;
+  padding: 7px 9px !important;
+  border-radius: 9px !important;
+  border-color: transparent !important;
+  background: transparent !important;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace button.lifeos-project-option.is-active {
+  border-color: color-mix(in srgb, var(--v3-accent) 18%, transparent) !important;
+  background: color-mix(in srgb, var(--v3-accent) 10%, var(--v3-surface)) !important;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-project-option:not(.is-active) .lifeos-project-progress-track { opacity: .45; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-project-option-copy { gap: 0; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-project-option-row {
+  display: grid; grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center; gap: 7px; width: 100%;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-project-option-row strong {
+  min-width: 0; font-size: 12px; font-weight: 600; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-project-option-icon { display: grid; color: var(--v3-muted); }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-project-option-icon svg { width: 15px; height: 15px; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-project-option-row .lifeos-project-option-count {
+  display: grid; place-items: center; min-width: 23px; height: 21px; padding: 0 4px;
+  border-radius: 6px; color: var(--v3-muted); background: color-mix(in srgb, var(--v3-ink) 5%, var(--v3-surface));
+  font-size: 11px; font-weight: 650;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-project-progress-track {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-project-task-detail { gap: 14px; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview {
+  position: relative;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, .34fr) !important;
+  gap: 12px 24px !important;
+  min-height: 205px;
+  padding: 22px 26px !important;
+  overflow: hidden;
+  isolation: isolate;
+  border: 1px solid color-mix(in srgb, var(--v3-accent) 16%, var(--v3-line));
+  border-radius: 16px;
+  background: linear-gradient(110deg, var(--v3-surface) 25%, color-mix(in srgb, var(--v3-accent) 13%, var(--v3-surface)) 100%) !important;
+  box-shadow: 0 12px 34px color-mix(in srgb, var(--v3-accent) 8%, transparent);
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview::after {
+  content: ""; position: absolute; z-index: -1; right: 0; bottom: 0;
+  width: 37%; height: 73%; opacity: .26; pointer-events: none;
+  background: color-mix(in srgb, var(--v3-accent) 50%, transparent);
+  clip-path: polygon(0 100%, 20% 76%, 36% 86%, 64% 22%, 81% 55%, 100% 4%, 100% 100%);
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview-heading { grid-column: 1 / -1; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview-heading h2 { margin: 0 0 4px; font-size: 21px; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview-heading p { margin: 0; color: var(--v3-muted); font-size: 12px; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview-body { display: flex; align-items: center; gap: 24px; min-width: 0; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview-ring {
+  display: flex; flex: 0 0 112px; flex-direction: column; align-items: center; justify-content: center;
+  width: 112px; height: 112px; border-radius: 50%;
+  background: radial-gradient(closest-side, var(--v3-surface) 79%, transparent 81%), conic-gradient(var(--v3-accent) var(--lifeos-task-progress), var(--v3-line) 0);
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview-ring strong { font-size: 22px; line-height: 1.2; color: var(--v3-ink); }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview-ring span { font-size: 11px; color: var(--v3-muted); }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview-metrics { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 10px; align-items: center; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview-stats { display: flex; grid-column: 1 / -1; gap: 14px; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview .lifeos-task-summary-item { flex: 1 1 0; min-width: 0; padding: 0 !important; background: transparent !important; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview .lifeos-task-summary-item .lifeos-muted-text { display: none; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview-track { height: 8px; border-radius: 99px; background: var(--v3-line); overflow: hidden; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview-track-fill { width: var(--lifeos-task-progress); height: 100%; border-radius: inherit; background: var(--v3-accent); }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview-percent { font-weight: 700; color: var(--v3-accent); }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview-quote { align-self: center; max-width: 200px; color: var(--v3-ink); font-size: 15px; font-weight: 650; line-height: 1.75; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board {
+  display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) !important;
+  grid-template-areas: "today open" "today done" "today note";
+  gap: 12px; align-items: start;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board.is-completed-hidden { grid-template-areas: "today open" "today note"; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board.is-today-empty {
+  grid-template-areas: "open today" "open done" "open note";
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board.is-today-empty.is-completed-hidden {
+  grid-template-areas: "open today" "open note";
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-board-column[data-task-column="today"] { grid-area: today; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-board-column[data-task-column="open"] { grid-area: open; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-board-column[data-task-column="done"] { grid-area: done; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-board-column-note { grid-area: note; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board-column-note {
+  display: flex !important; flex-direction: column !important; align-items: stretch !important;
+  gap: 7px !important; min-width: 0; padding: 12px 14px !important;
+  border: 1px solid color-mix(in srgb, var(--v3-accent) 18%, var(--v3-line)) !important;
+  background: color-mix(in srgb, var(--v3-accent) 4%, var(--v3-surface)) !important;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board-column-note .lifeos-auto-note {
+  display: flex; flex-wrap: wrap; gap: 6px; padding: 0; align-items: center;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board-column-note .lifeos-auto-note button { margin-left: auto; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board-column {
+  padding: 15px !important; border: 1px solid var(--v3-line); border-radius: 13px;
+  background: var(--v3-surface) !important;
+  box-shadow: 0 7px 22px color-mix(in srgb, var(--v3-ink) 4%, transparent);
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board-column-header {
+  justify-content: space-between; min-height: 29px;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board-column-heading { display: inline-flex; align-items: center; gap: 7px; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board-column-heading .lifeos-badge { margin-left: 2px; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board-column-header > button { min-height: 29px; padding: 4px 9px; font-size: 11px; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board-column[data-task-column="today"] .lifeos-status-icon { color: var(--v3-accent); }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board-column[data-task-column="open"] .lifeos-status-icon { color: #3180e4; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board-column[data-task-column="done"] .lifeos-status-icon { color: #229d67; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board-card {
+  border: 1px solid var(--v3-line); border-radius: 10px; padding: 12px !important;
+  background: var(--v3-surface) !important;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board-card:hover { border-color: color-mix(in srgb, var(--v3-accent) 42%, var(--v3-line)); }
+@container (max-width: 980px) {
+  .lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview { grid-template-columns: minmax(0, 1fr) !important; }
+  .lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-overview-quote { display: none; }
+  .lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board { grid-template-columns: minmax(0, 1fr) !important; grid-template-areas: "today" "open" "done" "note"; }
+  .lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board.is-completed-hidden { grid-template-areas: "today" "open" "note"; }
+  .lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board.is-today-empty { grid-template-areas: "open" "today" "done" "note"; }
+  .lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board.is-today-empty.is-completed-hidden { grid-template-areas: "open" "today" "note"; }
+}
+@media (max-width: 1120px) {
+  .lifeos-root:not(.lifeos-is-mobile-runtime) .lifeos-task-page-header { flex-wrap: wrap; }
+}
+/* Task refinement: the first screen should show useful tasks rather than a tall
+   greeting/illustration; imported task provenance stays available on demand. */
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-top {
+  display: grid !important;
+  grid-template-columns: 22px minmax(0, 1fr) 32px;
+  align-items: start;
+  gap: 9px;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-copy { min-width: 0; }
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-title { font-weight: 650; line-height: 1.5; overflow-wrap: anywhere; }
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-title > :first-child { margin-top: 0; }
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-title > :last-child { margin-bottom: 0; }
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-detail {
+  margin-top: 3px; color: var(--v3-muted); font-size: 12px;
+  line-height: 1.5; overflow-wrap: anywhere;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-card:not(.is-expanded) .lifeos-board-card-detail,
+.lifeos-root .lifeos-task-workspace .lifeos-board-card:not(.is-expanded):has(.lifeos-board-card-expand) .lifeos-board-card-title {
+  display: -webkit-box !important; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden !important;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-expand {
+  display: inline-flex; width: auto; min-height: 19px; margin: 1px 0 0;
+  padding: 0 2px !important; border: 0 !important; box-shadow: none !important;
+  background: transparent !important; color: var(--v3-accent) !important;
+  font-size: 11px; font-weight: 650; cursor: pointer;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-expand:focus-visible { outline: 2px solid var(--v3-accent); outline-offset: 2px; }
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-meta { margin-top: 7px !important; font-size: 11px; }
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-more { position: relative; align-self: start; justify-self: end; }
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-more > summary {
+  display: grid; place-items: center; width: 30px; height: 30px; padding: 0;
+  border: 1px solid transparent; border-radius: 7px; color: var(--v3-muted); cursor: pointer;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-more > summary:hover,
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-more[open] > summary {
+  background: color-mix(in srgb, var(--v3-accent) 9%, var(--v3-surface)); color: var(--v3-ink);
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-more .lifeos-board-card-actions {
+  position: absolute !important; z-index: 20; top: calc(100% + 4px); right: 0;
+  display: grid !important; grid-template-columns: minmax(0, 1fr) !important;
+  gap: 3px !important; width: 178px !important; min-width: 178px !important;
+  padding: 6px !important; margin: 0 !important;
+  border: 1px solid var(--v3-line); border-radius: 10px;
+  background: var(--v3-surface); box-shadow: 0 14px 34px color-mix(in srgb, var(--v3-ink) 14%, transparent);
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-more:not([open]) .lifeos-board-card-actions { display: none !important; }
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-more .lifeos-task-lane-select { grid-column: 1 !important; max-width: none !important; }
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-more .lifeos-task-card-icon-action {
+  justify-self: stretch !important; justify-content: flex-start !important;
+  width: 100% !important; max-width: none !important; height: 32px !important;
+  padding: 0 8px !important; gap: 8px !important; border: 0 !important;
+  color: var(--v3-ink) !important; background: transparent !important;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-more .lifeos-task-card-icon-action:hover { background: color-mix(in srgb, var(--v3-accent) 9%, var(--v3-surface)) !important; }
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-more .lifeos-task-card-icon-action .lifeos-v2-button-label { display: inline !important; }
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board-card-title { font-size: 12px !important; line-height: 1.45 !important; }
+.lifeos-root:is(.lifeos-is-narrow-pane,.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board-card-detail { font-size: 11px !important; }
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-actions .lifeos-task-lane-select {
+  max-width: 190px; justify-self: start;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-page-header {
+  padding: 5px 4px 12px !important; margin-bottom: 0 !important;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-header-copy .lifeos-kicker { display: none; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-header-copy { position: relative; padding-left: 52px; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-header-copy::before {
+  content: "☀"; position: absolute; left: 0; top: 3px; display: grid; place-items: center;
+  width: 42px; height: 42px; border-radius: 12px;
+  color: #d78008; background: color-mix(in srgb, #ffc776 22%, var(--v3-surface)); font-size: 25px;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-page-header h1 {
+  font-size: clamp(23px, 1.7vw, 27px); line-height: 1.2;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-overview {
+  min-height: 164px !important; padding: 17px 22px !important;
+  gap: 8px 20px !important;
+  background: linear-gradient(108deg, var(--v3-surface) 22%, color-mix(in srgb, var(--v3-accent) 9%, var(--v3-surface))) !important;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-overview::after {
+  width: 25%; height: 45%; opacity: .09;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-overview-ring {
+  flex-basis: 88px; width: 88px; height: 88px;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-overview-ring strong { font-size: 19px; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-overview-body { gap: 17px; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-overview-quote { font-size: 13px; line-height: 1.55; }
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board-card { padding: 10px 11px !important; }
+@container (max-width: 700px) {
+  .lifeos-root .lifeos-task-workspace .lifeos-task-overview-quote { display: none; }
+  .lifeos-root .lifeos-task-workspace .lifeos-board-card-actions .lifeos-task-lane-select { max-width: none; }
+}
+/* Task reference palette: color denotes action/selection, not fabricated status. */
+.lifeos-root:has(.lifeos-task-workspace) {
+  --lifeos-task-blue: #2478ef;
+  --lifeos-task-blue-tint: #eaf2ff;
+  --lifeos-task-done: #239966;
+  --lifeos-task-primary: #111b32;
+}
+body.lifeos-theme-codex-dark .lifeos-root:has(.lifeos-task-workspace),
+body.theme-dark .lifeos-root:has(.lifeos-task-workspace) {
+  --lifeos-task-blue: #82b2ff;
+  --lifeos-task-blue-tint: #1d3152;
+  --lifeos-task-done: #66d7a2;
+  --lifeos-task-primary: #315bb5;
+}
+.lifeos-root:has(.lifeos-task-workspace) .lifeos-nav-item.is-active {
+  color: var(--lifeos-task-blue) !important;
+  background: var(--lifeos-task-blue-tint) !important;
+  border-left-color: var(--lifeos-task-blue) !important;
+}
+.lifeos-root:has(.lifeos-task-workspace) .lifeos-nav-item.is-active .lifeos-nav-icon,
+.lifeos-root .lifeos-task-workspace .lifeos-project-option.is-active .lifeos-project-option-icon {
+  color: var(--lifeos-task-blue) !important;
+}
+.lifeos-root .lifeos-task-workspace button.lifeos-project-option.is-active {
+  background: var(--lifeos-task-blue-tint) !important;
+  border-color: color-mix(in srgb, var(--lifeos-task-blue) 20%, transparent) !important;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace button.lifeos-project-option.is-active {
+  background: var(--lifeos-task-blue-tint) !important;
+  border-color: color-mix(in srgb, var(--lifeos-task-blue) 20%, transparent) !important;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-project-option.is-active .lifeos-project-option-count {
+  color: var(--lifeos-task-blue) !important;
+  background: color-mix(in srgb, var(--lifeos-task-blue) 10%, var(--v3-surface)) !important;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-overview-ring {
+  background: radial-gradient(closest-side, var(--v3-surface) 79%, transparent 81%),
+    conic-gradient(var(--lifeos-task-blue) var(--lifeos-task-progress), var(--v3-line) 0) !important;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-overview-track-fill {
+  background: var(--lifeos-task-blue) !important;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-overview-percent,
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-expand {
+  color: var(--lifeos-task-blue) !important;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-overview-stats .lifeos-task-summary-item:nth-child(1) .lifeos-status-icon,
+.lifeos-root .lifeos-task-workspace .lifeos-task-overview-stats .lifeos-task-summary-item:nth-child(2) .lifeos-status-icon,
+.lifeos-root .lifeos-task-workspace .lifeos-board-column[data-task-column="today"] .lifeos-status-icon,
+.lifeos-root .lifeos-task-workspace .lifeos-board-column[data-task-column="open"] .lifeos-status-icon {
+  color: var(--lifeos-task-blue) !important;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-overview-stats .lifeos-task-summary-item:nth-child(3) .lifeos-status-icon,
+.lifeos-root .lifeos-task-workspace .lifeos-board-column[data-task-column="done"] .lifeos-status-icon {
+  color: var(--lifeos-task-done) !important;
+}
+.lifeos-root .lifeos-task-workspace :is(.lifeos-task-select,input[type="checkbox"]) {
+  accent-color: var(--lifeos-task-blue);
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-page-header .lifeos-toolbar > button:first-of-type,
+.lifeos-root .lifeos-task-workspace .lifeos-board-column[data-task-column="today"] .lifeos-board-column-header > button {
+  color: var(--lifeos-task-blue) !important;
+  border-color: color-mix(in srgb, var(--lifeos-task-blue) 25%, var(--v3-line)) !important;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-page-header .lifeos-toolbar > button:nth-of-type(2) {
+  color: #fff !important;
+  background: var(--lifeos-task-primary) !important;
+  border-color: var(--lifeos-task-primary) !important;
+}
+/* The task page uses a composed header, illustrated overview, and compact work
+   cards. All numbers, lane membership and click handlers still come from data. */
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-page-header {
+  min-height: 94px;
+  padding: 13px 18px !important;
+  border: 1px solid color-mix(in srgb, var(--v3-line) 65%, transparent) !important;
+  border-radius: 15px;
+  background: var(--v3-surface) !important;
+  box-shadow: 0 5px 20px color-mix(in srgb, var(--v3-ink) 4%, transparent);
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-header-copy {
+  padding-left: 68px;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-header-copy::before {
+  width: 54px; height: 54px; top: 0;
+  color: #f7a714; background: #fff4e6; font-size: 31px;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-page-header h1 {
+  font-size: clamp(25px, 1.85vw, 31px);
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-overview {
+  min-height: 214px !important;
+  padding: 20px 30px !important;
+  border-color: #d9e8f9 !important;
+  background: linear-gradient(100deg, #fcfdff 4%, #f0f7ff 56%, #dcecff 100%) !important;
+  box-shadow: 0 9px 25px color-mix(in srgb, var(--lifeos-task-blue) 8%, transparent);
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-overview::after {
+  right: 0; bottom: 0; width: 39% !important; height: 100% !important;
+  opacity: .77 !important; clip-path: none !important;
+  background: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%20650%20230'%3E%3Cdefs%3E%3ClinearGradient%20id%3D'm'%20x1%3D'0'%20y1%3D'0'%20x2%3D'0'%20y2%3D'1'%3E%3Cstop%20stop-color%3D'%23c8e2ff'%2F%3E%3Cstop%20offset%3D'1'%20stop-color%3D'%2378a9da'%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Cpath%20fill%3D'%23e2efff'%20d%3D'M0%20226%20112%20175%20176%20189%20266%20118%20328%20154%20445%2062%20508%2096%20590%2012%20650%2044%20650%20230Z'%2F%3E%3Cpath%20fill%3D'%23b8d8f5'%20d%3D'M0%20230%20130%20208%20230%20152%20321%20190%20432%2092%20507%20128%20593%2032%20650%2086%20650%20230Z'%2F%3E%3Cpath%20fill%3D'url(%23m)'%20d%3D'M107%20230%20231%20181%20290%20196%20438%20117%20485%20143%20596%2040%20650%2091%20650%20230Z'%2F%3E%3Cpath%20fill%3D'%23f7fbff'%20opacity%3D'.75'%20d%3D'M558%2090%20596%2040%20629%2072%20606%2065%20590%2080%20578%2067Z'%2F%3E%3Cpath%20fill%3D'%2380aaca'%20d%3D'M0%20230%20137%20211%20230%20221%20348%20186%20480%20201%20584%20153%20650%20183%20650%20230Z'%2F%3E%3Cg%20fill%3D'%23477d84'%3E%3Cpath%20d%3D'M598%20204v-79l-17%2030%209-3-17%2030%2015-5-23%2031%2031-11%2031%2011-23-31%2015%205-17-30%209%203Z'%2F%3E%3Cpath%20d%3D'M637%20213v-65l-14%2024%208-2-15%2026%2013-4-19%2024%2027-8%2024%208-20-24%2013%204-15-26%208%202Z'%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E") right bottom / auto 100% no-repeat !important;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-overview-ring {
+  flex-basis: 112px; width: 112px; height: 112px;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-overview-ring strong {
+  font-size: 23px;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-task-overview-quote {
+  position: relative; z-index: 1; max-width: 230px;
+  padding-left: 16px; border-left: 3px solid color-mix(in srgb, var(--lifeos-task-blue) 35%, transparent);
+  font-size: 15px; line-height: 1.75; text-align: center;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-overview-stats .lifeos-task-summary-item {
+  gap: 8px;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-overview-stats .lifeos-task-summary-item .lifeos-status-icon {
+  display: grid; place-items: center; width: 22px; height: 22px;
+  border-radius: 50%; background: color-mix(in srgb, currentColor 11%, transparent);
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-overview-stats .lifeos-task-summary-item:nth-child(3) .lifeos-status-icon {
+  background: color-mix(in srgb, var(--lifeos-task-done) 12%, transparent);
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-project-panel {
+  box-shadow: 0 5px 20px color-mix(in srgb, var(--v3-ink) 4%, transparent) !important;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board {
+  gap: 14px;
+}
+.lifeos-root:not(.lifeos-is-narrow-pane):not(.lifeos-is-mobile-runtime) .lifeos-task-workspace .lifeos-board-column {
+  padding: 16px !important; border-radius: 14px;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-column-header {
+  gap: 8px;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-column-heading {
+  margin-right: auto;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-column-heading .lifeos-badge {
+  background: var(--lifeos-task-blue-tint);
+  color: var(--lifeos-task-blue);
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-column[data-task-column="done"] .lifeos-board-column-heading .lifeos-badge {
+  background: color-mix(in srgb, var(--lifeos-task-done) 12%, var(--v3-surface));
+  color: var(--lifeos-task-done);
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-card {
+  gap: 5px;
+  border-color: color-mix(in srgb, var(--v3-line) 90%, transparent) !important;
+  border-radius: 9px !important;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-detail {
+  line-height: 1.4;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-card:not(.is-expanded) .lifeos-board-card-detail {
+  -webkit-line-clamp: 1;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-meta {
+  margin-top: 3px !important; gap: 5px 7px;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-card-meta .lifeos-badge {
+  border-radius: 5px; padding: 2px 5px;
+  background: var(--lifeos-task-blue-tint); color: var(--lifeos-task-blue);
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-column:has(> .lifeos-board-empty) {
+  min-height: 0 !important;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-column:has(> .lifeos-board-empty) .lifeos-board-empty {
+  min-height: 0; padding: 4px 0;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-column[data-task-column="done"]:has(> .lifeos-board-empty) .lifeos-board-empty,
+.lifeos-root .lifeos-task-workspace .lifeos-board-column[data-task-column="done"]:has(> .lifeos-board-empty) .lifeos-board-column-hint {
+  display: none;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-board-column-header .lifeos-task-batch-toolbar {
+  display: block !important; flex: 0 0 auto;
+  width: auto !important; min-width: 0 !important;
+  padding: 0 !important; margin: 0 !important;
+  border: 0 !important; background: transparent !important;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-batch-toolbar > .lifeos-task-batch-more {
+  position: relative; display: block;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-batch-more > summary {
+  display: grid; place-items: center;
+  width: 30px; height: 30px; border-radius: 7px;
+  color: var(--v3-muted); font-size: 0; cursor: pointer;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-batch-more > summary::before {
+  content: "⋯"; font-size: 18px; line-height: 1;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-batch-more > summary:hover,
+.lifeos-root .lifeos-task-workspace .lifeos-task-batch-more[open] > summary {
+  color: var(--lifeos-task-blue); background: var(--lifeos-task-blue-tint);
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-batch-more > .lifeos-task-batch-quick-select {
+  position: absolute !important; z-index: 30; top: calc(100% + 5px); right: 0;
+  display: flex !important; flex-direction: column !important; align-items: stretch !important;
+  width: min(310px, 86vw) !important; max-height: min(70vh, 480px); overflow-y: auto;
+  padding: 10px !important; border: 1px solid var(--v3-line);
+  border-radius: 11px; background: var(--v3-surface);
+  box-shadow: 0 15px 35px color-mix(in srgb, var(--v3-ink) 13%, transparent);
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-batch-more:not([open]) > .lifeos-task-batch-quick-select {
+  display: none !important;
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-batch-quick-select .lifeos-task-batch-selection {
+  padding-bottom: 8px; border-bottom: 1px solid var(--v3-line);
+}
+.lifeos-root .lifeos-task-workspace .lifeos-task-batch-quick-select .lifeos-task-batch-actions {
+  justify-content: flex-start;
+}
+body.theme-dark .lifeos-root .lifeos-task-workspace .lifeos-task-overview,
+body.lifeos-theme-codex-dark .lifeos-root .lifeos-task-workspace .lifeos-task-overview {
+  border-color: #35465e !important;
+  background: linear-gradient(100deg, #202a38 0%, #273a54 75%, #324c70 100%) !important;
+}
+body.theme-dark .lifeos-root .lifeos-task-workspace .lifeos-task-overview::after,
+body.lifeos-theme-codex-dark .lifeos-root .lifeos-task-workspace .lifeos-task-overview::after {
+  opacity: .24 !important;
+}
+@container (max-width: 980px) {
+  .lifeos-root .lifeos-task-workspace .lifeos-task-overview::after { display: none; }
 }
 /* Installed settings builds may use outer scrolling rather than inner panels. */
 .workspace-leaf-content .lifeos-root .lifeos-main.lifeos-settings-main > .lifeos-settings-page {

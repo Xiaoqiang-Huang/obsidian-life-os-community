@@ -727,3 +727,203 @@
 .lifeos-word-preview-document-body .lifeos-word-docx-wrapper { background: transparent; }
 .lifeos-word-preview-document-body section.lifeos-word-docx { max-width: min(100%, 52rem); margin: 0 auto 1rem; color: #20242c; background: #fff; box-shadow: 0 1px 8px rgb(0 0 0 / .12); }
 @media (max-width: 700px) { .lifeos-word-preview-document { padding: .5rem; } .lifeos-word-preview-document-body { width: 100%; } .lifeos-word-preview-document-body section.lifeos-word-docx { max-width: 100%; } }
+
+/* Chat realtime process panel (P1): verifiable stages/tools/timing only, never model reasoning text. */
+.lifeos-v3 .lifeos-chat-process-panel {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0 0 10px;
+  border: 1px solid var(--v3-line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--v3-raised) 72%, var(--v3-surface));
+  color: var(--v3-ink);
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+.lifeos-v3 .lifeos-chat-process-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+.lifeos-v3 .lifeos-chat-process-spinner {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--v3-accent) 25%, transparent);
+  border-top-color: var(--v3-accent);
+  border-radius: 50%;
+  animation: lifeos-chat-process-spin 1s linear infinite;
+}
+.lifeos-v3 .lifeos-chat-process-title,
+.lifeos-v3 .lifeos-chat-process-summary {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+.lifeos-v3 .lifeos-chat-process-timer,
+.lifeos-v3 .lifeos-chat-process-first-token {
+  flex: 0 0 auto;
+  color: var(--v3-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.lifeos-v3 .lifeos-chat-process-toggle {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  width: auto;
+  min-width: 44px;
+  height: auto;
+  min-height: 28px;
+  padding: 2px 8px;
+  border: 1px solid var(--v3-line);
+  border-radius: 6px;
+  background: var(--v3-surface);
+  color: var(--v3-ink);
+  font-size: 12px;
+  box-shadow: none;
+}
+.lifeos-v3 .lifeos-chat-process-body {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 10px 10px;
+}
+.lifeos-v3 .lifeos-chat-process-body[hidden],
+.lifeos-v3 .lifeos-chat-process-hint[hidden],
+.lifeos-v3 .lifeos-chat-process-reason[hidden] {
+  display: none !important;
+}
+.lifeos-v3 .lifeos-chat-process-stages {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+.lifeos-v3 .lifeos-chat-process-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--v3-line);
+  border-radius: 7px;
+  background: var(--v3-surface);
+}
+.lifeos-v3 .lifeos-chat-process-stage-label {
+  overflow-wrap: anywhere;
+  font-weight: 650;
+}
+.lifeos-v3 .lifeos-chat-process-stage-state {
+  color: var(--v3-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.lifeos-v3 .lifeos-chat-process-stage.is-pending,
+.lifeos-v3 .lifeos-chat-process-stage.is-skipped {
+  opacity: .48;
+}
+.lifeos-v3 .lifeos-chat-process-stage.is-active {
+  border-color: var(--v3-accent);
+  box-shadow: inset 3px 0 var(--v3-accent);
+}
+.lifeos-v3 .lifeos-chat-process-stage.is-done .lifeos-chat-process-stage-state {
+  color: var(--v3-accent);
+}
+.lifeos-v3 .lifeos-chat-process-stage.is-failed {
+  border-color: var(--text-error, #b3261e);
+}
+.lifeos-v3 .lifeos-chat-process-tools {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+.lifeos-v3 .lifeos-chat-process-tool {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: var(--v3-surface);
+}
+.lifeos-v3 .lifeos-chat-process-tool-name {
+  flex: 0 0 auto;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.lifeos-v3 .lifeos-chat-process-tool-args {
+  flex: 1 1 140px;
+  min-width: 0;
+  color: var(--v3-muted);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.lifeos-v3 .lifeos-chat-process-tool-state {
+  flex: 0 0 auto;
+  color: var(--v3-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.lifeos-v3 .lifeos-chat-process-tool.is-completed .lifeos-chat-process-tool-state {
+  color: var(--v3-accent);
+}
+.lifeos-v3 .lifeos-chat-process-tool.is-failed .lifeos-chat-process-tool-state {
+  color: var(--text-error, #b3261e);
+}
+.lifeos-v3 .lifeos-chat-process-tool.is-waiting .lifeos-chat-process-tool-state {
+  color: var(--text-warning, #9a6700);
+}
+.lifeos-v3 .lifeos-chat-process-tools-empty,
+.lifeos-v3 .lifeos-chat-process-meta {
+  color: var(--v3-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.lifeos-v3 .lifeos-chat-process-hint {
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--v3-accent) 10%, var(--v3-surface));
+  color: var(--v3-ink);
+  overflow-wrap: anywhere;
+}
+.lifeos-v3 .lifeos-chat-process-reason {
+  color: var(--text-error, #b3261e);
+  overflow-wrap: anywhere;
+}
+.lifeos-v3 .lifeos-chat-process-panel.is-completed {
+  background: color-mix(in srgb, var(--v3-accent) 6%, var(--v3-surface));
+}
+.lifeos-v3 .lifeos-chat-process-panel.is-collapsed .lifeos-chat-process-head {
+  padding-block: 7px;
+}
+.lifeos-v3 .lifeos-chat-process-panel.is-failed,
+.lifeos-v3 .lifeos-chat-process-panel.is-stopped {
+  border-color: color-mix(in srgb, var(--text-error, #b3261e) 45%, var(--v3-line));
+}
+@keyframes lifeos-chat-process-spin {
+  to { transform: rotate(360deg); }
+}
+@media (max-width: 520px) {
+  .lifeos-v3 .lifeos-chat-process-stages { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lifeos-v3 .lifeos-chat-process-tool { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .lifeos-v3 .lifeos-chat-process-tool-args { flex: none; }
+  .lifeos-v3 .lifeos-chat-process-toggle { min-height: 32px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lifeos-v3 .lifeos-chat-process-spinner { animation: none; }
+  .lifeos-v3 .lifeos-chat-process-panel,
+  .lifeos-v3 .lifeos-chat-process-panel * { transition: none !important; animation: none !important; }
+}

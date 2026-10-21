@@ -1,8 +1,243 @@
 import type { WeixinSkillDescriptor } from "./WeixinBotLogic";
+import { formatInstantAnswerForWeixin, type InstantAnswer } from "../LocalInstantAnswerService";
+/** User's explicit current-turn offline instruction beats keyword routing.
+ * A later explicit change in the same message may restore normal auto search. */
+export function weixinRequestWebSearchMode(content: string): "off" | "auto" {
+  let mode: "off" | "auto" = "auto";
+  for (const clause of String(content || "").split(/[，。！？；;,.!?\n]+/u)) {
+    if (/(?:不要|禁止|不许|勿|不需要|无需|别)[^，。！？；;,.!?\n]{0,16}(?:联网|上网|搜索|检索)/u.test(clause) || /(?:只用|仅用)本地|离线(?:回答|处理|模式)/u.test(clause)) mode = "off";
+    else if (/^\s*(?:但|但是|不过)?\s*(?:现在|改为|改成|可以|允许|请|要|需要|开启)[^，。！？；;,.!?\n]{0,16}(?:联网|上网|搜索|检索)/u.test(clause)) mode = "auto";
+  }
+  return mode;
+}
+export function weixinSdkFailureReply(error: string | undefined, stopReason: string, delivered?: string, linkNotice?: string): string {
+  const code = error && /^(?:sdk|agent-outbox)-[a-z-]{1,80}$/.test(error) ? error : "sdk-channel-stopped";
+  // KB-13B: a turn that died right after the user's own link could not be read
+  // gets an actionable notice built from the real tool results instead of the
+  // fixed copy. The notice is multi-line by contract (newlines are content,
+  // not control characters); an empty, over-long or control-character notice
+  // still degrades to the delivered copy / fixed copy below.
+  const notice = String(linkNotice ?? "").trim();
+  if (notice && notice.length <= 1200 && !/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/u.test(notice)) return notice;
+  // F-02/F-03: the SDK adapter can already have produced an actionable host
+  // delivery (fixed copy + reason code) with `ok === false`. Replacing it with a
+  // generic "check your configuration" line would throw away the only thing the
+  // user can act on. Only our own code-tagged copy is passed through; a provider
+  // body or an unrecognised error still degrades to the fixed copy and is never
+  // echoed.
+  const actionable = String(delivered ?? "").trim();
+  if (stopReason === "tool-failure" && actionable.length <= 1200 && !/[\u0000-\u001f]/u.test(actionable)
+    && /(?:SDK_EXECUTION|SDK_BOOTSTRAP|SDK_ORDINARY)_[A-Z][A-Z_]*/u.test(actionable)) {
+    return actionable;
+  }
+  return stopReason === "aborted"
+    ? `本次 SDK 请求已停止，已保留消息；不会自动重复调用模型。中断用量可能未知，请先核对执行记录。（${code}）`
+    : `本次 SDK 文字请求未完成，已保留消息；不会自动重跑或切换到原 AI API。请在 Life OS 的 Agent SDK 设置中核对配置与执行记录，再明确发起新请求。（${code}）`;
+}
+import { hasUnavailableWebBody } from "../context-engine/WebEvidenceBody";
 import {
   LIFEOS_AGENT_TOOL_REGISTRY,
   type LifeOSAgentToolDescriptor
 } from "../LifeOSAgentToolRegistry";
+
+/**
+ * KB-13B: one failed user link as seen by the Weixin reply layer. The channel
+ * adapter forwards `LifeOSAgentRunResult.toolResults`; this structural shape
+ * keeps the decision logic independent from the Agent types.
+ */
+export interface WeixinWebToolResultLike {
+  toolId?: string;
+  ok?: boolean;
+  output?: unknown;
+  error?: unknown;
+}
+
+const WEB_READ_TOOL_ID = "web-page-read";
+const LINK_READ_MARK = "【链接无法读取】";
+const LINK_SEARCH_MARK = "【按链接自动搜索的结果】";
+const LINK_NOTICE_MAX_CHARS = 1200;
+const LINK_SEARCH_BLOCK_MAX_CHARS = 800;
+const LINK_NOTICE_SEARCH_NOTE = "以下为按链接自动搜索的公开线索，未逐篇核对：";
+const LINK_NOTICE_ALTERNATIVES = "请把链接里的关键段落直接粘贴给我，或发一张相关截图；也可以换一个能公开访问的来源（官网、公开文档）再发一次。";
+const LINK_URL_PATTERN = /https?:\/\/[^\s<>"'“”‘’（）()【】\[\]]+/giu;
+const LINK_URL_TRAILING_PUNCTUATION = /[)\]}>）】，。；：、！？!?"'“”‘’]+$/gu;
+const NOTICE_CONTROL_CHARS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/gu;
+
+function stripNoticeControlChars(value: string): string {
+  return String(value ?? "").replace(NOTICE_CONTROL_CHARS, "");
+}
+
+function normalizeNoticeUrl(value: string): string {
+  return String(value || "").trim().replace(LINK_URL_TRAILING_PUNCTUATION, "").replace(/\/+$/u, "").toLocaleLowerCase();
+}
+
+function noticeUrlsIn(value: unknown): string[] {
+  return Array.from(new Set((String(value || "").match(LINK_URL_PATTERN) || []).map(normalizeNoticeUrl).filter(Boolean)));
+}
+
+/** The URL in `text` as it was written, matched against the user's normalized set. */
+function displayUrlMatching(text: unknown, normalizedUrls: string[]): string {
+  for (const item of String(text || "").match(LINK_URL_PATTERN) || []) {
+    if (normalizedUrls.includes(normalizeNoticeUrl(item))) {
+      return item.replace(LINK_URL_TRAILING_PUNCTUATION, "").replace(/\/+$/u, "");
+    }
+  }
+  return "";
+}
+
+function webToolResultText(result: WeixinWebToolResultLike | undefined): string {
+  if (!result) return "";
+  return [result.error, result.output]
+    .map((value) => (typeof value === "string" ? value : ""))
+    .filter((value) => value.trim().length > 0)
+    .join("\n");
+}
+
+/** Prefer a concrete HTTP status; the full reader-fallback text is noisy. */
+function webReadFailureReason(value: string): string {
+  const source = String(value || "");
+  const marked = source.match(/【链接无法读取】[^（(\n]{1,300}[（(]([^）)\n]{1,180})[）)]/u);
+  const remembered = source.match(/本轮已读取失败[（(]([^）)\n]{1,180})[）)]/u);
+  const reason = stripNoticeControlChars((marked?.[1] || remembered?.[1] || source).replace(/\s+/gu, " ")).trim();
+  const http = reason.match(/HTTP\s*\d{3}/iu);
+  return http ? http[0].replace(/\s+/gu, " ").trim() : reason.slice(0, 80) || "读取失败";
+}
+
+/** The fallback search excerpt between its marker and the tool guidance line. */
+function webReadSearchBlock(value: string): string {
+  const source = String(value || "");
+  const marker = source.indexOf(LINK_SEARCH_MARK);
+  if (marker < 0) return "";
+  const after = source.slice(marker + LINK_SEARCH_MARK.length);
+  const stop = after.search(/\n\s*(?:如仍不足|【链接无法读取】)/u);
+  const block = stripNoticeControlChars((stop >= 0 ? after.slice(0, stop) : after).trim());
+  if (!block) return "";
+  if (block.length <= LINK_SEARCH_BLOCK_MAX_CHARS) return block;
+  return `${block.slice(0, LINK_SEARCH_BLOCK_MAX_CHARS - 1).trimEnd()}…`;
+}
+
+/**
+ * KB-13B: the actionable copy for "the link you sent could not be read". It is
+ * built only from what the turn actually observed — a web-page-read failure
+ * whose URL is one the user pasted this turn — and never claims the link
+ * content was read. The primary evidence is a failed (`ok === false`) read;
+ * the KB-13 A1 tool layer also delivers the first failure as combined marker
+ * text before later retries fail, and that shape is accepted too.
+ */
+export function buildWeixinLinkFailureNotice(
+  toolResults: readonly WeixinWebToolResultLike[] | undefined,
+  userTurnText: unknown
+): string | undefined {
+  const userUrls = noticeUrlsIn(userTurnText);
+  if (userUrls.length === 0) return undefined;
+  const results: readonly WeixinWebToolResultLike[] = Array.isArray(toolResults) ? toolResults : [];
+  if (results.length === 0) return undefined;
+  const tiesToUser = (text: string): boolean =>
+    noticeUrlsIn(text).some((url) => userUrls.includes(url));
+  const readResults = results.filter((result) => result && result.toolId === WEB_READ_TOOL_ID);
+  if (readResults.length === 0) return undefined;
+  const failedRead = readResults.find((result) => result.ok === false && tiesToUser(webToolResultText(result)));
+  const markedRead = results.find((result) => webToolResultText(result).includes(LINK_READ_MARK) && tiesToUser(webToolResultText(result)));
+  const source = failedRead || markedRead;
+  if (!source) return undefined;
+  const sourceText = webToolResultText(source);
+  const url = displayUrlMatching(sourceText, userUrls);
+  const reason = webReadFailureReason(sourceText);
+  const searchBlock = results
+    .map((result) => webReadSearchBlock(webToolResultText(result)))
+    .find(Boolean) || "";
+  const head = [`你发来的链接无法读取（${reason}）。`, url ? `链接：${url}` : ""].filter(Boolean);
+  const compose = (block: string): string => [
+    ...head,
+    ...(block ? ["", LINK_NOTICE_SEARCH_NOTE, block] : []),
+    "",
+    LINK_NOTICE_ALTERNATIVES
+  ].join("\n");
+  let block = searchBlock;
+  let notice = stripNoticeControlChars(compose(block));
+  if (notice.length > LINK_NOTICE_MAX_CHARS && block) {
+    const excess = notice.length - LINK_NOTICE_MAX_CHARS;
+    block = `${block.slice(0, Math.max(block.length - excess - 1, 0)).trimEnd()}…`;
+    notice = stripNoticeControlChars(compose(block));
+  }
+  if (notice.length > LINK_NOTICE_MAX_CHARS) {
+    notice = stripNoticeControlChars(compose("")).slice(0, LINK_NOTICE_MAX_CHARS);
+  }
+  return notice.slice(0, LINK_NOTICE_MAX_CHARS);
+}
+
+/** KB-13B: failed web-page-read calls this turn (input for the footnote). */
+export function countWeixinWebReadFailures(toolResults: readonly WeixinWebToolResultLike[] | undefined): number {
+  return (Array.isArray(toolResults) ? toolResults : [])
+    .filter((result) => result && result.toolId === WEB_READ_TOOL_ID && result.ok === false)
+    .length;
+}
+
+/**
+ * KB-13B: append the read-failure footnote once, after the reply is final.
+ * An existing footnote (any count) is left alone so the sentence never repeats.
+ */
+export function appendWeixinReadFailureFootnote(text: string, failureCount: number): string {
+  const body = String(text ?? "");
+  const count = Math.floor(Number(failureCount));
+  if (!Number.isFinite(count) || count <= 0) return body;
+  if (/本轮另有\s*\d+\s*个网页读取失败/u.test(body)) return body;
+  const note = `（本轮另有 ${count} 个网页读取失败，其内容未纳入。）`;
+  const trimmed = body.replace(/\s+$/u, "");
+  return trimmed ? `${trimmed}\n\n${note}` : note;
+}
+
+function weixinReplyBlockContent(block: string): string {
+  return block.replace(/^(?:[ \t]{0,3}#{1,6}[^\n]*\n?)+/u, "");
+}
+
+function weixinReplyBlocks(text: string): string[] {
+  // Blank lines and heading starts both begin a new block; a heading keeps the
+  // content that immediately follows it inside the same block.
+  const blocks: string[] = [];
+  for (const span of text.split(/\n{2,}/u)) {
+    let current: string[] = [];
+    for (const line of span.split("\n")) {
+      const heading = /^[ \t]{0,3}#{1,6}\s+\S/u.test(line);
+      if (heading && current.length > 0) {
+        blocks.push(current.join("\n"));
+        current = [];
+      }
+      current.push(line);
+    }
+    if (current.length > 0) blocks.push(current.join("\n"));
+  }
+  return blocks.filter((block) => block.trim().length > 0);
+}
+
+/**
+ * KB-13B: remove repeated paragraphs/sections from a Weixin reply (the real
+ * accident repeated one paragraph under `## 简要总结` and `## 国考`). Only
+ * blocks whose normalized content is ≥60 chars are compared; short
+ * acknowledgements and differently-cited variants ([S1] vs [S2]) stay. A
+ * duplicate section loses its heading too, so no empty `## 标题` survives.
+ */
+export function dedupeWeixinReply(text: string): string {
+  const source = String(text ?? "");
+  if (!source.trim()) return source;
+  const blocks = weixinReplyBlocks(source.replace(/\r\n?/gu, "\n"));
+  if (blocks.length <= 1) return source;
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  let dropped = false;
+  for (const block of blocks) {
+    const normalized = weixinReplyBlockContent(block).replace(/\s+/gu, " ").trim();
+    if (normalized.length >= 60 && seen.has(normalized)) {
+      if (kept.length > 0 && weixinReplyBlockContent(kept[kept.length - 1]).trim().length === 0) kept.pop();
+      dropped = true;
+      continue;
+    }
+    if (normalized.length >= 60) seen.add(normalized);
+    kept.push(block);
+  }
+  if (!dropped) return source;
+  return kept.join("\n\n");
+}
 
 export interface WeixinHistoryLike {
   role: "user" | "ai" | "assistant" | "system";
@@ -222,6 +457,32 @@ export function getWeixinFastReply(value: unknown): string {
   const text = clean(value, 120);
   if (!SIMPLE_GREETING.test(text)) return "";
   return "你好，我在。今天想记录、查询，还是处理一件事？";
+}
+
+export interface WeixinInstantAnswerGate {
+  mode: "auto" | "off";
+  hasImages: boolean;
+  question: string;
+  answer: (question: string) => Promise<InstantAnswer>;
+}
+
+/**
+ * Channel gate for deterministic local answers. Only a high-confidence local
+ * hit may bypass the model; a disabled switch, a failed/empty answer, images,
+ * or any exception falls through to the original model chain without blocking
+ * it. Delivery is plain text, control-character free and bounded.
+ */
+export async function tryWeixinInstantAnswer(input: WeixinInstantAnswerGate): Promise<string | null> {
+  if (!input || input.mode === "off" || input.hasImages) return null;
+  const question = clean(input.question, 6_000);
+  if (!question) return null;
+  try {
+    const answer = await input.answer(question);
+    if (!answer || answer.intent === "none" || answer.confidence !== "high") return null;
+    return formatInstantAnswerForWeixin(answer) || null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -505,8 +766,7 @@ export function resolveWeixinLinkFollowUp(
 }
 
 export function hasUnavailableWeixinEvidence(value: unknown): boolean {
-  const text = clean(value, 100_000);
-  return /(?:待读取正文|正文(?:尚未|未能|无法|没有)(?:读取|获取|访问)|当前无法访问|链接读取失败|抓取失败|内容不可用|未获取到正文|仅保存了链接)/u.test(text);
+  return hasUnavailableWebBody(clean(value, 100_000));
 }
 
 export function allWeixinEvidenceUnavailable(values: unknown[]): boolean {

@@ -2,7 +2,7 @@ import type { App } from "obsidian";
 import { localizeLifeOsPathParts, normalizeDirectoryLanguage, type ChatContextMode, type PersonalLifeSystemSettings, type WebSearchMode } from "../settings";
 import { today } from "../utils/dates";
 import { ContextEngine, chatModeToEngineMode } from "./ContextEngine";
-import { ContextSourcePolicyService } from "./context-engine/ContextSourcePolicyService";
+import { ContextSourcePolicyService, prepareCitableMarkdown } from "./context-engine/ContextSourcePolicyService";
 import type { AiLike, ContextEngineResult, ContextRetrievalTrace, ContextSource, WebSearchProviderResult } from "./context-engine/types";
 import { LlmWikiContextService } from "./LlmWikiContextService";
 
@@ -47,6 +47,8 @@ export interface BuildChatContextOptions {
   includeQuestionInPrompt?: boolean;
   includeStatusCards?: boolean;
   useAiPlanner?: boolean;
+  /** Read-through Vault facade from a bounded prefetch; never persisted. */
+  vaultApp?: App;
 }
 
 type FileLike = {
@@ -388,6 +390,8 @@ export class ChatContextService {
     if (!file) return null;
     if (!this.isReadableChatContextFile(file)) return null;
     const content = await this.readFile(file);
+    // A note excluded from AI processing (or marked sensitive) contributes no body at all.
+    if (!content.trim()) return null;
     const links = await this.buildLinkContext(file, focusText);
     const body = [
       `当前笔记：${file.path}`,
@@ -591,7 +595,12 @@ export class ChatContextService {
   }
 
   private async readFile(file: FileLike): Promise<string> {
-    return String(await (this.app as unknown as { vault: { read: (file: FileLike) => Promise<string> } }).vault.read(file));
+    const raw = String(await (this.app as unknown as { vault: { read: (file: FileLike) => Promise<string> } }).vault.read(file));
+    // Same shared boundary as the primary engine: this assembler only ever feeds a model,
+    // so a note that opted out of AI (or is sensitive) yields no body here, while the
+    // Knowledge view still lists, searches and opens it locally.
+    const decision = prepareCitableMarkdown(file.path, raw, { rootFolder: normalizePathLocal(this.settings.rootFolder || "PersonalLifeSystem") });
+    return decision.allowed && decision.aiEligible ? decision.markdown : "";
   }
 
   private path(...parts: string[]): string {
@@ -835,7 +844,7 @@ function formatContextSources(sources: ContextSource[]): string[] {
 function contextModeLabel(mode: ChatContextMode): string {
   switch (mode) {
     case "semantic":
-      return "语义增强";
+      return "本地词面混合检索";
     case "global":
       return "全局分析";
     case "smart":

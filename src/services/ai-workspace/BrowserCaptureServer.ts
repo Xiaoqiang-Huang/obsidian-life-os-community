@@ -309,7 +309,10 @@ export class AiWorkspaceBrowserCaptureServer {
       includeFileReferences: input.includeFileReferences !== false,
       includeProjectMemory: input.includeProjectMemory !== false,
       includeToolMemory: input.includeToolMemory === true,
-      retainRawSnapshot: input.retainRawSnapshot !== false,
+      // KB-12: `"force"` is the explicit over-threshold snapshot override.
+      retainRawSnapshot: input.retainRawSnapshot === "force"
+        ? "force"
+        : input.retainRawSnapshot !== false,
       redactSecrets: input.redactSecrets !== false
     };
   }

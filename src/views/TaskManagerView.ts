@@ -280,7 +280,8 @@ export class TaskManagerView extends ItemView {
       const tasksKey = JSON.stringify([all, formatDate(), this.taskQuery]);
       const mounted = this.mountedWorkspace;
       container.querySelector(".lifeos-task-load-error")?.remove();
-      if (mounted?.root.isConnected && mounted.context === context) {
+      if (mounted?.root.isConnected && mounted.context === context
+        && mounted.detail.querySelector(":scope > .lifeos-task-page-header")) {
         if (mounted.tasksKey !== tasksKey) {
           const stableViewState = preserveScroll ? captureStableViewState(container) : null;
           const restoreFocus = this.captureTaskActionFocus(container);
@@ -295,6 +296,8 @@ export class TaskManagerView extends ItemView {
           mounted.columns.get("done")?.(displayedDone);
           this.replaceTaskRegion(mounted.board, ".lifeos-board-column-note", (host) => this.renderAutoColumn(host, visibleOpen.length, service));
           mounted.board.toggleClass("is-empty-board", visibleOpen.length === 0 && displayedDone.length === 0);
+          mounted.board.toggleClass("is-today-empty", todayTasks.length === 0 && pendingTasks.length > 0);
+          this.placeTaskBatchMenu(mounted.detail, mounted.board, todayTasks.length === 0 && pendingTasks.length > 0);
           mounted.tasksKey = tasksKey;
           restoreFocus();
           if (stableViewState) restoreStableViewState(container, stableViewState, () => revision === this.renderRequestRevision);
@@ -309,16 +312,13 @@ export class TaskManagerView extends ItemView {
         const shellMain = createLifeOSShell(staging, this.plugin, "tasks");
         shellMain.addClass("lifeos-task-workspace");
 
-        this.renderHeader(shellMain, defaultProjectId);
         nextToastEl = shellMain.createDiv({ cls: "lifeos-toast" });
         nextToastEl.hide();
 
         const layout = shellMain.createDiv({ cls: "lifeos-project-task-layout" });
         this.renderProjectList(layout, overview);
         const detail = layout.createDiv({ cls: "lifeos-project-task-detail" });
-        const search = detail.createEl("input", { attr: { type: "search", placeholder: "搜索当前项目的任务…", "aria-label": "搜索任务", "data-lifeos-focus-key": "task-query" } });
-        search.value = this.taskQuery;
-        search.oninput = () => { this.taskQuery = search.value; this.scheduleVaultRefresh(); };
+        this.renderHeader(detail, defaultProjectId);
         this.renderSummary(detail, todayTasks, pendingTasks, visibleDone);
         const projectDocumentsSlot = this.renderProjectDocumentsLoading(detail);
         this.renderTaskBatchToolbar(detail, {
@@ -330,6 +330,7 @@ export class TaskManagerView extends ItemView {
         const boardClasses = [
           "lifeos-board",
           visibleOpen.length === 0 && displayedDone.length === 0 ? "is-empty-board" : "",
+          todayTasks.length === 0 && pendingTasks.length > 0 ? "is-today-empty" : "",
           showCompleted ? "" : "is-completed-hidden"
         ].filter(Boolean).join(" ");
         const board = detail.createDiv({ cls: boardClasses });
@@ -345,10 +346,11 @@ export class TaskManagerView extends ItemView {
           button.setAttribute("role", "tab"); button.setAttribute("aria-selected", String(key === board.dataset.mobileLane));
         }
         const columns = new Map<TaskLane, (tasks: LifeOSTask[]) => void>();
-        columns.set("today", this.renderColumn(board, "today", "今日任务", "今天明确要推进的任务", todayTasks, service, "calendar-check"));
-        columns.set("open", this.renderColumn(board, "open", "待完成", "仍在待办池，不会丢失", pendingTasks, service, "circle"));
+        columns.set("today", this.renderColumn(board, "today", "今日任务", "今天明确要推进的任务", todayTasks, service, "check-square"));
+        columns.set("open", this.renderColumn(board, "open", "待完成", "仍在待办池，不会丢失", pendingTasks, service, "clock"));
         if (showCompleted) columns.set("done", this.renderColumn(board, "done", "已完成", "完成后自动归档到这里", visibleDone, service, "check-circle-2"));
         this.renderAutoColumn(board, visibleOpen.length, service);
+        this.placeTaskBatchMenu(detail, board, todayTasks.length === 0 && pendingTasks.length > 0);
         detail.appendChild(projectDocumentsSlot);
         nextWorkspace = {context, tasksKey, root: staging.firstElementChild as HTMLElement,
           main: shellMain, layout, detail, board, documentsSlot: projectDocumentsSlot, columns};
@@ -378,6 +380,13 @@ export class TaskManagerView extends ItemView {
     build(staging);
     if (previous) previous.replaceWith(...Array.from(staging.childNodes));
     else if (staging.firstChild) parent.insertBefore(staging.firstChild, before);
+  }
+
+  private placeTaskBatchMenu(detail: HTMLElement, board: HTMLElement, pendingIsMain: boolean): void {
+    const toolbar = detail.querySelector<HTMLElement>(".lifeos-task-batch-toolbar");
+    const lane = board.querySelector<HTMLElement>(`[data-task-column="${pendingIsMain ? "open" : "today"}"]`);
+    const heading = lane?.querySelector<HTMLElement>(".lifeos-board-column-header");
+    if (toolbar && heading && toolbar.parentElement !== heading) heading.appendChild(toolbar);
   }
 
   private captureTaskActionFocus(container: HTMLElement): () => void {
@@ -417,7 +426,7 @@ export class TaskManagerView extends ItemView {
     main.addClass("lifeos-task-workspace", "is-loading");
 
     const header = main.createDiv({ cls: "lifeos-page-header lifeos-task-page-header lifeos-task-loading-header" });
-    const copy = header.createDiv();
+    const copy = header.createDiv({ cls: "lifeos-task-header-copy" });
     copy.createDiv({ cls: "lifeos-kicker", text: "任务" });
     copy.createEl("h1", { text: "行动清单" });
     copy.createEl("p", { text: "页面已打开，正在读取任务和项目；项目文档会随后加载。" });
@@ -541,9 +550,15 @@ export class TaskManagerView extends ItemView {
     const header = parent.createDiv({ cls: "lifeos-page-header lifeos-task-page-header" });
     const copy = header.createDiv();
     copy.createDiv({ cls: "lifeos-kicker", text: "任务" });
-    copy.createEl("h1", { text: "行动清单" });
-    copy.createEl("p", { text: "把今天要推进的事放在这里。完成后归档，未完成会延续，不会丢失。" });
+    const hour = new Date().getHours();
+    copy.createEl("h1", { text: `${hour < 11 ? "早上好" : hour < 18 ? "下午好" : "晚上好"} 👋` });
+    copy.createEl("p", { text: "把今天要推进的事情放在这里，专注做好当下的任务。" });
     const toolbar = header.createDiv({ cls: "lifeos-toolbar" });
+    const searchBox = toolbar.createDiv({ cls: "lifeos-task-header-search" });
+    setIcon(searchBox.createSpan(), "search");
+    const search = searchBox.createEl("input", { attr: { type: "search", placeholder: "搜索任务…", "aria-label": "搜索当前项目的任务", "data-lifeos-focus-key": "task-query" } });
+    search.value = this.taskQuery;
+    search.oninput = () => { this.taskQuery = search.value; this.scheduleVaultRefresh(); };
     createButton(toolbar, "候选建议", () => new TaskSuggestionsModal(this.app, this.plugin, () => void this.render()).open(), { ghost: true, icon: "list-filter" });
     createButton(toolbar, "新建任务", () => new NewTaskModal(this.app, this.plugin, () => this.render(), defaultProjectId).open(), { primary: true, icon: "plus" });
     const more = toolbar.createEl("details", { cls: "lifeos-page-more" });
@@ -558,10 +573,27 @@ export class TaskManagerView extends ItemView {
   }
 
   private renderSummary(parent: HTMLElement, todayTasks: LifeOSTask[], pendingTasks: LifeOSTask[], done: LifeOSTask[]): void {
-    const stats = parent.createDiv({ cls: "lifeos-task-summary-grid" });
+    const overview = parent.createDiv({ cls: "lifeos-task-summary-grid lifeos-task-overview" });
+    const intro = overview.createDiv({ cls: "lifeos-task-overview-heading" });
+    intro.createEl("h2", { text: "今日任务" });
+    intro.createEl("p", { text: `${formatDate()} · 任务来自当前项目筛选，完成后会归档。` });
+    const body = overview.createDiv({ cls: "lifeos-task-overview-body" });
+    const total = todayTasks.length + pendingTasks.length + done.length;
+    const percent = total ? Math.round(done.length / total * 100) : 0;
+    const ring = body.createDiv({ cls: "lifeos-task-overview-ring", attr: { role: "img", "aria-label": `当前列表完成 ${done.length} / ${total} 项` } });
+    ring.setCssProps({ "--lifeos-task-progress": `${percent}%` });
+    ring.createEl("strong", { text: `${done.length}/${total}` });
+    ring.createSpan({ text: "列表进度" });
+    const metrics = body.createDiv({ cls: "lifeos-task-overview-metrics" });
+    const stats = metrics.createDiv({ cls: "lifeos-task-overview-stats" });
     this.summaryItem(stats, "今日任务", String(todayTasks.length), "今天优先处理", "calendar-check");
-    this.summaryItem(stats, "待完成", String(pendingTasks.length), "仍在待办池", "circle");
+    this.summaryItem(stats, "待完成", String(pendingTasks.length), "仍在待办池", "clock");
     this.summaryItem(stats, "已完成", String(done.length), "已归档", "check-circle-2");
+    const track = metrics.createDiv({ cls: "lifeos-task-overview-track", attr: { role: "progressbar", "aria-label": "当前列表完成度", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(percent) } });
+    track.setCssProps({ "--lifeos-task-progress": `${percent}%` });
+    track.createDiv({ cls: "lifeos-task-overview-track-fill" });
+    metrics.createSpan({ cls: "lifeos-task-overview-percent", text: `${percent}%` });
+    overview.createDiv({ cls: "lifeos-task-overview-quote", text: "专注于重要的事，其他的自然会顺利。" });
   }
 
   private summaryItem(parent: HTMLElement, label: string, value: string, hint: string, icon: string): void {
@@ -575,7 +607,14 @@ export class TaskManagerView extends ItemView {
 
   private renderProjectList(parent: HTMLElement, overview: LifeOSProjectOverview): void {
     const panel = parent.createDiv({ cls: "lifeos-project-panel" });
-    panel.createEl("h2", { text: "项目筛选" });
+    const heading = panel.createDiv({ cls: "lifeos-project-panel-heading" });
+    heading.createEl("h2", { text: "项目" });
+    const addProject = createButton(heading, "新增项目", () => {
+      if (!requireProFeature(this.plugin, "projectManagement")) return;
+      new NewProjectModal(this.app, this.plugin, () => this.render()).open();
+    }, { ghost: true, icon: "plus", className: "lifeos-project-panel-add" });
+    addProject.setAttr("aria-label", "新增项目");
+    addProject.setAttr("title", "新增项目");
     panel.createEl("p", {
       text: this.selectedProjectId ? "当前只显示选中项目的任务。" : "当前显示全部项目待办。"
     });
@@ -583,7 +622,7 @@ export class TaskManagerView extends ItemView {
     this.renderProjectOption(
       options,
       "all",
-      "全部项目待办",
+      "全部项目",
       overview.all.openCount,
       overview.all.progress,
       this.selectedProjectId === null,
@@ -644,8 +683,9 @@ export class TaskManagerView extends ItemView {
     const completion = Number.isFinite(progress) ? Math.max(0, Math.min(progress, 100)) : 0;
     const copy = item.createDiv({ cls: "lifeos-project-option-copy" });
     const row = copy.createDiv({ cls: "lifeos-project-option-row" });
+    setIcon(row.createSpan({ cls: "lifeos-project-option-icon" }), id === "all" ? "layout-grid" : id === "unassigned" ? "inbox" : "folder");
     row.createEl("strong", { text: label });
-    row.createSpan({ text: `${openCount} 个待办 · ${completion}%` });
+    row.createSpan({ cls: "lifeos-project-option-count", text: String(openCount), attr: { title: `${openCount} 个待办 · 完成 ${completion}%` } });
     const progressTrack = copy.createDiv({
       cls: "lifeos-project-progress-track",
       attr: {
@@ -1210,6 +1250,7 @@ export class TaskManagerView extends ItemView {
     installHostPopoverScope(quickMenu, this.app);
     quickMenu.createEl("summary", { text: "批量操作", attr: { "aria-label": "批量选择和操作任务" } });
     const quickSelect = quickMenu.createDiv({ cls: "lifeos-task-batch-quick-select lifeos-page-more-menu" });
+    quickSelect.appendChild(selection);
     const selectOnly = (tasks: LifeOSTask[]): void => {
       for (const task of unique) {
         const key = this.taskStableKey(task);
@@ -1370,15 +1411,18 @@ export class TaskManagerView extends ItemView {
     });
     this.configureTaskDropTarget(column, columnKey, service);
     const head = column.createDiv({ cls: "lifeos-board-column-header" });
-    const titleEl = head.createDiv();
+    const titleEl = head.createDiv({ cls: "lifeos-board-column-heading" });
     setIcon(titleEl.createSpan({ cls: "lifeos-status-icon" }), icon);
     titleEl.createSpan({ text: title });
-    const count = head.createSpan({ cls: "lifeos-badge", text: String(uniqueTasks.length) });
+    const count = titleEl.createSpan({ cls: "lifeos-badge", text: String(uniqueTasks.length) });
+    if (columnKey === "today") {
+      createButton(head, "新建任务", () => new NewTaskModal(this.app, this.plugin, () => this.render()).open(), { ghost: true, icon: "plus" });
+    }
     column.createDiv({ cls: "lifeos-board-column-hint", text: hint });
 
     const empty = column.createDiv({ cls: "lifeos-board-empty" });
     empty.createDiv({ text: "暂无任务" });
-    createButton(empty, "新建任务", () => new NewTaskModal(this.app, this.plugin, () => this.render()).open(), { ghost: true, icon: "plus" });
+    if (columnKey !== "done") createButton(empty, "新建任务", () => new NewTaskModal(this.app, this.plugin, () => this.render()).open(), { ghost: true, icon: "plus" });
 
     const list = column.createDiv({ cls: "lifeos-board-column-list" });
     list.setAttr("data-lifeos-scroll-key", `task-column:${title}`);
@@ -1475,7 +1519,7 @@ export class TaskManagerView extends ItemView {
     card.setAttr("data-lifeos-task-key", key);
     card.addEventListener("dragstart", (event) => {
       const target = event.target as HTMLElement | null;
-      if (target?.closest("button, input, select, textarea")) {
+      if (target?.closest("button, input, select, textarea, summary, details")) {
         event.preventDefault();
         return;
       }
@@ -1504,14 +1548,38 @@ export class TaskManagerView extends ItemView {
       this.syncTaskSelectionDom(key, select.checked);
       this.updateTaskBatchUi?.();
     };
-    renderMarkdownDisplay(this.app, this, top.createDiv({ cls: "lifeos-board-card-title" }), task.text);
+    const copy = top.createDiv({ cls: "lifeos-board-card-copy" });
+    const sourceSeparator = task.text.search(/\s*[|｜]\s*(?=依据\s*[:：])/u);
+    const titleText = sourceSeparator > 0 ? task.text.slice(0, sourceSeparator).trim() : task.text;
+    const detailText = sourceSeparator > 0 ? task.text.slice(sourceSeparator).replace(/^\s*[|｜]\s*/u, "").trim() : "";
+    const title = copy.createDiv({ cls: "lifeos-board-card-title" });
+    renderMarkdownDisplay(this.app, this, title, titleText);
+    if (detailText) renderMarkdownDisplay(this.app, this, copy.createDiv({ cls: "lifeos-board-card-detail" }), detailText);
+    if (Array.from(task.text).length > 105) {
+      const toggle = copy.createEl("button", {
+        cls: "lifeos-board-card-expand",
+        text: "展开详情",
+        attr: { type: "button", "aria-expanded": "false", "aria-label": `展开任务详情：${titleText}` }
+      });
+      toggle.onclick = () => {
+        const expanded = !card.hasClass("is-expanded");
+        card.toggleClass("is-expanded", expanded);
+        toggle.setText(expanded ? "收起详情" : "展开详情");
+        toggle.setAttr("aria-expanded", String(expanded));
+      };
+    }
     const meta = card.createDiv({ cls: "lifeos-board-card-meta" });
     const dueDate = this.taskDueDate(task);
     const completedDate = task.line.match(/✅\s*(20\d{2}-\d{2}-\d{2})/u)?.[1] || "";
     meta.createSpan({ text: dueDate || completedDate || (columnKey === "today" ? "今天" : "无截止日期") });
     meta.createSpan({ text: task.source === "open" ? "待办任务" : "已归档" });
     for (const tag of task.tags.slice(0, 2)) meta.createSpan({ cls: "lifeos-badge", text: tag });
-    const actions = card.createDiv({ cls: "lifeos-board-card-actions" });
+    const more = top.createEl("details", { cls: "lifeos-page-more lifeos-board-card-more" });
+    installHostPopoverScope(more, this.app);
+    const moreTrigger = more.createEl("summary", { attr: { "aria-label": `任务操作：${titleText}`, title: "任务操作" } });
+    setIcon(moreTrigger, "ellipsis");
+    const actions = more.createDiv({ cls: "lifeos-page-more-menu lifeos-board-card-actions" });
+    actions.addEventListener("click", (event) => { if ((event.target as HTMLElement).closest("button")) more.open = false; });
     const move = actions.createEl("select", {
       cls: "lifeos-task-lane-select",
       attr: { "aria-label": `移动任务：${task.text}`, "data-lifeos-focus-key": `task:${key}:move` }
@@ -1525,6 +1593,7 @@ export class TaskManagerView extends ItemView {
       const targetLane = move.value as TaskLane;
       move.value = "";
       if (!targetLane || targetLane === columnKey) return;
+      more.open = false;
       void this.runTaskLaneMove(task, targetLane, service);
     };
     move.addEventListener("dragstart", (event) => event.preventDefault());

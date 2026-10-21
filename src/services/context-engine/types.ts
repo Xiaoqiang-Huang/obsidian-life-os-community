@@ -88,7 +88,20 @@ export interface ContextRetrievalTrace {
   fusedCandidates: number;
   selectedCount: number;
   candidateCount: number;
+  /** Concept coverage: how much of the query's concepts appears in the returned evidence. It is NOT a claim that every document was read. */
   coverage: number;
+  /** The same measure as coverage, named explicitly so callers/UI can keep it separate from document coverage. */
+  conceptCoverage: number;
+  /** Distinct Markdown documents whose text actually entered the returned evidence. */
+  documentsRead: number;
+  /** Markdown documents in the retrieval scope that could have been read. */
+  documentsTotal: number;
+  /** documentsRead / documentsTotal (1 when the scope is empty). */
+  documentsCoverage: number;
+  /** True when documentsRead < documentsTotal; coverage=1 alone must not be read as full-document coverage. */
+  documentsTruncated: boolean;
+  /** Human-readable sampling/truncation reasons; empty when nothing was sampled away. */
+  samplingReasons: string[];
   durationMs: number;
   indexDocuments: number;
   indexChunks: number;

@@ -1,4 +1,6 @@
 import type { ContextSource } from "./types";
+import { equivalentEvidenceNumbers } from "./EvidenceNumberNormalizer";
+import { isCitableEvidenceSource } from "./ContextSourcePolicyService";
 
 export interface CitationVerificationOptions {
   requireCitations?: boolean;
@@ -13,6 +15,8 @@ export interface CitationVerificationOptions {
   minimumSupportCoverage?: number;
   /** Fail closed when even one cited claim is unsupported. */
   failOnUnsupportedClaim?: boolean;
+  /** Opt in to locale/list-format equivalence for webpage answers; local callers remain unchanged. */
+  normalizeEquivalentNumbers?: boolean;
 }
 
 export interface CitationVerificationResult {
@@ -36,6 +40,7 @@ export class CitationVerifierService {
     sources: ContextSource[],
     options: CitationVerificationOptions = {}
   ): CitationVerificationResult {
+    sources = sources.filter(isCitableEvidenceSource);
     const requireCitations = options.requireCitations === true;
     const minimumCompleteness = options.minimumCompleteness ?? 0.6;
     const verifyClaimSupport = options.verifyClaimSupport === true;
@@ -56,7 +61,7 @@ export class CitationVerifierService {
     const completeness = claims.length === 0 ? 1 : citedClaimCount / claims.length;
     const hasValidCitation = citationIds.some((id) => available.has(id));
     const unsupportedClaims = verifyClaimSupport
-      ? citedClaims.filter((claim) => !this.claimSupported(claim, sourceById, minimumClaimSupport))
+      ? citedClaims.filter((claim) => !this.claimSupported(claim, sourceById, minimumClaimSupport, options.normalizeEquivalentNumbers === true))
       : [];
     const supportedClaimCount = verifyClaimSupport
       ? Math.max(0, citedClaimCount - unsupportedClaims.length)
@@ -105,7 +110,8 @@ export class CitationVerifierService {
   private claimSupported(
     claim: string,
     sourceById: Map<string, ContextSource>,
-    minimumClaimSupport: number
+    minimumClaimSupport: number,
+    normalizeEquivalentNumbers = false
   ): boolean {
     const ids = Array.from(new Set(Array.from(claim.matchAll(/\[(S\d+)\]/g), (match) => match[1])));
     const citedSources = ids.map((id) => sourceById.get(id)).filter((source): source is ContextSource => Boolean(source));
@@ -121,8 +127,8 @@ export class CitationVerifierService {
     const cleanClaim = claim.replace(/\[(?:S\d+)\]/g, " ").trim();
     if (this.claimsReadableBody(cleanClaim) && this.evidenceSaysUnavailable(evidence)) return false;
 
-    const claimNumbers = this.numericTokens(cleanClaim);
-    const evidenceNumbers = new Set(this.numericTokens(evidence));
+    const claimNumbers = this.numericTokens(cleanClaim, normalizeEquivalentNumbers);
+    const evidenceNumbers = new Set(this.numericTokens(evidence, normalizeEquivalentNumbers));
     if (claimNumbers.some((token) => !evidenceNumbers.has(token))) return false;
 
     const normalizedClaim = this.normalizeForMatch(cleanClaim);
@@ -145,7 +151,8 @@ export class CitationVerifierService {
     return /(?:待读取正文|无法访问|未取得正文|正文不可用|抓取失败|仅保存链接|没有读取到正文|未读取正文)/u.test(value);
   }
 
-  private numericTokens(value: string): string[] {
+  private numericTokens(value: string, normalizeEquivalentNumbers = false): string[] {
+    if (normalizeEquivalentNumbers) return equivalentEvidenceNumbers(value);
     return Array.from(new Set(Array.from(
       String(value || "").matchAll(/\d+(?:[.,:/-]\d+)*(?:\s*(?:%|元|美元|人民币|万|亿|千|k|m|b))?/giu),
       (match) => match[0].replace(/[\s,]/gu, "").toLocaleLowerCase()

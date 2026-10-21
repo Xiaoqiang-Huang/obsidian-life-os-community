@@ -25,6 +25,8 @@ export interface WeixinAssistantResponse {
   projectId?: string;
   conversationPath?: string;
   writebackStatus?: string;
+  /** Incremental chunks were already delivered by the channel transport. */
+  streamed?: boolean;
   /** Stored in the durable queue for local diagnosis; never rendered to the
    * Weixin user and never contains prompts, secrets or absolute OS paths. */
   diagnostics?: WeixinAssistantDiagnostics;
@@ -39,7 +41,9 @@ export interface WeixinAssistantDiagnostics {
   sourceCount: number;
   sourcePaths: string[];
   retrievalStrategy?: string;
-  failureKind?: "none" | "web-evidence-insufficient" | "local-citation-check" | "model";
+  failureKind?: "none" | "web-evidence-insufficient" | "web-answer-check" | "local-citation-check" | "model";
+  answerCheck?: import("./WeixinAnswerGuard").WeixinAnswerCheck;
+  webEvidence?: import("./WeixinAnswerGuard").WeixinWebEvidenceDiagnostic;
 }
 
 export interface WeixinAccessSettings {
@@ -1486,6 +1490,20 @@ function normalizeInlineDollarMath(whole: string, math: string): string {
 /** Final channel guard: Weixin displays formulas as readable plain text, never TeX markup. */
 export function formatWeixinPlainTextReply(value: unknown): string {
   let result = String(value ?? "");
+  // Grounded extracts may pass through durable replay and the sender again.
+  // Preserve their literal text rather than interpreting article currency as TeX.
+  if (/^原文摘录：/mu.test(result)) return result.trim();
+  const money: string[] = [];
+  let markerPrefix = "LIFEOSMONEYTOKEN";
+  while (result.includes(markerPrefix)) markerPrefix += "X";
+  const original = result;
+  result = result.replace(/\$[+\-−－]?\d+(?:,\d{3})*(?:\.\d+)?/gu, (amount, offset: number) => {
+    const closing = original.indexOf("$", offset + 1);
+    if (closing !== -1 && !/[\d+\-−－]/u.test(original.charAt(closing + 1))
+      && /^[\d\s.+*/^()=−－-]+[\d)]\s*$/u.test(original.slice(offset + 1, closing))) return amount;
+    const marker = `${markerPrefix}${money.length}END`;
+    money.push(amount); return marker;
+  });
   result = result
     .replace(/\$\$([\s\S]*?)\$\$/gu, (_whole, math: string) => normalizeLatexMath(math))
     .replace(/\\\[([\s\S]*?)\\\]/gu, (_whole, math: string) => normalizeLatexMath(math))
@@ -1496,7 +1514,7 @@ export function formatWeixinPlainTextReply(value: unknown): string {
     .replace(/\$\$/gu, "")
     .replace(/\n{3,}/gu, "\n\n")
     .trim();
-  return result;
+  return result.replace(new RegExp(`${markerPrefix}(\\d+)END`, "gu"), (_match, index: string) => money[Number(index)] || "");
 }
 
 function safeMediaReference(value: unknown): string {

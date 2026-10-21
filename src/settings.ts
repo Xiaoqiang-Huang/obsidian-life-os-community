@@ -1,6 +1,9 @@
 import type { LicenseStateSnapshot } from "./licensing/license-types";
 import type { AiSkillCustomCategory, AiSkillOverride, ImportedAiSkillRecord } from "./services/AiSkillService";
+import type { AnswerMetric } from "./services/answer/AnswerMetrics";
+import type { AiWorkspaceRawRetention } from "./services/ai-workspace/types";
 import type { LifeOSNavKey } from "./types";
+import { createDefaultAgentEngineConfig } from "./services/agent/AgentEngineConfig";
 
 export type AiProviderType =
   | "auto"
@@ -515,6 +518,12 @@ export function getExamAssistantPrompt(
 }
 
 export interface PersonalLifeSystemSettings {
+  /** Kept raw on load so malformed/future schemas are never silently overwritten. */
+  agentExecution?: unknown;
+  sdkAutomaticWorkflowsEnabled: boolean;
+  sdkAutomaticWorkflowIdentity: string;
+  sdkAutomaticMemoryEnabled: boolean;
+  sdkAutomaticMemoryIdentity: string;
   rootFolder: string;
   hasCompletedFirstRun: boolean;
   firstRunState: { draft: string; id: string; preset: string; pending?: { id: string; snapshot: string }; receipt?: { id: string; path: string; hash: string; savedAt: string } };
@@ -535,6 +544,12 @@ export interface PersonalLifeSystemSettings {
   aiExtraHeadersJson: string;
   aiApiVersion: string;
   aiReasoningEffort: AiReasoningEffort;
+  aiChatOutputTokens: number;
+  aiChatTimeoutSeconds: number;
+  /** Per-tool deadline (seconds) for one SDK tool call; 45 by default. */
+  aiToolTimeoutSeconds: number;
+  /** Deterministic local answers for questions with an unambiguous local source. */
+  instantAnswerMode: "auto" | "off";
   enableVisionFileAnalysis: boolean;
   visionAiModel: string;
   aiModelSupportsVision?: boolean;
@@ -566,6 +581,7 @@ export interface PersonalLifeSystemSettings {
   llmWikiShortCompileDepth: LlmWikiCompileDepth;
   llmWikiLongMaterialMode: LlmWikiLongMaterialMode;
   llmWikiSensitiveDefault: LlmWikiSensitiveDefault;
+  llmWikiDeepCompileMaxSegments: number;
   llmWikiIncludeDraftsInChat: boolean;
   llmWikiShowSourceReferences: boolean;
   llmWikiDashboardReminder: boolean;
@@ -579,6 +595,15 @@ export interface PersonalLifeSystemSettings {
   defaultChatMode: ChatMode;
   defaultChatContextMode: ChatContextMode;
   defaultWebSearchMode: WebSearchMode;
+  /** Fast path is opt-in; shadow mode records the route without changing execution. */
+  fastPathMode: "auto" | "off";
+  fastPathShadow: boolean;
+  fastPathDisabledIntents: string[];
+  showReasoning: boolean;
+  prefetchEnabled: boolean;
+  speculativeEnabled: boolean;
+  speculativeConsentAt: number;
+  answerMetrics: AnswerMetric[];
   /** Optional higher-coverage backend; built-in search remains the no-key fallback. */
   webSearchProvider: WebSearchProviderType;
   webSearchApiKey: string;
@@ -638,6 +663,9 @@ export interface PersonalLifeSystemSettings {
   browserCaptureSetupVersion: number;
   browserCapturePort: number;
   browserCaptureToken: string;
+  aiWorkspaceRawRetention: AiWorkspaceRawRetention;
+  aiWorkspaceRawMaxSourceMB: number;
+  aiWorkspaceRawGovernanceVersion: number;
   weixinBotEnabled: boolean;
   weixinBotSetupVersion: number;
   weixinSenderPolicy: WeixinSenderPolicy;
@@ -683,6 +711,19 @@ export const DEFAULT_AGENT_MEMORY_MAX_SESSIONS_PER_RUN = 4;
 export const DEFAULT_AGENT_MEMORY_MAX_ITEMS_PER_SESSION = 8;
 export const DEFAULT_AGENT_MEMORY_RETENTION_DAYS = 365;
 export const DEFAULT_AGENT_MEMORY_MIN_CONFIDENCE = 0.62;
+/** Deep organize splits a long source into bounded segments; the budget is clamped. */
+export const DEFAULT_LLM_WIKI_DEEP_COMPILE_MAX_SEGMENTS = 4;
+export const MAX_LLM_WIKI_DEEP_COMPILE_MAX_SEGMENTS = 8;
+
+/** Clamp the configurable deep-mode segment budget to 1..MAX (defaults are never exceeded). */
+export function normalizeLlmWikiDeepCompileMaxSegments(value: unknown): number {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return DEFAULT_LLM_WIKI_DEEP_COMPILE_MAX_SEGMENTS;
+  }
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed)) return DEFAULT_LLM_WIKI_DEEP_COMPILE_MAX_SEGMENTS;
+  return Math.min(MAX_LLM_WIKI_DEEP_COMPILE_MAX_SEGMENTS, Math.max(1, parsed));
+}
 
 export function normalizeAgentMemoryMode(value: unknown): AgentMemoryMode {
   return value === "use-only" || value === "disabled" || value === "temporary" || value === "standard"
@@ -745,6 +786,21 @@ export function normalizeProjectContextTaskExtractionLimit(value: unknown): numb
 export function normalizeBrowserCapturePort(value: unknown): number {
   const port = Math.floor(Number(value));
   return Number.isFinite(port) && port >= 1024 && port <= 65535 ? port : 27183;
+}
+
+export function normalizeAiWorkspaceRawRetention(value: unknown): AiWorkspaceRawRetention {
+  return value === "all" || value === "three" ? value : "latest";
+}
+
+/**
+ * Source-size threshold for read-only raw snapshots. `0` disables the limit.
+ * Missing or invalid values fall back to the 20 MB default; values above
+ * 10240 MB are clamped so the setting stays meaningful on desktop disks.
+ */
+export function normalizeAiWorkspaceRawMaxSourceMB(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return 20;
+  return Math.min(10240, Math.floor(parsed));
 }
 
 export function normalizeWebSearchProvider(value: unknown): WebSearchProviderType {
@@ -1270,6 +1326,11 @@ export function analyzeAiConnectionTestModels(
 }
 
 export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
+  agentExecution: createDefaultAgentEngineConfig(),
+  sdkAutomaticWorkflowsEnabled: false,
+  sdkAutomaticWorkflowIdentity: "",
+  sdkAutomaticMemoryEnabled: false,
+  sdkAutomaticMemoryIdentity: "",
   rootFolder: "PersonalLifeSystem",
   hasCompletedFirstRun: false,
   firstRunState: { draft: "", id: "", preset: "life" },
@@ -1293,6 +1354,10 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   aiExtraHeadersJson: "",
   aiApiVersion: "",
   aiReasoningEffort: "default",
+  aiChatOutputTokens: 4096,
+  aiChatTimeoutSeconds: 90,
+  aiToolTimeoutSeconds: 45,
+  instantAnswerMode: "auto",
   enableVisionFileAnalysis: false,
   visionAiModel: "",
   pdfOcrEngine: "auto",
@@ -1319,6 +1384,7 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   llmWikiShortCompileDepth: "standard",
   llmWikiLongMaterialMode: "ask",
   llmWikiSensitiveDefault: "local-only",
+  llmWikiDeepCompileMaxSegments: DEFAULT_LLM_WIKI_DEEP_COMPILE_MAX_SEGMENTS,
   llmWikiIncludeDraftsInChat: true,
   llmWikiShowSourceReferences: true,
   llmWikiDashboardReminder: true,
@@ -1332,6 +1398,14 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   defaultChatMode: "chat",
   defaultChatContextMode: "smart",
   defaultWebSearchMode: "auto",
+  fastPathMode: "auto",
+  fastPathShadow: true,
+  fastPathDisabledIntents: [],
+  showReasoning: true,
+  prefetchEnabled: true,
+  speculativeEnabled: false,
+  speculativeConsentAt: 0,
+  answerMetrics: [],
   webSearchProvider: "built-in",
   webSearchApiKey: "",
   webSearchEndpoint: "",
@@ -1378,6 +1452,9 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   browserCaptureSetupVersion: 1,
   browserCapturePort: 27183,
   browserCaptureToken: "",
+  aiWorkspaceRawRetention: "latest",
+  aiWorkspaceRawMaxSourceMB: 20,
+  aiWorkspaceRawGovernanceVersion: 1,
   weixinBotEnabled: false,
   weixinBotSetupVersion: 3,
   weixinSenderPolicy: "pairing",

@@ -1,5 +1,5 @@
 import type { ContextEngineMode, ContextEngineResult, ContextSection, ContextSource } from "./types";
-import { prepareCitableMarkdown, USER_SAVED_CONVERSATION_LABEL } from "./ContextSourcePolicyService";
+import { prepareCitableMarkdown, isCitableEvidenceSource } from "./ContextSourcePolicyService";
 
 interface ComposeInput {
   userMessage: string;
@@ -26,13 +26,17 @@ export class ContextComposer {
 
     for (const originalSection of sortedSections) {
       let section = originalSection;
+      if (section.kind !== "context" && section.sourceInfo && !isCitableEvidenceSource(section.sourceInfo)) continue;
       if (section.kind === "context") {
         section = { ...section, content: section.content.replace(/\[S(\d+)\]/gu, "［上下文中的旧引用 S$1］") };
       }
       const path = section.sourceInfo?.path ?? section.source;
       if (path && section.kind !== "context" && !/^https?:\/\//iu.test(path)) {
         const decision = prepareCitableMarkdown(path, section.content);
-        if (!decision.allowed) continue;
+        // Last shared boundary before the prompt: a source that opted out of AI
+        // processing (or is marked sensitive) is never assembled into promptContext,
+        // even when an upstream caller forgot to filter it.
+        if (!decision.allowed || !decision.aiEligible) continue;
         section = { ...section, content: decision.markdown };
       }
       const rawSource = this.sourceFor(section, section.content);
@@ -89,7 +93,6 @@ export class ContextComposer {
       `## [${source.citationId}] ${section.title}`,
       `来源：[${source.citationId}] ${source.originalPath || source.path}`,
       source.originalPath ? `识别文本缓存：${source.path}；机器识别内容请对照原文档核实。` : "",
-      source.evidenceOrigin === "user-saved-conversation" ? `来源性质：${USER_SAVED_CONVERSATION_LABEL}；仅说明该对话被保存，不证明其中主张为真。` : "",
       locator ? `定位：${locator}` : ""
     ].filter((line, index) => line || index < 2).join("\n") + "\n";
   }
@@ -109,7 +112,10 @@ export class ContextComposer {
   private sourceFor(section: ContextSection, content: string): ContextSource | null {
     if (section.kind === "context" || section.sourceInfo?.evidenceOrigin === "context-only") return null;
     const sourcePath = section.sourceInfo?.path ?? section.source;
-    if (sourcePath && !/^https?:\/\//iu.test(sourcePath) && !prepareCitableMarkdown(sourcePath, content).allowed) return null;
+    if (sourcePath && !/^https?:\/\//iu.test(sourcePath)) {
+      const decision = prepareCitableMarkdown(sourcePath, content);
+      if (!decision.allowed || !decision.aiEligible) return null;
+    }
     if (section.sourceInfo) return { ...section.sourceInfo };
     if (!section.source) return null;
     const path = section.source;

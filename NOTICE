@@ -22,3 +22,7 @@ access-control mechanisms.
 
 For commercial licensing, resale permission, enterprise deployment, or other
 written permission, contact the copyright holder.
+
+Candidate SDK integration: Anthropic's Agent SDK and optional Windows runtime
+have separate all-rights-reserved/legal-agreement notices. They are not covered
+by Life OS's PolyForm license. See THIRD_PARTY_NOTICES.md and docs/licenses/sdk/.

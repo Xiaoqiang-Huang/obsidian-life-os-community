@@ -84,7 +84,7 @@ export class LlmWikiIntakeService {
     }
 
     const duplicate = await this.duplicateService.findDuplicate(input.title, input.content, input.originalUrl || "");
-    if (duplicate.kind === "exact" || duplicate.kind === "similar") {
+    if (duplicate.kind === "exact" || duplicate.kind === "similar" || duplicate.kind === "updated") {
       if (input.duplicateDecision === "skip") {
         return {
           duplicate,
@@ -92,7 +92,7 @@ export class LlmWikiIntakeService {
           requiresDuplicateDecision: false,
           requiresLongMaterialAction: false,
           undoTargets: [],
-          message: "已跳过重复资料。"
+          message: duplicate.kind === "updated" ? "已跳过这次来源更新。" : "已跳过重复资料。"
         };
       }
 
@@ -103,7 +103,9 @@ export class LlmWikiIntakeService {
           requiresDuplicateDecision: true,
           requiresLongMaterialAction: false,
           undoTargets: [],
-          message: "这份资料可能已经存在，请选择跳过、仍然保存或作为新版保存。"
+          message: duplicate.kind === "updated"
+            ? "同一来源已有条目但内容已变化，请选择跳过、仍然另存或作为新版保存。"
+            : "这份资料可能已经存在，请选择跳过、仍然保存或作为新版保存。"
         };
       }
     }

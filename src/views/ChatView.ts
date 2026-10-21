@@ -1,9 +1,14 @@
+import { useSdkToolContext } from "../services/sdk/SdkContextPolicy";
+import { sdkDesktopOnlyMessage } from "../services/sdk/SdkInternalBootstrap";
+import { useLightweightGreeting, emptyGreetingContext } from "../services/agent/GreetingTurnPolicy";
+import { chatFailureContent, chatStoppedContent } from "../ui/chat-turn-presentation";
 import { parseSessionCommand } from "../services/AgentSessionService";
+import { readAgentEngineConfig } from "../services/agent/AgentEngineConfig";
 import { isTaskResumeRequest } from "../services/agent/AgentResume";
 import { resolveVisionSettings } from "../settings";
 import { installHostPopoverScope } from "../utils/host-popover-scope";
 import { LifeOSModal as Modal } from "../components/LifeOSModal";
-﻿import { ItemView, Notice, TFile, WorkspaceLeaf, requestUrl } from "obsidian";
+﻿import { ItemView, Notice, Platform, TFile, WorkspaceLeaf, requestUrl } from "obsidian";
 import { appendAiGeneratedFooter, buildSystemPrompt, type AiMessage, type AiMessageContent, type AiUsage } from "../ai";
 import { App} from "obsidian";
 import { setIcon } from "obsidian";
@@ -16,6 +21,12 @@ import { CHAT_VIEW_TYPE } from "../constants";
 import type PersonalLifeSystemPlugin from "../main";
 import { ChatContextService, type ChatContextBundle, type ChatContextStatusCard } from "../services/ChatContextService";
 import type { ContextSource } from "../services/context-engine/types";
+import { routeAnswer, FAST_ANSWER_PROMPT, FAST_CONTEXT_PROMPT, FAST_MAX_OUTPUT_TOKENS, FAST_MAX_DURATION_MS, FAST_MAX_TOOL_CALLS, FAST_CONTEXT_MAX_TOOL_CALLS } from "../services/answer/FastPathRouter";
+import { resolveFastContext, verifyFastContextSourceList } from "../services/answer/FastContextPrefetch";
+import { REASONING_MAX_CHARS } from "../services/answer/ReasoningStream";
+import { AnswerTrace } from "../services/answer/AnswerTrace";
+import { recordAnswerMetric } from "../services/answer/AnswerMetrics";
+import { ProjectPrefetchService, opaqueHash, type ProjectPrefetchScope } from "../services/context-engine/ProjectPrefetchService";
 import { markUserSavedConversation, USER_SAVED_CONVERSATION_SOURCE } from "../services/context-engine/ContextSourcePolicyService";
 import { ChatService, type ChatHistoryChannelFilter, type ChatHistoryItem } from "../services/ChatService";
 import { parseKnowledgeWritebackCandidate, parseMemoryWritebackCandidate, type KnowledgeWritebackCandidate, type MemoryWritebackCandidate } from "../services/ChatWritebackParser";
@@ -40,7 +51,7 @@ import {
   shouldRunLegacyChatWriteback,
   type LifeOSAgentBuildMessagesInput
 } from "../services/LifeOSAgentService";
-import type { LifeOSAgentEvent, LifeOSAgentToolResult } from "../services/agent/LifeOSAgentTypes";
+import type {  LifeOSAgentToolResult } from "../services/agent/LifeOSAgentTypes";
 import { CHAT_IMPORT_ACCEPT, buildImportedDocumentsContextMarkdown, buildImportedDocumentsMarkdown, buildImportedDocumentsSummary, formatAttachmentSize, formatImportedDocumentReference, readImportedFile, saveImportedFileToVault, type ImportedDocument } from "../services/DocumentImportService";
 import { PdfOcrService } from "../services/PdfOcrService";
 import { DocumentRecognitionCacheService } from "../services/DocumentRecognitionCacheService";
@@ -65,6 +76,7 @@ import { renderMarkdownDisplay } from "../utils/markdown-render";
 import { joinPath, writeFile as writeVaultFile } from "../utils/vault";
 import { randomId } from "../utils/ids";
 import { composerFileLabel, composerSkillLabel, findComposerFiles, findComposerSkills, promptWithoutFileLabel, promptWithoutSelectedSkill, readComposerTrigger, replaceComposerTrigger, type ComposerTrigger } from "../ui/chat-composer-mentions";
+import { ChatProcessPanel } from "../ui/chat-process-panel";
 
 type UiChatMode = "chat" | "exam";
 type UiChatContextMode = "smart" | "semantic" | "global";
@@ -76,8 +88,6 @@ type RequestedWriteTarget = "diary" | "knowledge" | "memory" | "project-document
 type WritebackTarget = "diary" | "knowledge" | "memory" | "project-document";
 type ProjectWhiteboardChatIntent = "generate" | "adjust";
 type ChatComposerControlId = "mode" | "project" | "model" | "skill" | "web" | "reasoning" | "context" | "memory" | "aiReply" | "writeback" | "board" | "length" | "style";
-type ChatActivityStepState = "pending" | "active" | "done" | "skipped" | "error";
-type ChatActivityStepId = string;
 
 const CHAT_SLASH_SUGGESTIONS = [
   { command: "/compact", description: "压缩早期对话，保留摘要" },
@@ -89,24 +99,6 @@ const CHAT_SLASH_SUGGESTIONS = [
   { command: "/whiteboard-adjust", description: "基于现有白板生成调整版" },
   { command: "/clear", description: "清空当前显示，不删除历史" }
 ] as const;
-
-interface ChatActivityStep {
-  id: ChatActivityStepId;
-  label: string;
-  detail: string;
-  state: ChatActivityStepState;
-  items?: string[];
-  startedAt?: number;
-  elapsedMs?: number;
-}
-
-interface ChatActivitySnapshot {
-  id: string;
-  startedAt: number;
-  finishedAt?: number;
-  steps: ChatActivityStep[];
-  element?: HTMLDetailsElement;
-}
 
 interface AutoWritebackResult {
   written: boolean;
@@ -152,7 +144,7 @@ interface DiaryWritebackCandidate {
 const MODE_LABELS: Record<Exclude<UiChatMode, "exam">, string> = { chat: "日常对话" };
 const CONTEXT_MODE_LABELS: Record<UiChatContextMode, string> = {
   smart: "智能上下文",
-  semantic: "语义增强",
+  semantic: "本地词面混合检索",
   global: "全局分析"
 };
 const STYLE_LABELS: Record<UiChatStyle, string> = {
@@ -207,6 +199,7 @@ const AI_GENERATED_FOOTER_PATTERN = /(?:^|\n)\s*(?:AI生成|AI鐢熸垚)\s*$/u;
 export class LifeOSChatView extends ItemView {
   private messages: ChatMessage[] = [];
   private renderedMessageEls = new WeakMap<ChatMessage, { bubble: HTMLElement; signature: string }>();
+  private chatProcessPanels = new WeakMap<ChatMessage, ChatProcessPanel>();
   private renderedMessages = new Set<ChatMessage>();
   private messagePageStart: number | null = null;
   private messagePager: HTMLElement | null = null;
@@ -261,13 +254,16 @@ export class LifeOSChatView extends ItemView {
   private memoryMode: AgentMemoryMode;
   private selectedSkillIds: string[];
   private selectedProjectScopeId = "";
+  private readonly answerReasoning = new WeakMap<ChatMessage, { text: string; incomplete: boolean; open: boolean; startedAt: number; endedAt?: number }>();
+  private projectPrefetch?: ProjectPrefetchService;
+  private prefetchTimer: number | null = null;
   private isSkillPickerExpanded = false;
   private abortController: AbortController | null = null;
   private isStreaming = false;
   private dispatchingMessage = false;
   private managingSession = false;
   private stopNoticeShown = false;
-  private streamTimedOut = false;
+
   private lastContextBundle: ChatContextBundle | null = null;
   private compressedContextSummary = "";
   private compressedContextMessageCount = 0;
@@ -285,7 +281,7 @@ export class LifeOSChatView extends ItemView {
   private lastImportedDocuments: ImportedDocument[] = [];
   private importedAiSkills: AiSkill[] = [];
   private skillSearchQuery = "";
-  private readonly messageActivity = new WeakMap<ChatMessage, ChatActivitySnapshot>();
+
   private readonly projectScopeControlId = randomId("lifeos-chat-project-scope");
   private agentSessionId = randomId("lifeos-chat-session");
   private isViewOpen = false;
@@ -383,6 +379,8 @@ export class LifeOSChatView extends ItemView {
 
   async onClose(): Promise<void> {
     this.historyRenderRevision++;
+    if (this.prefetchTimer !== null) { window.clearTimeout(this.prefetchTimer); this.prefetchTimer = null; }
+    this.projectPrefetch?.clear();
     this.logEl?.removeEventListener("scroll", this.onChatScroll);
     this.selectionListenerDocument?.removeEventListener("selectionchange", this.onChatSelectionChange);
     this.selectionListenerDocument = null;
@@ -596,6 +594,7 @@ export class LifeOSChatView extends ItemView {
       this.resizeComposer();
       this.renderComposerSuggestions();
       this.persistActiveChatState();
+      this.scheduleAnswerPrefetch();
     });
     this.inputEl.addEventListener("focus", () => this.keepComposerVisible(true));
     this.visualViewportHandler = () => {
@@ -2466,11 +2465,21 @@ export class LifeOSChatView extends ItemView {
           cls: `lifeos-context-route is-${trace.route}`,
           text: this.retrievalRouteLabel(trace.route)
         });
+        const conceptCoverage = Number.isFinite(trace.conceptCoverage) ? trace.conceptCoverage : trace.coverage;
+        const documentSpan = Number.isFinite(trace.documentsRead) && Number.isFinite(trace.documentsTotal) && trace.documentsTotal > 0
+          ? ` · 已读 ${trace.documentsRead}/${trace.documentsTotal} 篇`
+          : "";
         traceCard.createDiv({
           cls: "lifeos-context-trace-summary",
-          text: `命中 ${bundle.sources.length} 个证据片段 · ${trace.attempts} 轮 · 覆盖 ${Math.round(trace.coverage * 100)}% · ${this.formatDuration(trace.durationMs)}`
+          text: `命中 ${bundle.sources.length} 个证据片段 · ${trace.attempts} 轮 · 概念覆盖 ${Math.round(conceptCoverage * 100)}%${documentSpan} · ${this.formatDuration(trace.durationMs)}`
         });
-        traceCard.createEl("small", { text: `本地混合检索（关键词 + 语义 + 重排），索引 ${trace.indexDocuments} 篇 / ${trace.indexChunks} 个片段；联网结果按网页单独列出` });
+        traceCard.createEl("small", { text: `本地词面混合检索（关键词 + 同义词别名扩展 + 词面重排；不含语义模型），索引 ${trace.indexDocuments} 篇 / ${trace.indexChunks} 个片段；同义改写或跨语言提问可能召回不到；联网结果按网页单独列出` });
+        if (trace.documentsTruncated) {
+          const reasons = Array.isArray(trace.samplingReasons) && trace.samplingReasons.length > 0
+            ? `：${trace.samplingReasons.join("；")}`
+            : "";
+          traceCard.createEl("small", { text: `本轮为采样式检索，未读取全部资料${reasons}。如需完整覆盖，请使用「项目全文观点分析」入口。` });
+        }
       }
 
       const sourceList = this.contextEl.createDiv({ cls: "lifeos-context-source-list" });
@@ -2807,6 +2816,28 @@ export class LifeOSChatView extends ItemView {
     }
   }
 
+  private renderAnswerReasoning(parent: HTMLElement, message: ChatMessage, contentEl?: HTMLElement): void {
+    const entry = this.answerReasoning.get(message);
+    if (!entry || this.plugin.settings.showReasoning === false || !entry.text) return;
+    let block = parent.querySelector<HTMLDetailsElement>(".lifeos-answer-reasoning");
+    if (!block) {
+      block = parent.createEl("details", { cls: "lifeos-answer-reasoning" });
+      block.open = entry.open;
+      block.createEl("summary");
+      block.createEl("pre");
+      block.addEventListener("toggle", () => { entry.open = block!.open; });
+      if (contentEl) parent.insertBefore(block, contentEl);
+    }
+    const summary = block.querySelector("summary");
+    const pre = block.querySelector("pre");
+    if (summary) {
+      const elapsed = Math.max(0, ((entry.endedAt ?? Date.now()) - entry.startedAt) / 1000);
+      const seconds = elapsed >= 0.05 ? ` · ${elapsed.toFixed(1)}s` : "";
+      summary.textContent = `思考过程（模型生成，可能不完整）${entry.incomplete ? " · 未完成" : ""}${seconds}`;
+    }
+    if (pre) pre.textContent = entry.text;
+  }
+
   private renderMessage(message: ChatMessage, parent: HTMLElement = this.logEl): HTMLElement {
     const roleClass = message.role === "user" ? "lifeos-chat-bubble-user" : "lifeos-chat-bubble-ai";
     const bubble = parent.createDiv({ cls: `lifeos-chat-bubble ${roleClass}` });
@@ -2853,290 +2884,15 @@ export class LifeOSChatView extends ItemView {
       });
       save.onclick = () => void this.saveSingleAiMessage(message.content);
     }
-    if (message.role === "ai") this.renderMessageActivity(bubble, message);
+
     const content = bubble.createDiv({ cls: "lifeos-chat-bubble-content" });
+    const processPanel = this.chatProcessPanels?.get(message);
+    if (processPanel) bubble.insertBefore(processPanel.el, content);
+    if (message.role === "ai") this.renderAnswerReasoning(bubble, message, content);
     content.appendChild(content.ownerDocument.createTextNode(message.content));
     void renderMarkdownDisplay(this.app, this, content, message.content);
     if (message.role === "ai") this.renderWritebackActions(bubble, message.content);
     return content;
-  }
-
-  private chatActivityIntentLabels(profile: ChatRequestProfile): string[] {
-    const labels: string[] = [];
-    if (profile.project) labels.push("项目问答");
-    if (profile.knowledge) labels.push("知识检索");
-    if (profile.documentEdit) labels.push("文档编辑");
-    if (profile.numeric) labels.push("数字核对");
-    if (profile.web) labels.push("联网检索");
-    if (profile.writeback) labels.push("写入请求");
-    return labels.length > 0 ? labels : ["普通问答"];
-  }
-
-  private chatActivityModelLabel(documents: ImportedDocument[]): string {
-    const provider = this.plugin.settings.aiProvider?.trim() || "AI";
-    const model = this.visionRequestModel(documents) || this.plugin.settings.aiModel?.trim() || "未指定模型";
-    return `${provider} / ${model}`;
-  }
-
-  private compactActivityText(value: string, maxChars = 88): string {
-    const text = String(value || "").replace(/\s+/g, " ").trim();
-    if (text.length <= maxChars) return text;
-    return `${text.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`;
-  }
-
-  private activitySourceItems(sources: ContextSource[], limit = 4): string[] {
-    const items = sources.slice(0, limit).map((source) => {
-      const citation = source.citationId
-        ? source.citationId.startsWith("[") ? source.citationId : `[${source.citationId}]`
-        : "来源";
-      const location = [source.title || source.path, source.heading].filter(Boolean).join(" › ");
-      return `${citation} ${this.compactActivityText(location, 76)}`;
-    });
-    if (sources.length > limit) items.push(`另有 ${sources.length - limit} 个来源，可在“上下文来源”中查看`);
-    return items;
-  }
-
-  private beginMessageActivity(
-    message: ChatMessage,
-    profile: ChatRequestProfile,
-    willSearchWeb: boolean,
-    documents: ImportedDocument[]
-  ): void {
-    const now = Date.now();
-    const scopeDetail = this.selectedProjectScopeId ? `项目 ${this.selectedProjectScopeId}` : "全部项目";
-    const skillNames = getAiSkills(
-      this.selectedSkillIds,
-      this.importedAiSkills,
-      this.plugin.settings.aiSkillOverrides
-    ).map((skill) => skill.name);
-    const intentLabels = this.chatActivityIntentLabels(profile);
-    const steps: ChatActivityStep[] = [
-      {
-        id: "analyze",
-        label: "理解请求",
-        detail: `正在识别目标与所需能力：${intentLabels.join("、")}`,
-        state: "active",
-        startedAt: now,
-        items: [
-          `工作范围：${scopeDetail}`,
-          `方法：${skillNames.join(" + ") || "Life OS 总管"}`,
-          `模型：${this.chatActivityModelLabel(documents)} · 推理 ${this.reasoningEffort}`,
-          willSearchWeb ? `联网：${WEB_SEARCH_MODE_LABELS[this.webSearchMode]}` : "联网：本轮暂未触发"
-        ]
-      }
-    ];
-    this.messageActivity.set(message, {
-      id: randomId("lifeos-chat-activity"),
-      startedAt: now,
-      steps
-    });
-  }
-
-  private updateMessageActivity(
-    message: ChatMessage,
-    stepId: ChatActivityStepId,
-    state: ChatActivityStepState,
-    detail?: string,
-    items?: string[],
-    label?: string
-  ): void {
-    const snapshot = this.messageActivity.get(message);
-    if (!snapshot) return;
-    let step = snapshot.steps.find((candidate) => candidate.id === stepId);
-    if (!step) {
-      // Claude Code-style progressive disclosure: an action does not exist in the
-      // UI until it actually starts or produces an observable result.
-      if (state === "pending" || state === "skipped") return;
-      step = {
-        id: stepId,
-        label: label || this.activityStepLabel(stepId),
-        detail: detail || "正在执行",
-        state,
-        startedAt: state === "active" ? Date.now() : undefined
-      };
-      snapshot.steps.push(step);
-    }
-    if (label) step.label = label;
-    const now = Date.now();
-    if (state === "active" && !step.startedAt) step.startedAt = now;
-    if ((state === "done" || state === "skipped" || state === "error") && step.startedAt) {
-      step.elapsedMs = Math.max(0, now - step.startedAt);
-    }
-    step.state = state;
-    if (detail) step.detail = detail;
-    if (items !== undefined) {
-      step.items = items.map((item) => this.compactActivityText(item, 180)).filter(Boolean);
-    }
-    if (snapshot.element?.isConnected) this.paintMessageActivity(snapshot.element, snapshot);
-  }
-
-  private activityStepLabel(stepId: ChatActivityStepId): string {
-    const labels: Record<string, string> = {
-      analyze: "理解请求",
-      inspect: "检查输入与附件",
-      retrieve: "检索 Life OS",
-      web: "联网搜索",
-      compose: "组织模型上下文",
-      generate: "生成回答",
-      verify: "核验回答",
-      persist: "保存会话记录",
-      writeback: "写入 Life OS",
-      "agent:turn": "启动 Agent 回合",
-      "agent:skill": "选择 Skill",
-      "agent:context": "准备 Agent 上下文",
-      "agent:attachment": "绑定附件",
-      "agent:plan": "规划执行步骤",
-      "agent:compact": "压缩长上下文"
-    };
-    return labels[stepId] || (stepId.startsWith("tool:") ? "调用工具" : "执行动作");
-  }
-
-  private applyAgentEventToActivity(message: ChatMessage, event: LifeOSAgentEvent): void {
-    const toolStep = this.agentToolActivityStep(event);
-    const items = [
-      event.toolId ? `工具：${event.toolId}` : "",
-      event.detail ? this.compactActivityText(event.detail, 180) : "",
-      event.durationMs !== undefined ? `耗时：${this.formatActivityElapsed(event.durationMs)}` : ""
-    ].filter(Boolean);
-    if (event.type === "turn-started") {
-      this.updateMessageActivity(message, "agent:turn", "done", event.summary, items);
-    } else if (event.type === "context-prepared") {
-      this.updateMessageActivity(message, "agent:context", "done", event.summary, items);
-    } else if (event.type === "skill-routed") {
-      this.updateMessageActivity(message, "agent:skill", "done", event.summary, items);
-    } else if (event.type === "plan-created") {
-      this.updateMessageActivity(message, "agent:plan", "done", event.summary, items);
-    } else if (event.type === "attachment-staged") {
-      this.updateMessageActivity(message, "agent:attachment", "active", event.summary, items);
-    } else if (event.type === "attachment-bound" || event.type === "attachment-referenceable") {
-      this.updateMessageActivity(message, "agent:attachment", "done", event.summary, items);
-    } else if (event.type === "tool-started" || event.type === "subagent-started") {
-      this.updateMessageActivity(message, toolStep, "active", event.summary, items, this.agentToolActivityLabel(event.toolId || ""));
-    } else if (event.type === "tool-completed" || event.type === "subagent-completed") {
-      this.updateMessageActivity(message, toolStep, "done", event.summary, items, this.agentToolActivityLabel(event.toolId || ""));
-    } else if (event.type === "tool-failed") {
-      this.updateMessageActivity(message, toolStep, "error", event.summary, items, this.agentToolActivityLabel(event.toolId || ""));
-    } else if (event.type === "tool-confirmation-required") {
-      this.updateMessageActivity(message, "writeback", "active", event.summary, items);
-    } else if (event.type === "context-compacted") {
-      this.updateMessageActivity(message, "agent:compact", "done", event.summary, items);
-    } else if (event.type === "model-started" || event.type === "model-streaming") {
-      this.updateMessageActivity(message, "generate", "active", event.summary, items);
-    } else if (event.type === "answer-verified") {
-      this.updateMessageActivity(message, "verify", "done", event.summary, items);
-    } else if (event.type === "turn-completed") {
-      this.updateMessageActivity(message, "generate", "done", event.summary, items);
-    } else if (event.type === "turn-stopped") {
-      this.updateMessageActivity(message, "generate", "error", event.summary, items);
-    }
-  }
-
-  private agentToolActivityStep(event: LifeOSAgentEvent): ChatActivityStepId {
-    const identity = event.callId || event.toolId || event.id;
-    return `tool:${identity}`;
-  }
-
-  private agentToolActivityLabel(toolId: string): string {
-    const labels: Record<string, string> = {
-      "web-search": "联网搜索网页",
-      "subagent-web": "委派联网研究",
-      vision: "识别图片",
-      "vision-analyze": "分析图片",
-      "ocr-read": "读取图片文字",
-      "lifeos-search": "检索 Life OS 知识",
-      "project-search": "检索项目上下文",
-      "diary-read": "读取日记",
-      "task-list": "读取任务",
-      "reminder-list": "读取提醒",
-      "subagent-rag": "委派知识检索",
-      "subagent-project": "委派项目分析"
-    };
-    if (labels[toolId]) return labels[toolId];
-    if (/(?:add|save|update|complete|delete|generate|cancel)$/u.test(toolId)) return "执行 Life OS 写入";
-    return toolId ? `调用 ${toolId}` : "调用 Agent 工具";
-  }
-
-  private renderMessageActivity(parent: HTMLElement, message: ChatMessage): void {
-    const snapshot = this.messageActivity.get(message);
-    if (!snapshot) return;
-    const details = parent.createEl("details", {
-      cls: "lifeos-chat-activity",
-      attr: {
-        "aria-label": "本轮可核对执行过程",
-        "aria-live": "polite",
-        title: "展示检索、生成和写入状态；不展示模型隐藏思维链"
-      }
-    });
-    details.dataset.activityId = snapshot.id;
-    snapshot.element = details;
-    this.paintMessageActivity(details, snapshot);
-  }
-
-  private paintMessageActivity(details: HTMLDetailsElement, snapshot: ChatActivitySnapshot): void {
-    const wasOpen = details.open;
-    const activeStep = snapshot.steps.find((step) => step.state === "active");
-    const hasError = snapshot.steps.some((step) => step.state === "error");
-    const complete = typeof snapshot.finishedAt === "number";
-    details.empty();
-    details.removeClass("is-error", "is-complete", "is-running");
-    details.addClass(hasError ? "is-error" : complete ? "is-complete" : "is-running");
-
-    const summary = details.createEl("summary", { cls: "lifeos-chat-activity-summary" });
-    summary.createSpan({ cls: "lifeos-chat-activity-status-dot", text: hasError ? "!" : complete ? "✓" : "•" });
-    summary.createSpan({ cls: "lifeos-chat-activity-title", text: "执行轨迹" });
-    summary.createSpan({
-      cls: "lifeos-chat-activity-current",
-      text: hasError
-        ? "部分动作失败"
-        : complete
-          ? `已完成 ${snapshot.steps.length} 个动作`
-          : activeStep ? `${activeStep.label}：${activeStep.detail}` : "准备中"
-    });
-    if (complete) {
-      summary.createSpan({ cls: "lifeos-chat-activity-time", text: this.formatActivityElapsed((snapshot.finishedAt ?? Date.now()) - snapshot.startedAt) });
-    }
-
-    const list = details.createDiv({ cls: "lifeos-chat-activity-list" });
-    for (const step of snapshot.steps) {
-      const row = list.createDiv({ cls: `lifeos-chat-activity-step is-${step.state}` });
-      row.createSpan({ cls: "lifeos-chat-activity-step-icon", text: step.state === "done" ? "✓" : step.state === "skipped" ? "–" : step.state === "error" ? "!" : step.state === "active" ? "•" : "○" });
-      const copy = row.createDiv({ cls: "lifeos-chat-activity-step-copy" });
-      copy.createEl("strong", { text: step.label });
-      copy.createSpan({ text: step.detail });
-      if (step.items && step.items.length > 0) {
-        const items = copy.createDiv({ cls: "lifeos-chat-activity-step-items" });
-        for (const item of step.items) {
-          items.createSpan({ cls: "lifeos-chat-activity-step-item", text: item });
-        }
-      }
-      if (typeof step.elapsedMs === "number" && step.elapsedMs > 0) {
-        row.createSpan({ cls: "lifeos-chat-activity-step-time", text: this.formatActivityElapsed(step.elapsedMs) });
-      }
-    }
-
-    details.open = complete ? wasOpen && details.classList.contains("is-user-open") : true;
-    details.ontoggle = () => {
-      if (complete && details.open) details.addClass("is-user-open");
-      if (!details.open) details.removeClass("is-user-open");
-    };
-  }
-
-  private finishMessageActivity(message: ChatMessage): void {
-    const snapshot = this.messageActivity.get(message);
-    if (!snapshot) return;
-    const now = Date.now();
-    for (const step of snapshot.steps) {
-      if (step.state !== "active") continue;
-      step.state = "done";
-      step.elapsedMs = step.startedAt ? Math.max(0, now - step.startedAt) : undefined;
-    }
-    snapshot.finishedAt = now;
-    if (snapshot.element?.isConnected) this.paintMessageActivity(snapshot.element, snapshot);
-  }
-
-  private formatActivityElapsed(elapsedMs: number): string {
-    if (elapsedMs < 1000) return `${Math.max(1, Math.round(elapsedMs))} ms`;
-    return `${(elapsedMs / 1000).toFixed(1)} s`;
   }
 
   private editUserMessage(message: ChatMessage): void {
@@ -3255,6 +3011,9 @@ export class LifeOSChatView extends ItemView {
     if (this.plugin.chatContinuity.activeRun) { new Notice("上一轮回答仍在生成，请等待完成或先停止生成。"); return; }
     if (this.composerFileImportsPending > 0) { new Notice("引用文件仍在读取，请稍等片刻再发送。"); return; }
     if (this.isStreaming || this.dispatchingMessage || this.managingSession) return;
+    // S5: no AI request exists off the desktop build. Explain before touching the
+    // draft, so a mobile send neither fails silently nor clears the input.
+    if (this.aiToggleEl.value === "on" && !Platform.isDesktopApp) { new Notice(sdkDesktopOnlyMessage(), 8000); return; }
     this.dispatchingMessage = true;
     try { await this.sendInternal(service); }
     catch (error) { new Notice(error instanceof Error ? error.message : "发送失败，原有会话保留。"); }
@@ -3267,6 +3026,14 @@ export class LifeOSChatView extends ItemView {
     const content = promptWithoutSelectedSkill(this.inputEl.value, selectedSkill?.name);
     if (await this.manageAgentSession(content)) return;
     const documents = [...this.importedDocuments];
+    if (documents.length === 0 &&
+      /(?:项目|文档|资料)/u.test(content) && /(?:所有|全部|完整|全文|所有观点|全面)/u.test(content) &&
+      /(?:分析|总结|提炼|观点|综合|列出|列举|盘点|枚举|清单)/u.test(content)) {
+      // Retrieval snippets cannot honestly satisfy exhaustive coverage. Preserve
+      // the draft and ask for scope/cost approval in the durable full-analysis UI.
+      await this.plugin.openProjectAnalysis(this.selectedProjectScopeId || undefined, content);
+      return;
+    }
     if (!content && documents.length === 0) {
       new Notice("先写下你想问 Life OS 的内容。");
       return;
@@ -3292,7 +3059,9 @@ export class LifeOSChatView extends ItemView {
     this.renderMessages();
     this.scrollLogToBottom();
     this.persistActiveChatState();
-    const autoCompacted = this.maybeAutoCompactConversationContext(content, documents);
+    const autoCompacted = useLightweightGreeting({ content, mode: this.mode, contextMode: this.contextMode,
+      webSearchMode: this.webSearchMode, attachmentCount: documents.length, explicitReference: /[@/]/u.test(userDisplayContent) })
+      ? false : this.maybeAutoCompactConversationContext(content, documents);
     if (autoCompacted) {
       new Notice("上下文接近窗口上限，已自动生成本地摘要。", 4000);
     }
@@ -3305,7 +3074,7 @@ export class LifeOSChatView extends ItemView {
       return;
     }
 
-    if (!this.plugin.ai.isConfigured()) {
+    if (!this.plugin.agent.isChannelConfigured()) {
       const message = appendAiGeneratedFooter("AI 尚未配置，请先到设置中填写 Provider、Base URL 和 Model。");
       this.messages.push({ role: "ai", content: message });
       this.renderMessages();
@@ -3316,10 +3085,28 @@ export class LifeOSChatView extends ItemView {
       return;
     }
 
+    const lightweightGreeting = useLightweightGreeting({ content, mode: this.mode,
+      contextMode: this.contextMode, webSearchMode: this.webSearchMode, attachmentCount: documents.length,
+      explicitReference: /[@/]/u.test(this.inputEl.value || userDisplayContent) });
     const requestProfile = this.profileChatRequest(content, documents);
-    const willSearchWeb = shouldSearchWeb(content, this.webSearchMode);
+    let fastDecision = routeAnswer({
+      question: content,
+      contextualFast: true,
+      mode: this.plugin.settings.fastPathMode,
+      shadow: this.plugin.settings.fastPathShadow,
+      attachments: documents.length,
+      projectId: this.selectedProjectScopeId || undefined,
+      hasHistory: this.messages.length > 2,
+      customSkill: this.selectedSkillIds.length > 0,
+      webAlways: this.webSearchMode === "always",
+      disabledIntents: this.plugin.settings.fastPathDisabledIntents
+    });
+    let fast = fastDecision.path !== "deep";
+    const fastContext = fastDecision.path === "fast_context";
+    const sdkToolContext = !fast && !lightweightGreeting && useSdkToolContext({ mode: this.mode, contextMode: this.contextMode, webSearchMode: this.webSearchMode, documentEdit: requestProfile.documentEdit });
+    const willSearchWeb = !fast && !lightweightGreeting && shouldSearchWeb(content, this.webSearchMode);
     const assistant: ChatMessage = { role: "ai", content: "" };
-    this.beginMessageActivity(assistant, requestProfile, willSearchWeb, documents);
+
     this.messages.push(assistant);
     this.renderMessages();
     this.scrollLogToBottom();
@@ -3329,12 +3116,12 @@ export class LifeOSChatView extends ItemView {
     this.isStreaming = true;
     this.plugin.chatContinuity.beginRun(this.agentSessionId, this.abortController, this);
     this.stopNoticeShown = false;
-    this.streamTimedOut = false;
+
     this.sendButtonEl.disabled = true;
     this.stopButtonEl.show();
     this.loadingEl.show();
     let streamed = "";
-    const runState: { status: ChatRunStatus } = { status: "completed" };
+    const runState: { status: ChatRunStatus; processPanel?: ChatProcessPanel } = { status: "completed" };
     let numericEvidenceForRun: NumericEvidence[] = [];
     let numericIntentForRun = false;
     let documentEditTarget: AiDocumentEditTarget | null = null;
@@ -3343,21 +3130,32 @@ export class LifeOSChatView extends ItemView {
     let resultUsage: AiUsage | undefined;
     let agentToolResults: LifeOSAgentToolResult[] = [];
     const runStartedAt = Date.now();
+    const assistantBubble = assistantContent?.closest(".lifeos-chat-bubble") as HTMLElement | null;
+    const processPanel = assistantBubble ? new ChatProcessPanel(assistantBubble, { startedAt: runStartedAt }) : null;
+    if (processPanel) {
+      if (assistantContent) assistantBubble?.insertBefore(processPanel.el, assistantContent);
+      runState.processPanel = processPanel;
+      this.chatProcessPanels.set(assistant, processPanel);
+      this.loadingEl.hide();
+    }
+    let failureReason = "";
     let contextStartedAt = runStartedAt;
     let contextMs = 0;
     let requestStartedAt = 0;
     let firstTokenMs: number | null = null;
-    let timeoutHandle: number | null = null;
+
     let streamRenderFrame: number | null = null;
     let lastStreamPersistAt = 0;
-    let lastActivityStreamUpdateAt = 0;
+    // Paint-only buffer. Save/copy/history/writeback use assistant.content, never this.
+    let provisionalText = "";
+
     const flushStreamPreview = (persist = false): void => {
       if (streamRenderFrame !== null) {
         window.cancelAnimationFrame(streamRenderFrame);
         streamRenderFrame = null;
       }
-      assistant.content = streamed || assistant.content;
-      if (assistantContent && !this.isContentSelected(assistantContent)) assistantContent.setText(streamed || assistant.content || "正在生成...");
+      if (runState.status === "completed") assistant.content = streamed || assistant.content;
+      if (assistantContent && !this.isContentSelected(assistantContent)) assistantContent.setText(assistant.content || streamed || "正在生成...");
       this.scrollLogToBottom();
       if (persist) {
         this.persistActiveChatState();
@@ -3368,8 +3166,10 @@ export class LifeOSChatView extends ItemView {
       if (streamRenderFrame !== null) return;
       streamRenderFrame = window.requestAnimationFrame(() => {
         streamRenderFrame = null;
+        if (runState.status !== "completed") return;
         assistant.content = streamed;
-        if (assistantContent && !this.isContentSelected(assistantContent)) assistantContent.setText(streamed);
+        const visibleText = provisionalText.startsWith(streamed) ? provisionalText : streamed;
+        if (assistantContent && !this.isContentSelected(assistantContent)) assistantContent.setText(visibleText);
         this.scrollLogToBottom();
         if (Date.now() - lastStreamPersistAt >= 1000) {
           this.persistActiveChatState();
@@ -3378,27 +3178,50 @@ export class LifeOSChatView extends ItemView {
       });
     };
 
+    const answerTrace = new AnswerTrace();
+    let prefetchHit = false;
+    let prefetchMs: number | null = null;
+    let prefetchedApp: App | undefined;
+    if (!fast && this.plugin.settings.prefetchEnabled && !Platform.isMobileApp && this.selectedProjectScopeId) {
+      const scope = this.projectPrefetchScope(content, this.messages.slice(0, -2));
+      const cached = this.projectPrefetchService().get(scope);
+      if (cached) {
+        prefetchHit = true;
+        prefetchMs = cached.durationMs;
+        prefetchedApp = this.projectPrefetchService().cachedApp(cached);
+      }
+    }
+
+    const reasoningEntry = { text: "", incomplete: true, open: true, startedAt: Date.now(), endedAt: undefined as number | undefined };
+    this.answerReasoning.set(assistant, reasoningEntry);
+    const showReasoning = this.plugin.settings.showReasoning !== false;
+    let reasoningRenderFrame: number | null = null;
+    const reasoningHost = () => {
+      const bubble = (this.renderedMessageEls.get(assistant)?.bubble as HTMLElement | undefined) || assistantBubble;
+      const content = bubble?.querySelector<HTMLElement>(".lifeos-chat-bubble-content") || assistantContent;
+      return { bubble, content: content || undefined };
+    };
+    const scheduleReasoningRender = () => {
+      if (reasoningRenderFrame !== null) return;
+      reasoningRenderFrame = window.requestAnimationFrame(() => {
+        reasoningRenderFrame = null;
+        const { bubble, content } = reasoningHost();
+        if (bubble) this.renderAnswerReasoning(bubble, assistant, content);
+      });
+    };
+
     try {
-      this.loadingEl.setText(willSearchWeb
+      this.loadingEl.setText(lightweightGreeting ? "正在通过内置 SDK 回复..."
+        : sdkToolContext ? "正在由 SDK 按需处理当前问题..."
+        : willSearchWeb
         ? "正在提炼搜索问题，并行检索本地资料与网页..."
         : "正在定位与当前问题相关的本地上下文...");
       contextStartedAt = Date.now();
-      this.updateMessageActivity(
-        assistant,
-        "analyze",
-        "done",
-        `已识别为：${this.chatActivityIntentLabels(requestProfile).join("、")}`
-      );
-      this.updateMessageActivity(
-        assistant,
-        "inspect",
-        "active",
-        documents.length > 0 ? `正在读取 ${documents.length} 个附件并确认目标` : "正在确认输入、目标与写入意图"
-      );
-      documentEditTarget = await this.resolveDocumentEditTarget(content);
+
+      documentEditTarget = lightweightGreeting ? null : await this.resolveDocumentEditTarget(content);
       documentEditPromptContext = formatAiDocumentEditTargetForPrompt(documentEditTarget, content);
       const importedContextMarkdown = buildImportedDocumentsContextMarkdown(documents, content || "请分析这些导入文件。");
-      const numericEvidence = this.buildEvidenceForRequest(content, documents);
+      const numericEvidence = lightweightGreeting ? [] : this.buildEvidenceForRequest(content, documents);
       numericEvidenceForRun = numericEvidence;
       numericIntentForRun = hasNumericIntent(content) || documents.some((document) => hasNumericIntent(document.text));
       const numericEvidenceMarkdown = buildNumericEvidenceMarkdown(numericEvidence);
@@ -3408,43 +3231,44 @@ export class LifeOSChatView extends ItemView {
         documentEditTarget,
         requestProfile
       );
-      const inspectionItems = [
-        documents.length > 0
-          ? `附件：${documents.map((document) => document.name).slice(0, 4).join("、")}${documents.length > 4 ? ` 等 ${documents.length} 个` : ""}`
-          : "附件：无",
-        documentEditTarget?.path
-          ? `目标文档：${documentEditTarget.path}`
-          : requestProfile.documentEdit ? "目标文档：未自动定位，回答后将走确认流程" : "",
-        numericIntentForRun ? `数字证据候选：${numericEvidence.length} 条` : ""
-      ].filter(Boolean);
-      this.updateMessageActivity(
-        assistant,
-        "inspect",
-        "done",
-        documentEditTarget?.path ? "已定位输入文件和目标文档" : "输入与目标检查完成",
-        inspectionItems
-      );
-      this.updateMessageActivity(
-        assistant,
-        "retrieve",
-        "active",
-        this.selectedProjectScopeId ? "正在检索当前项目与相关本地资料" : "正在检索本地资料"
-      );
-      if (willSearchWeb) {
-        this.updateMessageActivity(assistant, "web", "active", "正在根据当前问题搜索网页");
+
+      let fastContextBundle: ChatContextBundle | null = null;
+      let prefetchMiss = false;
+      if (fastContext) {
+        const scope = this.projectPrefetchScope(content, this.messages.slice(0, -2));
+        const prefetchStarted = Date.now();
+        const resolved = await resolveFastContext(() => this.projectPrefetchService().prefetch(scope));
+        prefetchMs = Date.now() - prefetchStarted;
+        if (resolved.useFast && resolved.bundle) {
+          prefetchHit = true;
+          fastContextBundle = resolved.bundle;
+          this.lastContextBundle = resolved.bundle;
+        } else {
+          fast = false;
+          prefetchMiss = true;
+          fastDecision = { ...fastDecision, path: "deep", candidate: "deep", reason: "prefetch-miss", effort: "max" };
+        }
       }
-      this.lastContextBundle = await this.plugin.agent.buildContext({
+      this.lastContextBundle = prefetchMiss
+        ? { promptContext: "", sections: [], statusCards: [], contextSources: [], sources: [] }
+        : fast && !fastContext
+          ? { promptContext: "", sections: [], statusCards: [], contextSources: [], sources: [] }
+          : fastContext && fastContextBundle
+            ? fastContextBundle
+            : lightweightGreeting || sdkToolContext ? emptyGreetingContext() : await this.plugin.agent.buildContext({
         userMessage: contextQuestion,
         contextMode: this.contextMode,
         maxChars: this.contextBudgetForRequest(requestProfile),
         projectScopeId: this.selectedProjectScopeId || undefined,
         includeQuestionInPrompt: false,
         includeStatusCards: false,
-        useAiPlanner: this.contextMode === "global",
+        // Retrieval stays deterministic; the channel SDK is the sole paid planner.
+        useAiPlanner: false,
         fetchUrl: (url) => this.fetchUrlText(url),
         searchWeb: (query) => this.searchWebText(query),
         webSearchMode: this.webSearchMode,
-        webSearchQuery: content
+        webSearchQuery: content,
+        ...(prefetchedApp ? { vaultApp: prefetchedApp } : {})
       });
       contextMs = Date.now() - contextStartedAt;
       if (this.lastContextBundle.statusCards.length > 0) {
@@ -3453,54 +3277,9 @@ export class LifeOSChatView extends ItemView {
       if (this.activeDrawerKind === "context") this.renderContextCards();
       this.renderRuntimeStatus(service);
       const webSources = this.lastContextBundle.sources.filter((source) => source.type === "url" && /^https?:\/\//i.test(source.path));
-      const localSources = this.lastContextBundle.sources.filter((source) => !webSources.includes(source));
+
       const webSourceCount = webSources.length;
-      const trace = this.lastContextBundle.retrievalTrace;
-      const retrievalItems = trace
-        ? [
-            `策略：${trace.strategy} · ${this.retrievalRouteLabel(trace.route)} · ${trace.attempts} 轮`,
-            `索引：${trace.indexDocuments} 篇文档 / ${trace.indexChunks} 个片段 · 候选 ${trace.candidateCount} · 采用 ${trace.selectedCount}`,
-            trace.queries.length > 0
-              ? `检索词：${trace.queries.slice(0, 3).map((query) => this.compactActivityText(query, 54)).join(" / ")}`
-              : "",
-            ...this.activitySourceItems(localSources)
-          ].filter(Boolean)
-        : [
-            `上下文模式：${CONTEXT_MODE_LABELS[this.contextMode]}`,
-            `整理 ${this.lastContextBundle.sections.length} 个上下文区段`,
-            ...this.activitySourceItems(localSources)
-          ];
-      this.updateMessageActivity(
-        assistant,
-        "retrieve",
-        "done",
-        localSources.length > 0
-          ? `已采用 ${localSources.length} 个本地来源 · ${this.formatActivityElapsed(contextMs)}`
-          : `本地检索完成，未命中独立来源 · ${this.formatActivityElapsed(contextMs)}`,
-        retrievalItems
-      );
-      if (willSearchWeb) {
-        const webItems = webSources.slice(0, 4).map((source) => {
-          let host = source.path;
-          try {
-            host = new URL(source.path).hostname.replace(/^www\./i, "");
-          } catch {
-            // Keep the original locator when a provider returns a non-standard URL.
-          }
-          const citation = source.citationId
-            ? source.citationId.startsWith("[") ? source.citationId : `[${source.citationId}]`
-            : "网页";
-          return `${citation} ${host} · ${this.compactActivityText(source.title || source.path, 68)}`;
-        });
-        this.updateMessageActivity(
-          assistant,
-          "web",
-          webSourceCount > 0 ? "done" : "skipped",
-          webSourceCount > 0 ? `已获取 ${webSourceCount} 个网页来源` : "未返回可用网页，继续使用本地资料",
-          webItems
-        );
-      }
-      this.updateMessageActivity(assistant, "compose", "active", "正在整理来源、附件和会话历史");
+
       this.loadingEl.setText(webSourceCount > 0
         ? `已定位 ${this.lastContextBundle.sources.length} 个来源（含 ${webSourceCount} 个网页），正在请求模型...`
         : `已定位 ${this.lastContextBundle.sources.length} 个可核对来源，正在请求模型...`);
@@ -3516,180 +3295,182 @@ export class LifeOSChatView extends ItemView {
       );
       const preparedAgentTurn = await this.plugin.agent.prepare({
         ...agentInput,
+        ...(fast ? {
+          history: [],
+          context: fastContext ? this.lastContextBundle.promptContext : "",
+          promptSections: [],
+          answerInstructions: [],
+          compressedSummary: "",
+          compressedMessageCount: 0,
+          compressedSourceCount: 0,
+          systemInstructions: [...(agentInput.systemInstructions || []), fastContext ? FAST_CONTEXT_PROMPT : FAST_ANSWER_PROMPT]
+        } : {}),
+        lightweightGreeting: fast ? false : lightweightGreeting,
+        sdkToolContext: fast ? false : sdkToolContext,
         contextBundle: this.lastContextBundle
       });
-      // Preparation happens before the model request. Paint those observable
-      // actions now so the trace follows real execution order instead of
-      // replaying them only after “生成回答” has appeared.
-      for (const event of preparedAgentTurn.preparationEvents) {
-        this.applyAgentEventToActivity(assistant, event);
-      }
+
       const aiMessages = preparedAgentTurn.messages;
       estimatedInputTokens = this.estimateAiMessagesTokens(aiMessages);
-      const selectedSkillNames = getAiSkills(
-        this.selectedSkillIds,
-        this.importedAiSkills,
-        this.plugin.settings.aiSkillOverrides
-      ).map((skill) => skill.name);
-      this.updateMessageActivity(
-        assistant,
-        "compose",
-        "done",
-        `已组装 ${aiMessages.length} 条消息 · 约 ${estimatedInputTokens.toLocaleString()} token`,
-        [
-          `上下文：${this.lastContextBundle.promptContext.length.toLocaleString()} 字符 · ${this.lastContextBundle.sources.length} 个来源`,
-          `Skill：${selectedSkillNames.join(" + ") || "Life OS 总管"}`,
-          documents.length > 0 ? `附件：${documents.length} 个` : "附件：无"
-        ]
-      );
-      this.updateMessageActivity(
-        assistant,
-        "generate",
-        "active",
-        `正在调用 ${this.chatActivityModelLabel(documents)}`,
-        [
-          `推理强度：${this.reasoningEffort}`,
-          `输入估算：${estimatedInputTokens.toLocaleString()} token`
-        ]
-      );
+
       requestStartedAt = Date.now();
       if (this.plugin.agent.isBulkPdfRecognitionRequest(preparedAgentTurn)) {
         new Notice("将按你的要求逐页识别整本 PDF。扫描页会调用视觉模型并可能产生费用；可点停止中断，已完成页会缓存。", 10000);
       }
-      timeoutHandle = window.setTimeout(() => {
-        if (!this.abortController || !this.isStreaming) return;
-        this.streamTimedOut = true;
-        this.abortController.abort();
-      }, this.plugin.agent.isBulkPdfRecognitionRequest(preparedAgentTurn) ? 20 * 60 * 1000 : 90000);
+
+      // The SDK owns bounded execution and terminal errors; this view only
+      // forwards the user/lifecycle cancellation signal and paints output.
+      answerTrace.dispatchModel();
       const result = await this.plugin.agent.completeStream(
         preparedAgentTurn,
         {
           temperature: this.mode === "exam" ? 0.25 : 0.45,
+          ...(lightweightGreeting ? { enableTools: false } : {}),
           model: this.visionRequestModel(documents),
           reasoningEffort: this.reasoningEffort,
           permissionMode: this.agentPermissionMode(),
+          webSearchMode: this.webSearchMode,
           explicitWriteIntent: requestProfile.writeback,
-          forcePlanner: requestProfile.writeback
+          forcePlanner: requestProfile.writeback,
+          ...(fast ? {
+            reasoningEffort: "low" as const,
+            permissionMode: "read-only" as const,
+            webSearchMode: "off" as const,
+            explicitWriteIntent: false,
+            forcePlanner: false,
+            enableTools: false,
+            maxOutputTokens: FAST_MAX_OUTPUT_TOKENS,
+            maxDurationMs: FAST_MAX_DURATION_MS,
+            budget: { maxModelCalls: 1, maxToolCalls: fastContext ? FAST_CONTEXT_MAX_TOOL_CALLS : FAST_MAX_TOOL_CALLS }
+          } : {})
         },
         {
           onStart: () => {
+            provisionalText = streamed;
             if (assistantContent) assistantContent.setText("正在生成...");
-            this.updateMessageActivity(
-              assistant,
-              "generate",
-              "active",
-              "请求已发送，等待首段内容",
-              [
-                `模型：${this.chatActivityModelLabel(documents)}`,
-                `推理强度：${this.reasoningEffort}`,
-                `输入估算：${estimatedInputTokens.toLocaleString()} token`
-              ]
-            );
+
           },
           onAgentEvent: (event) => {
-            this.applyAgentEventToActivity(assistant, event);
+            runState.processPanel?.handleEvent(event);
           },
+
           onToken: (token) => {
             streamed += token;
+            answerTrace.firstToken();
             if (firstTokenMs === null) {
               firstTokenMs = Date.now() - requestStartedAt;
+              runState.processPanel?.markFirstToken(firstTokenMs);
               this.loadingEl.setText("正在生成回答...");
             }
-            const now = Date.now();
-            if (now - lastActivityStreamUpdateAt >= 650) {
-              lastActivityStreamUpdateAt = now;
-              this.updateMessageActivity(
-                assistant,
-                "generate",
-                "active",
-                `正在流式接收 · ${streamed.length.toLocaleString()} 字符`,
-                [
-                  `首段等待：${this.formatActivityElapsed(firstTokenMs ?? 0)}`,
-                  `模型：${this.chatActivityModelLabel(documents)}`
-                ]
-              );
+
+            scheduleStreamPreview();
+          },
+          onReasoning: (text) => {
+            reasoningEntry.text = (reasoningEntry.text + text).slice(0, REASONING_MAX_CHARS);
+            reasoningEntry.incomplete = true;
+            if (showReasoning) scheduleReasoningRender();
+          },
+          onPreview: (text) => {
+            provisionalText += text;
+            answerTrace.firstToken();
+            if (firstTokenMs === null) {
+              firstTokenMs = Date.now() - requestStartedAt;
+              runState.processPanel?.markFirstToken(firstTokenMs);
+              this.loadingEl.setText("正在生成回答...");
             }
             scheduleStreamPreview();
           },
           onDone: (text) => {
+            provisionalText = "";
             streamed = text || streamed;
             assistant.content = streamed;
-            this.updateMessageActivity(
-              assistant,
-              "generate",
-              "done",
-              `模型返回结束信号 · ${streamed.length.toLocaleString()} 字符`
-            );
+            reasoningEntry.incomplete = false;
+            reasoningEntry.endedAt = Date.now();
+            if (showReasoning) scheduleReasoningRender();
           },
           onAbort: () => {
+            provisionalText = "";
+            failureReason = "aborted";
             runState.status = "interrupted";
-            this.updateMessageActivity(assistant, "generate", "error", this.streamTimedOut ? "生成超时，已保留现有内容" : "已按你的操作停止生成");
-            if (this.streamTimedOut) {
-              assistant.content = streamed || "生成超时：本轮上下文可能过长。请少选几个 Skill，或点“上下文来源”确认本轮读取内容后重试。";
-            }
+            assistant.content = chatStoppedContent(streamed);
           },
           onError: (error) => {
+            provisionalText = "";
+            failureReason = "error";
             runState.status = "error";
-            this.updateMessageActivity(assistant, "generate", "error", `模型请求失败：${error}`);
-            assistant.content = streamed || `AI 请求失败：${error}`;
+
+            assistant.content = chatFailureContent(streamed, error);
           }
         },
         this.abortController.signal
       );
       resultUsage = result.response.usage;
       agentToolResults = result.toolResults;
+      answerTrace.toolCount = result.toolResults.length;
+      // Tools fill this same turn-local bundle as SDK reads, so citations are not lost.
+      this.lastContextBundle = result.prepared.context;
+      if (this.activeDrawerKind === "context") this.renderContextCards();
 
       if (!result.ok && runState.status !== "interrupted") {
         runState.status = "error";
-        assistant.content = streamed || `AI 请求失败：${result.error ?? "未知错误"}`;
+        failureReason = result.stopReason || "error";
+        assistant.content = chatFailureContent(streamed, result.error ?? "未知错误");
       } else if (runState.status === "interrupted") {
-        assistant.content = streamed || (this.streamTimedOut ? "生成超时：本轮上下文可能过长。请减少 Skill 或上下文后重试。" : "已停止生成。");
+        assistant.content = chatStoppedContent(streamed);
       } else {
         assistant.content = streamed || result.text || "";
       }
     } catch (error) {
       runState.status = "error";
+      failureReason = "error";
       const message = error instanceof Error ? error.message : String(error);
-      const activity = this.messageActivity.get(assistant);
-      const activeSteps = activity?.steps.filter((step) => step.state === "active") ?? [];
-      if (activeSteps.length === 0) {
-        this.updateMessageActivity(assistant, "generate", "error", `本轮未能正常完成：${message}`);
-      } else {
-        for (const step of activeSteps) {
-          this.updateMessageActivity(assistant, step.id, "error", `执行中断：${message}`);
-        }
-      }
-      for (const pendingStep of activity?.steps.filter((step) => step.state === "pending") ?? []) {
-        this.updateMessageActivity(assistant, pendingStep.id, "skipped", "前置步骤失败，本步骤未执行");
-      }
-      assistant.content = streamed || `AI 请求失败：${message}`;
+      assistant.content = chatFailureContent(streamed, message);
       new Notice(`AI 请求失败：${message}`, 7000);
     } finally {
-      if (timeoutHandle !== null) window.clearTimeout(timeoutHandle);
+
+      if (reasoningRenderFrame !== null) { window.cancelAnimationFrame(reasoningRenderFrame); reasoningRenderFrame = null; }
+      if (runState.status === "completed") reasoningEntry.incomplete = false;
+      if (reasoningEntry.endedAt === undefined) reasoningEntry.endedAt = Date.now();
+      if (showReasoning) {
+        const { bubble, content } = reasoningHost();
+        if (bubble) this.renderAnswerReasoning(bubble, assistant, content);
+      }
+      try {
+        if (answerTrace.dispatch > 0) {
+          const snapshot = answerTrace.snapshot();
+          recordAnswerMetric(this.plugin.settings, fastDecision, {
+            channel: "desktop",
+            ttftMs: snapshot.ttftMs,
+            totalMs: snapshot.totalMs,
+            dispatch: snapshot.dispatch,
+            validationFailed: false,
+            // True only when a supplier thinking_delta was actually received.
+            reasoningAvailable: reasoningEntry.text.length > 0,
+            prefetchHit,
+            prefetchMs,
+            status: runState.status === "interrupted" ? "interrupted" : runState.status === "error" ? "error" : "completed",
+            kind: "answer",
+            effort: fast ? "low" : this.reasoningEffort,
+            toolCount: snapshot.toolCount,
+            fallbackCount: snapshot.fallbackCount,
+            pathHashes: snapshot.pathHashes
+          });
+          void this.plugin.saveSettings().catch(() => undefined);
+        }
+      } catch { /* metrics never change the answer outcome */ }
+
       flushStreamPreview(true);
-      const verificationItems: string[] = [];
-      const verificationWarnings: string[] = [];
+
       if (runState.status === "completed") {
-        this.updateMessageActivity(assistant, "verify", "active", "正在检查引用、数字证据和输出完整性");
+
         if (numericIntentForRun) {
-          const beforeNumericCheck = assistant.content;
+
           assistant.content = this.addNumericEvidenceWarningIfNeeded(assistant.content, numericEvidenceForRun);
-          const warningAdded = assistant.content !== beforeNumericCheck;
-          verificationItems.push(`数字证据：检查 ${numericEvidenceForRun.length} 条候选${warningAdded ? "，已补充提醒" : "，未新增提醒"}`);
-          if (warningAdded) verificationWarnings.push("数字证据");
-        } else {
-          verificationItems.push("数字证据：本轮未识别到数字核对需求");
+
         }
 
-        const citationRequired = this.shouldRequireCitationVerification(requestProfile);
-        const beforeCitationCheck = assistant.content;
-        assistant.content = this.addCitationVerificationIfNeeded(assistant.content, requestProfile);
-        const citationWarningAdded = assistant.content !== beforeCitationCheck;
-        const sourceCount = this.lastContextBundle?.sources.length ?? 0;
-        verificationItems.push(citationRequired
-          ? `引用核验：检查 ${sourceCount} 个来源${citationWarningAdded ? "，已补充完整性提醒" : "，通过"}`
-          : `引用核验：${sourceCount} 个来源，本轮不强制逐项引用`);
-        if (citationWarningAdded) verificationWarnings.push("引用完整性");
+        assistant.content = this.addCitationVerificationIfNeeded(assistant.content, requestProfile, fastDecision.path);
+
       }
       if (assistant.content.trim()) assistant.content = appendAiGeneratedFooter(assistant.content);
       let runUsage: AiUsage | null = null;
@@ -3697,47 +3478,29 @@ export class LifeOSChatView extends ItemView {
         runUsage = this.buildApiUsage(resultUsage, estimatedInputTokens, assistant.content);
         this.lastApiUsage = runUsage;
       }
-      if (runState.status === "completed") {
-        this.updateMessageActivity(
-          assistant,
-          "generate",
-          "done",
-          `回答接收完成 · ${assistant.content.length.toLocaleString()} 字符`,
-          [
-            firstTokenMs === null ? "首段等待：未提供" : `首段等待：${this.formatActivityElapsed(firstTokenMs)}`,
-            `Token：${this.formatApiUsage(runUsage)}`
-          ]
-        );
-        this.updateMessageActivity(
-          assistant,
-          "verify",
-          "done",
-          verificationWarnings.length > 0
-            ? `核验完成，已附加 ${verificationWarnings.join("、")}提醒`
-            : "核验完成，未发现需要补充的证据提醒",
-          verificationItems
-        );
-      } else {
-        this.updateMessageActivity(assistant, "verify", "skipped", "回答未完成，未执行最终核验");
-      }
+
       this.lastRunMetrics = {
         contextMs,
         firstTokenMs,
         sourceCount: this.lastContextBundle?.sources.length ?? 0,
         totalMs: Date.now() - runStartedAt
       };
+      if (processPanel) {
+        const finalStatus = runState.status === "completed" ? "completed" : runState.status === "interrupted" ? "interrupted" : "error";
+        processPanel.finish(finalStatus, finalStatus === "completed" ? "" : failureReason || finalStatus);
+      }
       this.finishStreaming();
       this.renderMessages();
       this.scrollLogToBottom();
       this.renderRuntimeStatus(service);
       this.persistActiveChatState();
-      this.updateMessageActivity(assistant, "persist", "active", "正在保存本轮会话与来源索引");
+
       try {
         await service.saveConversation(this.messages, this.saveOptions(runState.status, this.lastContextBundle?.contextSources));
-        this.updateMessageActivity(assistant, "persist", "done", "会话记录已保存，可在聊天历史中继续");
+
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        this.updateMessageActivity(assistant, "persist", "error", `会话保存失败：${message}`);
+
         new Notice(`回答已保留，但会话记录保存失败：${message}`, 7000);
       }
       const requestedWriteTarget = this.detectRequestedWriteTarget(content);
@@ -3749,30 +3512,21 @@ export class LifeOSChatView extends ItemView {
       const documentEditCandidate = parseAiDocumentEditCandidate(assistant.content, documentEditTarget);
       const runLegacyWriteback = shouldRunLegacyChatWriteback(this.currentWritebackMode(), agentToolResults);
       if (runState.status === "completed" && runLegacyWriteback && documentEditCandidate) {
-        this.updateMessageActivity(
-          assistant,
-          "writeback",
-          "active",
-          "已识别目标文档，正在处理写入",
-          [
-            `目标：${documentEditTarget?.path || documentEditCandidate.targetPath || "待确认文档"}`,
-            `模式：${CHAT_WRITEBACK_MODE_LABELS[this.currentWritebackMode()]}`
-          ]
-        );
+
         try {
           if (this.currentWritebackMode() === "explicit-auto" && documentEditTarget) {
             const result = await this.autoApplyDocumentEditWriteback(documentEditCandidate);
-            this.updateMessageActivity(assistant, "writeback", result.written ? "done" : "skipped", result.detail);
+
           } else {
             await this.previewDocumentEditWriteback(documentEditCandidate);
-            this.updateMessageActivity(assistant, "writeback", "done", "文档写入确认流程已结束");
+
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          this.updateMessageActivity(assistant, "writeback", "error", `写入失败：${message}`);
+
           new Notice(`AI 写入失败：${message}`, 6000);
         }
-        this.finishMessageActivity(assistant);
+
         return;
       }
       if (
@@ -3783,21 +3537,12 @@ export class LifeOSChatView extends ItemView {
         const targetLabel = requestedWriteTarget
           ? ({ diary: "日记", knowledge: "知识库", memory: "记忆", "project-document": "项目文档" } as const)[requestedWriteTarget]
           : "等待用户选择";
-        this.updateMessageActivity(
-          assistant,
-          "writeback",
-          "active",
-          requestedWriteTarget ? "已识别明确写入目标" : "写入目标含糊，等待你选择",
-          [
-            `目标：${targetLabel}`,
-            `模式：${CHAT_WRITEBACK_MODE_LABELS[this.currentWritebackMode()]}`
-          ]
-        );
+
         try {
           if (this.currentWritebackMode() === "explicit-auto") {
             if (!requestedWriteTarget) {
               await this.previewRecognizedWritebackChoice(content, assistant.content, writebackCandidates, requestedWriteTarget, documents);
-              this.updateMessageActivity(assistant, "writeback", "done", "目标选择与确认流程已结束");
+
             } else {
               const result = await this.autoApplyRequestedWritebackTarget(
                 requestedWriteTarget,
@@ -3806,15 +3551,15 @@ export class LifeOSChatView extends ItemView {
                 writebackCandidates,
                 documents
               );
-              this.updateMessageActivity(assistant, "writeback", result.written ? "done" : "skipped", result.detail);
+
             }
           } else {
             await this.previewRecognizedWritebackChoice(content, assistant.content, writebackCandidates, requestedWriteTarget, documents);
-            this.updateMessageActivity(assistant, "writeback", "done", "写入确认流程已结束");
+
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          this.updateMessageActivity(assistant, "writeback", "error", `写入失败：${message}`);
+
           new Notice(`AI 写入失败：${message}`, 6000);
         }
       } else if (runState.status === "completed") {
@@ -3825,11 +3570,9 @@ export class LifeOSChatView extends ItemView {
             : agentToolResults.length > 0 && !runLegacyWriteback
               ? "写入已由统一 Agent 处理，不再重复执行旧写回流程"
               : "没有需要执行的写入操作";
-        this.updateMessageActivity(assistant, "writeback", "skipped", detail);
-      } else {
-        this.updateMessageActivity(assistant, "writeback", "skipped", "回答未完成，本轮未执行写入");
+
       }
-      this.finishMessageActivity(assistant);
+
     }
   }
 
@@ -3855,9 +3598,19 @@ export class LifeOSChatView extends ItemView {
       || route === "deep";
   }
 
-  private addCitationVerificationIfNeeded(content: string, profile: ChatRequestProfile): string {
+  private addCitationVerificationIfNeeded(
+    content: string,
+    profile: ChatRequestProfile,
+    path: "fast" | "fast_context" | "deep"
+  ): string {
     const bundle = this.lastContextBundle;
     if (!bundle || !content.trim() || !this.shouldRequireCitationVerification(profile)) return content;
+
+    if (path === "fast_context") {
+      if (/\*\*引用检查：\*\*/.test(content)) return content;
+      const warning = verifyFastContextSourceList(content, bundle.sources);
+      return warning ? `${content.trimEnd()}\n\n${warning}` : content;
+    }
 
     const verification = this.plugin.agent.verifyAnswer(content, bundle.sources, {
       requireCitations: true,
@@ -3891,6 +3644,37 @@ export class LifeOSChatView extends ItemView {
     ));
   }
 
+  private projectPrefetchService(): ProjectPrefetchService {
+    return this.projectPrefetch ??= new ProjectPrefetchService(this.app, () => this.plugin.settings);
+  }
+
+  private projectPrefetchScope(question: string, history: ChatMessage[]): ProjectPrefetchScope {
+    const settings = this.plugin.settings;
+    return {
+      question,
+      project: this.selectedProjectScopeId,
+      account: opaqueHash(JSON.stringify([settings.aiProvider, settings.aiBaseUrl, settings.aiModel])),
+      session: this.agentSessionId || "",
+      config: JSON.stringify([settings.defaultChatContextMode, settings.aiChatOutputTokens, settings.directoryLanguage, settings.rootFolder]),
+      sessionMemory: history.slice(-6)
+        .filter(message => typeof message.content === "string" && message.content.trim().length > 0)
+        .map(message => ({ role: message.role, content: message.content }))
+    };
+  }
+
+  private scheduleAnswerPrefetch(): void {
+    if (!this.plugin.settings.prefetchEnabled || Platform.isMobileApp || !this.selectedProjectScopeId) return;
+    const question = this.inputEl?.value.trim() || "";
+    if (!question) return;
+    if (this.prefetchTimer !== null) window.clearTimeout(this.prefetchTimer);
+    const project = this.selectedProjectScopeId;
+    this.prefetchTimer = window.setTimeout(() => {
+      this.prefetchTimer = null;
+      if (this.inputEl.value.trim() !== question || this.selectedProjectScopeId !== project) return;
+      void this.projectPrefetchService().prefetch(this.projectPrefetchScope(question, this.messages));
+    }, 600);
+  }
+
   private buildAgentTurnInput(
     content: string,
     context: string,
@@ -3900,6 +3684,8 @@ export class LifeOSChatView extends ItemView {
     documentEditMarkdown = "",
     requestProfile = this.profileChatRequest(content, documents)
   ): LifeOSAgentBuildMessagesInput {
+    const sdkToolContext = useSdkToolContext({ mode: this.mode, contextMode: this.contextMode,
+      webSearchMode: this.webSearchMode, documentEdit: requestProfile.documentEdit });
     const history = this.recentAgentHistory();
     const selectedSkills = getAiSkills(this.selectedSkillIds, this.importedAiSkills, this.plugin.settings.aiSkillOverrides);
     const skillPrompt = this.compactSkillPrompt(composeAiSkillPrompt(
@@ -3960,6 +3746,7 @@ export class LifeOSChatView extends ItemView {
       }));
     return {
       channel: "desktop",
+      sdkToolContext,
       sessionId: this.agentSessionId,
       content,
       history,
@@ -3979,7 +3766,10 @@ export class LifeOSChatView extends ItemView {
       compressedSourceCount: this.compressedContextSourceCount,
       skillPromptOverride: skillPrompt,
       systemInstructions: [selectedSkillGuard],
-      answerInstructions,
+      answerInstructions: sdkToolContext ? [
+        "回复风格：" + STYLE_LABELS[this.style] + "；长度：" + LENGTH_LABELS[this.length] + "。",
+        ...(this.webSearchMode === "always" ? ["本轮联网模式为始终开启：涉及外部事实的问题应先调用网页搜索/读取工具核对；不要预先检索无关仓库资料，也不要为纯问候或闲聊强行搜索。"] : [])
+      ] : answerInstructions,
       promptSections: [
         requestProfile.documentEdit && documentEditMarkdown
           ? { title: "目标文档与编辑约束", content: documentEditMarkdown }
@@ -4665,6 +4455,17 @@ export class LifeOSChatView extends ItemView {
     return content.replace(AI_GENERATED_FOOTER_PATTERN, "").trimEnd();
   }
 
+  /** Help entry (F-05a): 「问 AI 助手」must not append to the previous task's
+   * conversation, or the manual question inherits stale checkpoints/summaries.
+   * Returns whether a fresh session really started; the draft is injected either
+   * way so the manual-grounded answer is still produced when a new session is
+   * refused (e.g. a turn is still streaming). */
+  async startGuideConversation(): Promise<boolean> {
+    const previousSession = this.agentSessionId;
+    await this.startNewConversation();
+    return this.agentSessionId !== previousSession;
+  }
+
   private async startNewConversation(fromCommand = false): Promise<void> {
     if (this.isStreaming || this.managingSession || (this.dispatchingMessage && !fromCommand)) { new Notice("请先停止当前生成，再新建会话。"); return; }
     this.managingSession = true;
@@ -4940,14 +4741,18 @@ export class LifeOSChatView extends ItemView {
     });
   }
 
-  private async requestWebContext(url: string, options: WebContextRequestOptions = {}): Promise<{ text: string; status?: number }> {
+  private async requestWebContext(url: string, options: WebContextRequestOptions = {}): Promise<{ text: string; status?: number; headers?: Record<string, string> }> {
     const response = await requestUrl({
       url,
       method: options.method ?? "GET",
       headers: options.headers,
-      body: options.body
+      body: options.body,
+      throw: false
     });
-    return { text: response.text, status: response.status };
+    if ((options.method ?? "GET") === "GET" && (response.status < 200 || response.status >= 300)) {
+      throw new Error(`Web request failed: HTTP ${response.status}`);
+    }
+    return { text: response.text, status: response.status, headers: response.headers };
   }
 
   private service(): ChatService {

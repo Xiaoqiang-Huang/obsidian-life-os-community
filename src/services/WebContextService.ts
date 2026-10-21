@@ -1,4 +1,7 @@
+import { AnonymousSearchMcpService } from "./AnonymousSearchMcpService";
 import { extractWebArticle } from "./web-article";
+import { diversifyNewsResults, newsSubjects } from "./context-engine/NewsAnswerQuality";
+import { extractReadableWebBody, hasReadableWebBody, hasUnavailableWebBody, selectReadableWebEvidence } from "./context-engine/WebEvidenceBody";
 
 export interface WebContextRequestOptions {
   headers?: Record<string, string>;
@@ -7,6 +10,7 @@ export interface WebContextRequestOptions {
 }
 
 export interface WebContextResponse {
+  headers?: Record<string, string>;
   text: string;
   status?: number;
 }
@@ -107,6 +111,15 @@ export interface WebSearchGrounding {
   results: WebSearchGroundingItem[];
   searchedAt: string;
   warnings: string[];
+  /** Present only for explicit, broader body collection; no raw page data. */
+  collection?: {
+    candidateCount: number;
+    attemptedCount: number;
+    effectiveCount: number;
+    targetCount: number;
+    recoveryQueryCount: number;
+    stopReason: "target-reached" | "candidates-exhausted" | "read-budget-reached";
+  };
 }
 
 export interface WebSearchOptions {
@@ -125,6 +138,8 @@ export interface WebSearchOptions {
   /** Optional one-call search backend such as Tavily, Brave or SearXNG. */
   searchProvider?: WebSearchProvider;
   maxRecoveryQueries?: number;
+  /** Opt-in collection target (up to 20 usable, non-identical article bodies). */
+  maxEvidenceSources?: number;
   now?: Date;
 }
 
@@ -294,6 +309,15 @@ export function planWebSearchQueries(
   const now = options.now ?? new Date();
   const year = now.getUTCFullYear();
   const month = now.getUTCMonth() + 1;
+  const subjects = newsSubjects(message);
+  if (subjects.length > 1 && maxQueries > 1) {
+    // Each named object gets a query within the existing total budget.
+    const constraints = message.match(/(?:新闻|消息|近况|动态)[，,。；;\s]*([\s\S]*)$/u)?.[1]?.trim() || "";
+    const timeRange = message.match(/(?:最近|过去|近)\s*\d{1,3}\s*天|20\d{2}年(?:\s*\d{1,2}月)?/u)?.[0] || `${year}年${month}月`;
+    return uniqueStrings([
+      base, ...subjects.map((name) => `${name} 最新新闻 ${timeRange} ${constraints}`)
+    ].map(normalizeSearchQuery)).slice(0, maxQueries);
+  }
   const subject = extractSearchSubjectTokens(base).slice(0, 4).join(" ");
   const intent = inferEnglishSearchIntent(base);
 
@@ -483,7 +507,9 @@ export async function searchWebGrounding(
   };
   if (!cleanQuery) return empty;
 
-  const maxResults = Math.max(1, Math.min(options.maxResults ?? 8, 12));
+  const collectionTarget = Number.isFinite(options.maxEvidenceSources)
+    ? Math.max(0, Math.min(Math.floor(options.maxEvidenceSources!), 20)) : 0;
+  const maxResults = Math.max(1, Math.min(options.maxResults ?? 8, collectionTarget ? 60 : 12));
   const fetchTopPages = Math.max(0, Math.min(options.fetchTopPages ?? 4, 6));
   const maxPageChars = Math.max(800, Math.min(options.maxPageChars ?? DEFAULT_MAX_PAGE_CHARS, 12_000));
   const queries = planWebSearchQueries(cleanQuery, {
@@ -494,7 +520,10 @@ export async function searchWebGrounding(
   const warnings: string[] = [];
   const executedQueries = [...queries];
   const fetchedByUrl = new Map<string, { content: string; warning: string }>();
-  const maxPlannerQueries = Math.max(1, Math.min(options.maxRecoveryQueries ?? 2, 3));
+  const maxPlannerQueries = Math.max(1, Math.min(options.maxRecoveryQueries ?? 2, collectionTarget ? 2 : 3));
+  const maxRecoveryQueries = Math.max(1, Math.min(options.maxRecoveryQueries ?? 2, collectionTarget ? 10 : 3));
+  let recoveryQueryCount = 0;
+  const recoveryCandidateUrls = new Set<string>();
   let activeEntityAliases: WebSearchEntityAlias[] = [];
   const evidenceQueryFor = (itemQuery = ""): string => uniqueStrings([
     cleanQuery,
@@ -543,9 +572,20 @@ export async function searchWebGrounding(
       query: evidenceQueryFor()
     }));
 
+  const anonymousSearch = new AnonymousSearchMcpService(request, {
+    acceptUrl: (url) => { try { normalizePublicHttpUrl(url); return true; } catch { return false; } }
+  });
   const searchQueries = async (plannedQueries: string[]) => {
     const batches = await Promise.all(plannedQueries.map(async (plannedQuery) => {
-      const items = await searchWebResults(plannedQuery, request, maxResults);
+      let items: WebSearchItem[] = [];
+      if (options.searchProvider) items = await searchWebResults(plannedQuery, request, maxResults);
+      else {
+        try {
+          items = (await anonymousSearch.search(plannedQuery, maxResults)).filter(item => {
+            try { normalizePublicHttpUrl(item.url); return true; } catch { return false; }
+          });
+        } catch (error) { warnings.push(errorMessage(error)); }
+      }
       if (items.length === 0) warnings.push(`No readable search results were returned for: ${plannedQuery}`);
       return items.map((item) => ({ ...item, query: plannedQuery }));
     }));
@@ -555,7 +595,10 @@ export async function searchWebGrounding(
   const enrichCandidates = async (input: Array<WebSearchItem & { query: string }>) => {
     let next = dedupeGroundingItems(input);
     const discovered = await discoverRelevantOfficialLinks(evidenceQueryFor(), next, request, maxResults);
-    next = dedupeGroundingItems([...discovered, ...next]);
+    // Discovery supplements retrieval. Keep the provider's title/snippet when
+    // a sidebar links to the same URL, rather than replacing it with generic
+    // navigation text and an inherited endorsement.
+    next = dedupeGroundingItems([...next, ...discovered]);
     return next;
   };
 
@@ -661,7 +704,7 @@ export async function searchWebGrounding(
   // topic archives. Run one bounded reader rescue whenever the candidates do
   // not yet contain usable evidence; do not disable it merely because an AI
   // planner exists.
-  if (needsReaderSearch(evidenceQueryFor(), candidates)) {
+  if (options.searchProvider && needsReaderSearch(evidenceQueryFor(), candidates)) {
     const readerQuery = [...executedQueries].reverse().find((item) => /[A-Za-z]/u.test(item)) || executedQueries[0] || cleanQuery;
     const readerUrl = isNewsSearchQuery(evidenceQueryFor())
       ? `https://r.jina.ai/http://www.bing.com/news/search?q=${encodeURIComponent(readerQuery)}&qft=sortbydate%3d%221%22`
@@ -671,42 +714,32 @@ export async function searchWebGrounding(
     candidates = dedupeGroundingItems([...readerItems, ...candidates]);
   }
   const maxFetchPerRound = Math.min(
-    6,
-    fetchTopPages + (options.initialQueryPlanner || options.recoveryQueryPlanner ? 1 : 0)
+    collectionTarget ? 5 : 6,
+    fetchTopPages + (!collectionTarget && (options.initialQueryPlanner || options.recoveryQueryPlanner) ? 1 : 0)
   );
-  const materialize = async (): Promise<WebSearchGrounding> => {
-    const ranked = rankSearchItems(candidates, evidenceQueryFor()).slice(0, maxResults);
-    const unfetched = ranked
-      .filter((item) => !fetchedByUrl.has(item.url))
-      // Recovery results arrive after the first materialization pass. Limiting
-      // by the lifetime cache size meant a noisy first page could consume the
-      // entire budget and the newly planned official result was never read.
-      // Keep each bounded retrieve -> assess round independently budgeted.
-      .slice(0, maxFetchPerRound);
-    const fetchedPages = await Promise.all(unfetched.map(async (item) => {
-      try {
-        return {
-          url: item.url,
-          content: await fetchSearchResultEvidence(item, evidenceQueryFor(item.query), request, maxPageChars),
-          warning: ""
-        };
-      } catch (error) {
-        return {
-          url: item.url,
-          content: "",
-          warning: `Unable to read ${item.url}: ${errorMessage(error)}`
-        };
-      }
-    }));
-    for (const page of fetchedPages) {
-      fetchedByUrl.set(page.url, { content: page.content, warning: page.warning });
-      if (page.warning) warnings.push(page.warning);
+  const materialize = async (attemptLimit = 60): Promise<WebSearchGrounding> => {
+    let ordered = rankSearchItems(candidates, evidenceQueryFor());
+    if (collectionTarget && recoveryCandidateUrls.size) {
+      // Keep useful cached bodies and give fresh recovery URLs a chance before
+      // spending the remaining budget on the old failed tranche.
+      const useful = ordered.filter((item) => {
+        const page = fetchedByUrl.get(item.url);
+        return page?.content && hasReadableWebBody({ title: item.title, excerpt: page.content })
+          && !hasUnavailableWebBody(page.content)
+          && isWebEvidenceRelevant(evidenceQueryFor(), extractReadableWebBody({ title: item.title, excerpt: page.content }));
+      });
+      const used = new Set(useful.map((item) => item.url));
+      const fresh = ordered.filter((item) => recoveryCandidateUrls.has(item.url) && !fetchedByUrl.has(item.url));
+      fresh.forEach((item) => used.add(item.url));
+      ordered = [...useful, ...fresh, ...ordered.filter((item) => !used.has(item.url))];
     }
-    const results = ranked.map((item): WebSearchGroundingItem => {
+    const ranked = diversifyNewsResults(cleanQuery, ordered, maxResults);
+    const toResult = (item: WebSearchItem & { query: string }): WebSearchGroundingItem => {
       const page = fetchedByUrl.get(item.url);
       const content = page?.content ?? "";
       const fetched = Boolean(content.trim());
-      const evidenceQuery = evidenceQueryFor(item.query);
+      // Expanded-query keywords are retrieval hints, not extra user subjects.
+      const evidenceQuery = evidenceQueryFor(collectionTarget ? "" : item.query);
       const evidenceTier = classifyWebEvidenceTier(evidenceQuery, item, fetched);
       return {
         ...item,
@@ -716,45 +749,99 @@ export async function searchWebGrounding(
         bodyChars: content.length,
         readWarning: page?.warning || undefined,
         evidenceTier,
-        relevanceScore: webEvidenceRelevanceScore(evidenceQuery, `${item.title}\n${item.url}\n${item.snippet}\n${content}`, fetched)
+        relevanceScore: webEvidenceRelevanceScore(evidenceQuery, collectionTarget
+          ? extractReadableWebBody({ title: item.title, excerpt: content })
+          : `${item.title}\n${item.url}\n${item.snippet}\n${content}`, fetched)
       };
-    });
+    };
+    const effectiveResults = (): WebSearchGroundingItem[] => {
+      const seen = new Set<string>();
+      return ranked.map(toResult).filter((item) => {
+        if (!item.fetched || hasUnavailableWebBody(item.content) || (item.relevanceScore ?? 0) < 0.55) return false;
+        const excerpt = selectReadableWebEvidence({ title: item.title, excerpt: item.content }, evidenceQueryFor(), maxPageChars);
+        if (!hasReadableWebBody({ title: item.title, excerpt }) || !isWebEvidenceRelevant(evidenceQueryFor(), excerpt)) return false;
+        const key = extractReadableWebBody({ title: item.title, excerpt: item.content }).replace(/\s+/gu, " ").trim();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }).slice(0, collectionTarget);
+    };
+    // Broad collection is opt-in. Small concurrent batches refill failed reads
+    // until 20 effective bodies, candidate exhaustion or 60 total URL attempts.
+    // The cache counts failed attempts too; neither recovery nor refill retries them.
+    do {
+      const remaining = collectionTarget ? collectionTarget - effectiveResults().length : maxFetchPerRound;
+      if (remaining <= 0 || (collectionTarget && fetchedByUrl.size >= attemptLimit)) break;
+      const unfetched = diversifyNewsResults(cleanQuery, ranked.filter((item) => !fetchedByUrl.has(item.url)),
+        Math.min(maxFetchPerRound, remaining, collectionTarget ? attemptLimit - fetchedByUrl.size : maxFetchPerRound));
+      if (!unfetched.length) break;
+      const fetchedPages = await Promise.all(unfetched.map(async (item) => {
+        try {
+          return { url: item.url, content: await fetchSearchResultEvidence(item, evidenceQueryFor(collectionTarget ? "" : item.query), request, maxPageChars), warning: "" };
+        } catch (error) {
+          return { url: item.url, content: "", warning: `Unable to read ${item.url}: ${errorMessage(error)}` };
+        }
+      }));
+      for (const page of fetchedPages) {
+        fetchedByUrl.set(page.url, { content: page.content, warning: page.warning });
+        if (page.warning) warnings.push(page.warning);
+      }
+      if (!collectionTarget) break;
+    } while (true);
+    const results = collectionTarget ? effectiveResults() : ranked.map(toResult);
     return {
       query: cleanQuery,
       queries: [...executedQueries],
       searchedAt: now.toISOString(),
       warnings: uniqueStrings(warnings),
-      results
+      results,
+      ...(collectionTarget ? { collection: {
+        candidateCount: candidates.length,
+        attemptedCount: fetchedByUrl.size,
+        effectiveCount: results.length,
+        targetCount: collectionTarget,
+        recoveryQueryCount,
+        stopReason: results.length >= collectionTarget ? "target-reached" as const
+          : fetchedByUrl.size >= attemptLimit ? "read-budget-reached" as const : "candidates-exhausted" as const
+      } } : {})
     };
   };
 
-  let grounding = await materialize();
-  if (options.recoveryQueryPlanner && !assessWebSearchGrounding(grounding, cleanQuery).sufficient) {
+  // Reserve half the broad URL budget for fresh recovery results rather than
+  // letting a completely failed first tranche consume all 60 attempts.
+  let grounding = await materialize(collectionTarget && options.recoveryQueryPlanner ? 30 : 60);
+  if (options.recoveryQueryPlanner && (collectionTarget
+    ? grounding.results.length < collectionTarget
+    : !assessWebSearchGrounding(grounding, cleanQuery).sufficient)) {
     try {
-      const maxRecoveryQueries = Math.max(1, Math.min(options.maxRecoveryQueries ?? 2, 3));
       const proposed = await options.recoveryQueryPlanner({
         phase: "recovery",
         query: cleanQuery,
         executedQueries: [...executedQueries],
-        results: grounding.results.slice(0, 8).map(({ title, url, snippet, fetched }) => ({ title, url, snippet, fetched })),
+        results: grounding.results.slice(0, collectionTarget || 8).map(({ title, url, snippet, fetched }) => ({ title, url, snippet, fetched })),
         maxQueries: maxRecoveryQueries
       });
       const recoveryPlan = normalizePlannerResult(proposed, maxRecoveryQueries);
       const recoveryQueries = recoveryPlan.queries;
+      recoveryQueryCount = recoveryQueries.length;
       const recoveryUrlItems = plannerUrlItems(recoveryPlan.urls, "recovery");
       if (recoveryQueries.length > 0 || recoveryUrlItems.length > 0) {
         executedQueries.push(...recoveryQueries);
+        const recoveryItems = recoveryQueries.length > 0 ? await searchQueries(recoveryQueries) : [];
+        [...recoveryUrlItems, ...recoveryItems].forEach((item) => recoveryCandidateUrls.add(item.url));
         candidates = await enrichCandidates([
           ...recoveryUrlItems,
           ...candidates,
-          ...(recoveryQueries.length > 0 ? await searchQueries(recoveryQueries) : [])
+          ...recoveryItems
         ]);
-        grounding = await materialize();
       }
     } catch (error) {
       warnings.push(`Web query recovery planner failed: ${errorMessage(error)}`);
-      grounding = { ...grounding, warnings: uniqueStrings(warnings) };
     }
+    // An empty, rejected or failed model plan must not strand unread candidates.
+    // One additional bounded pass reuses the URL cache (including failed reads)
+    // and never retries already attempted pages or loops until enough sources.
+    grounding = await materialize();
   }
 
   const assessment = assessWebSearchGrounding(grounding, cleanQuery);
@@ -1009,6 +1096,11 @@ function sourceQualityScore(item: WebSearchItem, query = ""): number {
   const strongSubjectMatch = subjectTokens.length === 0 || hasStrongSearchSubjectMatch(query, haystack);
   if (strongSubjectMatch && subjectTokens.length > 0) score += 6;
   if (!strongSubjectMatch) score -= 8;
+  // Within equally relevant/authoritative candidates, prefer direct search
+  // hits to generic links expanded from a documentation sidebar. This small
+  // provenance tie-break does not outrank a genuinely intent-matching release
+  // or pricing page discovered from an official homepage.
+  if (!item.discoveredFrom) score += 1;
   if (item.snippet.trim().length >= 40) score += 1;
   if (isNewsSearchQuery(query)) score += newsFreshnessScore(item);
   return score;

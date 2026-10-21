@@ -389,7 +389,7 @@ export function stripManagedReviewDailyBlocks(content: string): string {
 
 export function cleanReviewDailyContent(content: string): string {
   const evidence = prepareCitableMarkdown("review-daily.md", content);
-  if (!evidence.allowed) return "";
+  if (!evidence.allowed || !evidence.aiEligible) return "";
   let clean = evidence.markdown.replace(/^---\s*\n[\s\S]*?\n---\s*/u, "");
   if (evidence.origin === "user-saved-conversation") clean = `说明：${USER_SAVED_CONVERSATION_LABEL}\n\n${clean}`;
   clean = stripManagedReviewDailyBlocks(clean);

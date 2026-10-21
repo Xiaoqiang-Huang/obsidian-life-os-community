@@ -4,7 +4,7 @@ import { prepareCitableMarkdown, type EvidenceOrigin } from "./context-engine/Co
 /** Shared input boundary for user-triggered diary analysis; never modify the source. */
 export function prepareDailyAnalysisSource(path: string, markdown: string, rootFolder: string): { content: string; origin: EvidenceOrigin } {
   const source = prepareCitableMarkdown(path, markdown, { rootFolder });
-  if (!source.allowed) return { content: "", origin: "context-only" };
+  if (!source.allowed || !source.aiEligible) return { content: "", origin: "context-only" };
   const lines: string[] = [];
   let aiLevel = 0, fence = "";
   // Remove the entire subtree BEFORE empty-heading cleanup can discard its parent.

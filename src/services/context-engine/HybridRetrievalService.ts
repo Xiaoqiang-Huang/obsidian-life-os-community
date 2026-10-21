@@ -1,4 +1,5 @@
 import type { App } from "obsidian";
+import { isInternalTrashPath } from "./ContextSourcePolicyService";
 import { MarkdownChunkingService, type MarkdownChunk } from "./MarkdownChunkingService";
 import { ObsidianMetadataService } from "./ObsidianMetadataService";
 import { extractSpecificQueryAnchors } from "./QueryAnalysis";
@@ -11,7 +12,16 @@ import type {
 
 export interface HybridRetrievalInput {
   userMessage: string;
+  /** Documents this query may read (the shared index may hold more). */
   inventory: ContextInventoryItem[];
+  /**
+   * KB-10: the full-Vault manifest that owns the shared index lifecycle. Documents are
+   * indexed from and evicted against this list only, so switching project scope never
+   * evicts another project's documents. `allowedPaths` narrows a single query without
+   * touching the index. Direct callers that omit it keep the previous contract:
+   * `inventory` is both the query scope and the index manifest.
+   */
+  indexInventory?: ContextInventoryItem[];
   allowedPaths?: string[];
   maxResults?: number;
 }
@@ -72,9 +82,12 @@ const ALIAS_GROUPS: string[][] = [
 ];
 
 /**
- * Built-in local hybrid retrieval. It combines BM25 and a hashed semantic
- * vector, fuses them with RRF, then reranks with metadata and diversity.
- * No remote embedding service is required, so semantic mode always works.
+ * Built-in local lexical hybrid retrieval. It combines BM25 over words and
+ * Han character n-grams with a hashed word/n-gram vector, fuses them with RRF,
+ * expands the query with the fixed synonym/alias groups below, then reranks
+ * with metadata and diversity. There is no semantic model and no remote
+ * embedding service: exact wording matters, so paraphrases and cross-language
+ * queries may not be recalled.
  */
 export class HybridRetrievalService {
   private readonly chunker = new MarkdownChunkingService();
@@ -100,10 +113,26 @@ export class HybridRetrievalService {
     }
   }
 
+  /** Build or incrementally refresh the shared local index without a query.
+   * Read-only and model-free: it reuses the same inventory/ensureIndex path as
+   * search(), so an idle warm-up can never widen retrieval or write to the
+   * Vault. Unchanged documents are reused by mtime; only changed files re-read.
+   * `inventory` is the full-Vault manifest here. */
+  async warmIndex(inventory: ContextInventoryItem[]): Promise<{ updated: number; reused: number; documents: number; chunks: number }> {
+    const stats = await this.ensureIndex(inventory);
+    return {
+      ...stats,
+      documents: this.state.documents.size,
+      chunks: Array.from(this.state.documents.values()).reduce((sum, document) => sum + document.chunks.length, 0)
+    };
+  }
+
   async search(input: HybridRetrievalInput): Promise<HybridRetrievalResult> {
     const startedAt = Date.now();
-    const indexStats = await this.ensureIndex(input.inventory);
-    const allowed = input.allowedPaths?.length ? new Set(input.allowedPaths.map((path) => this.normalizePath(path))) : null;
+    const indexStats = await this.ensureIndex(input.indexInventory ?? input.inventory);
+    // An explicit allow-list is authoritative, even when empty: a scoped query must not
+    // fall back to the whole shared index. Only an omitted list means "no narrowing".
+    const allowed = input.allowedPaths ? new Set(input.allowedPaths.map((path) => this.normalizePath(path))) : null;
     const chunks = Array.from(this.state.documents.values())
       .filter((document) => !allowed || allowed.has(this.normalizePath(document.path)))
       .flatMap((document) => document.chunks);
@@ -122,7 +151,8 @@ export class HybridRetrievalService {
     const fused = this.fuse(sparse, vector, rankingTokens, originalQuery);
     const bestScore = fused[0]?.score ?? 0;
     const qualified = fused.filter((entry) => entry.score >= Math.max(0.055, bestScore * 0.32));
-    const selected = this.selectDiverse(qualified, this.clamp(input.maxResults ?? 10, 1, MAX_RESULTS));
+    const limit = this.clamp(input.maxResults ?? 10, 1, MAX_RESULTS);
+    const selected = this.selectDiverse(qualified, limit);
     const citableSelected: RankedChunk[] = [];
     for (const entry of selected) {
       if (await this.metadata.readCitableSource(entry.chunk.path)) citableSelected.push(entry);
@@ -145,6 +175,18 @@ export class HybridRetrievalService {
       })
     }));
 
+    const scopePaths = new Set(chunks.map((chunk) => this.normalizePath(chunk.path)));
+    const readPaths = new Set(evidence.map((item) => this.normalizePath(item.source.path)));
+    const conceptCoverage = this.coverage(rankingTokens, evidence);
+    const documentsTruncated = readPaths.size < scopePaths.size;
+    const samplingReasons: string[] = [];
+    if (documentsTruncated) {
+      samplingReasons.push(`本地检索按相关性选取片段：检索范围 ${scopePaths.size} 篇中只有 ${readPaths.size} 篇进入证据。`);
+    }
+    if (evidence.length >= limit && qualified.length > evidence.length) {
+      samplingReasons.push(`证据片段上限 ${limit} 条。`);
+    }
+
     return {
       evidence,
       warnings: evidence.length === 0 && queryTokens.length > 0 ? ["未找到与当前问题足够相关的本地证据。"] : [],
@@ -158,7 +200,13 @@ export class HybridRetrievalService {
         fusedCandidates: fused.length,
         selectedCount: evidence.length,
         candidateCount: chunks.length,
-        coverage: this.coverage(rankingTokens, evidence),
+        coverage: conceptCoverage,
+        conceptCoverage,
+        documentsRead: readPaths.size,
+        documentsTotal: scopePaths.size,
+        documentsCoverage: scopePaths.size > 0 ? readPaths.size / scopePaths.size : 1,
+        documentsTruncated,
+        samplingReasons,
         durationMs: Date.now() - startedAt,
         indexDocuments: this.state.documents.size,
         indexChunks: Array.from(this.state.documents.values()).reduce((sum, document) => sum + document.chunks.length, 0),
@@ -168,8 +216,16 @@ export class HybridRetrievalService {
     };
   }
 
-  private async ensureIndex(inventory: ContextInventoryItem[]): Promise<{ updated: number; reused: number }> {
-    const readable = inventory.filter((item) => item.path.toLowerCase().endsWith(".md"));
+  /**
+   * KB-10: the index lifecycle is owned by the full-Vault manifest (`indexInventory`).
+   * Only documents absent from that manifest (a real delete) or revoked by the internal
+   * Trash are evicted; a project scope never removes documents from the shared index.
+   */
+  private async ensureIndex(indexInventory: ContextInventoryItem[]): Promise<{ updated: number; reused: number }> {
+    // The index is model-bound, so it never trusts the caller's snapshot for the undo state:
+    // a revoked (internal Trash) path is not live and is evicted from the incremental index
+    // instead of being re-read, even when a stale inventory still lists it.
+    const readable = indexInventory.filter((item) => item.path.toLowerCase().endsWith(".md") && !isInternalTrashPath(item.path));
     const livePaths = new Set(readable.map((item) => this.normalizePath(item.path)));
     for (const path of Array.from(this.state.documents.keys())) {
       if (!livePaths.has(this.normalizePath(path))) this.state.documents.delete(path);

@@ -1,4 +1,14 @@
 import type { AiClient } from "../../ai";
+import type { AgentRequestBudget } from "./AgentRequestBudget";
+
+export interface AgentMemoryExtractionPolicy {
+  /** Compatibility name: only the unified SDK policy exists. False disables
+   * processing; it can NEVER select a native inference path. */
+  sdkSelected(): boolean;
+  identity(): string;
+  ready(): boolean;
+  client(job: AgentMemoryExtractionJob): AiClient;
+}
 import {
   normalizeAgentMemoryMaxItemsPerSession,
   normalizeAgentMemoryMaxSessionsPerRun,
@@ -68,14 +78,21 @@ const MEMORY_KINDS = new Set<AgentMemoryKind>([
 export class AgentMemoryPipeline {
   private running: Promise<AgentMemoryPipelineResult> | null = null;
   private scheduled = false;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private stopped = false;
+  private readonly lifecycle = new AbortController();
+  dispose(): void { this.stopped = true; this.lifecycle.abort(); if (this.timer) clearTimeout(this.timer); this.timer = undefined; this.scheduled = false; }
 
   constructor(
     private ai: AiClient,
     private store: AgentMemoryStore,
-    private getSettings: () => Partial<PersonalLifeSystemSettings>
+    private getSettings: () => Partial<PersonalLifeSystemSettings>,
+    private policy?: AgentMemoryExtractionPolicy
   ) {}
 
   async enqueueTurn(input: AgentMemoryTurnInput): Promise<boolean> {
+    const sdk = this.policy?.sdkSelected() === true;
+    if (this.stopped || !sdk || !this.policy!.ready() || this.getSettings().agentMemoryEnabled === false) return false;
     const userContent = this.clean(input.userContent, 8_000);
     const assistantContent = this.clean(input.assistantContent, 8_000);
     if (!userContent || !assistantContent) return false;
@@ -87,6 +104,8 @@ export class AgentMemoryPipeline {
     ].join("|"));
     const now = new Date().toISOString();
     const job: AgentMemoryExtractionJob = {
+      modelBackend: "claude-sdk",
+      sdkWorkflowIdentity: this.policy!.identity(),
       id: `extract-${fingerprint}`,
       fingerprint,
       sessionId: input.sessionId,
@@ -110,11 +129,11 @@ export class AgentMemoryPipeline {
   }
 
   schedule(): void {
-    if (this.scheduled) return;
+    if (this.scheduled || this.stopped) return;
     this.scheduled = true;
-    setTimeout(() => {
+    this.timer = setTimeout(() => {
       this.scheduled = false;
-      void this.processPending().catch(() => undefined);
+      if (!this.stopped) void this.processPending().catch(() => undefined);
     }, 40);
   }
 
@@ -128,8 +147,16 @@ export class AgentMemoryPipeline {
 
   private async processClaimed(limit?: number): Promise<AgentMemoryPipelineResult> {
     const settings = this.getSettings();
+    const sdk = this.policy?.sdkSelected() === true;
+    const empty = { claimed: 0, completed: 0, failed: 0, added: 0, updated: 0 };
+    if (this.stopped || !sdk) return empty;
     const maxJobs = limit ?? normalizeAgentMemoryMaxSessionsPerRun(settings.agentMemoryMaxSessionsPerRun);
-    const jobs = await this.store.claimJobs(maxJobs);
+    if (!Number.isSafeInteger(maxJobs) || maxJobs <= 0) return empty;
+    const identity = this.policy!.identity();
+    await this.store.pauseIncompatibleJobs(identity);
+    if (this.stopped || !identity || !this.policy!.ready() || this.getSettings().agentMemoryEnabled === false) return empty;
+    const jobs = await this.store.claimJobs(Math.min(maxJobs, 20), new Date(), 60_000, job => job.modelBackend === "claude-sdk" && job.sdkWorkflowIdentity === identity);
+    const budget: AgentRequestBudget = { limit: jobs.length, used: 0, signal: this.lifecycle.signal, maxInputChars: 60000, maxOutputTokens: 2048 };
     const result: AgentMemoryPipelineResult = {
       claimed: jobs.length,
       completed: 0,
@@ -139,7 +166,11 @@ export class AgentMemoryPipeline {
     };
     for (const job of jobs) {
       try {
-        const candidates = await this.extract(job);
+        if (this.stopped || this.policy && this.policy.sdkSelected() !== sdk) throw new Error("sdk-workflow-identity-changed");
+        if (sdk && (this.getSettings().agentMemoryEnabled === false || !this.policy!.sdkSelected() || !this.policy!.ready() || this.policy!.identity() !== identity)) throw new Error("sdk-workflow-identity-changed");
+        const candidates = await this.extract(job, this.policy!.client(job), budget);
+        if (this.stopped || this.policy && this.policy.sdkSelected() !== sdk) throw new Error("sdk-workflow-identity-changed");
+        if (sdk && (this.getSettings().agentMemoryEnabled === false || !this.policy!.sdkSelected() || !this.policy!.ready() || this.policy!.identity() !== identity)) throw new Error("sdk-workflow-identity-changed");
         const outcome = await this.store.completeJob(job.id, candidates);
         result.completed += 1;
         result.added += outcome.added;
@@ -155,7 +186,7 @@ export class AgentMemoryPipeline {
     return result;
   }
 
-  private async extract(job: AgentMemoryExtractionJob): Promise<AgentMemoryCandidate[]> {
+  private async extract(job: AgentMemoryExtractionJob, client: AiClient, budget: AgentRequestBudget): Promise<AgentMemoryCandidate[]> {
     const scope: AgentMemoryScope = buildAgentMemoryScope(
       normalizeAgentMemoryScopeMode(this.getSettings().agentMemoryScopeMode),
       job.projectScopeId,
@@ -171,9 +202,12 @@ export class AgentMemoryPipeline {
     }];
     const heuristic = this.heuristicCandidates(job, scope).map((candidate) => ({ ...candidate, evidence }));
     const maxItems = normalizeAgentMemoryMaxItemsPerSession(this.getSettings().agentMemoryMaxItemsPerSession);
-    if (!this.ai.isConfigured()) return heuristic.slice(0, maxItems);
+    if (!client.isConfigured()) {
+      throw new Error("sdk-workflow-config-not-ready");
+    }
 
-    const response = await this.ai.complete({
+    const response = await client.complete({
+      requestBudget: budget,
       responseFormat: "json",
       temperature: 0,
       skipModelCheck: true,
@@ -201,7 +235,15 @@ export class AgentMemoryPipeline {
         }
       ]
     });
-    if (!response.ok || !response.text) return heuristic.slice(0, maxItems);
+    if (!response.ok || !response.text) {
+      throw new Error(response.error && /^sdk-[a-z-]+$/.test(response.error) ? response.error : "sdk-memory-extraction-failed");
+    }
+    if (budget) {
+      try {
+        const value = JSON.parse(response.text);
+        if (!value || !Array.isArray(value.items)) throw new Error("invalid-memory-schema");
+      } catch { throw new Error("sdk-memory-schema-invalid"); }
+    }
     const parsed = this.parseRows(response.text);
     const modelCandidates = parsed.map((row) => this.toCandidate(row, scope, evidence)).filter((item): item is AgentMemoryCandidate => Boolean(item));
     return this.dedupe([...heuristic, ...modelCandidates]).slice(0, maxItems);

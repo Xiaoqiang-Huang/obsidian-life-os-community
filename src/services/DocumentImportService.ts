@@ -1,4 +1,4 @@
-import type { App, TFile } from "obsidian";
+import { TFile, type App } from "obsidian";
 import { strFromU8, unzipSync } from "fflate";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import "pdfjs-dist/legacy/build/pdf.worker.mjs";
@@ -44,11 +44,26 @@ export interface ExtractedDocumentText {
 
 export interface SaveImportedFileToVaultOptions {
   folderPath: string;
+  /**
+   * Stable job identity for retry-safe archiving. When set, the vault path is derived from the
+   * identity and an already stored original is reused instead of archiving a second copy.
+   */
+  identity?: string;
 }
 
 export interface SavedImportedFile {
   vaultPath: string;
   obsidianLink: string;
+}
+
+/** Shared preflight/read limit for imported originals (50 MB). */
+export const IMPORTED_FILE_MAX_BYTES = 50 * 1024 * 1024;
+
+export interface ImportedFilePreflightResult {
+  ok: boolean;
+  kind: ImportedDocumentKind;
+  /** Present when `ok` is false: the same message `readImportedFile` would throw. */
+  message?: string;
 }
 
 export interface ExtractReadableDocumentTextOptions {
@@ -114,21 +129,36 @@ export function formatAttachmentSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/**
+ * Deterministic import preflight: unsupported type and size are known before any byte is read
+ * or archived, so batch import can reject a file without leaving an orphan attachment.
+ */
+export function preflightImportedFile(
+  file: ReadableImportFile,
+  options: { maxBytes: number }
+): ImportedFilePreflightResult {
+  const kind = classifyImportedDocument(file.name, file.type || "");
+  if (!isSupportedImportKind(kind)) {
+    return { ok: false, kind, message: `Unsupported file type: ${file.name}` };
+  }
+  if (file.size > options.maxBytes) {
+    return { ok: false, kind, message: `${file.name} is larger than ${formatAttachmentSize(options.maxBytes)}.` };
+  }
+  return { ok: true, kind };
+}
+
 export async function readImportedFile(
   file: ReadableImportFile,
   options: ReadImportedFileOptions
 ): Promise<ImportedDocument> {
   const mimeType = file.type || "";
-  const kind = classifyImportedDocument(file.name, mimeType);
+  const preflight = preflightImportedFile(file, { maxBytes: options.maxBytes });
+  if (!preflight.ok) {
+    throw new Error(preflight.message);
+  }
+  const kind = preflight.kind;
   const warnings: string[] = [];
   const maxTextChars = options.maxTextChars === null ? null : options.maxTextChars ?? null;
-
-  if (!isSupportedImportKind(kind)) {
-    throw new Error(`Unsupported file type: ${file.name}`);
-  }
-  if (file.size > options.maxBytes) {
-    throw new Error(`${file.name} is larger than ${formatAttachmentSize(options.maxBytes)}.`);
-  }
 
   let text = "";
   let dataUrl: string | undefined;
@@ -311,15 +341,30 @@ export async function saveImportedFileToVault(
     throw new Error("Attachment archive folder is not configured.");
   }
   await ensureFolder(app, folderPath);
-  const bytes = await readFileBytes(file);
-  const vaultPath = uniqueVaultFilePath(app, folderPath, file.name);
-  const binary = new Uint8Array(bytes).buffer;
   const vault = app.vault as App["vault"] & {
     createBinary?: (path: string, data: ArrayBuffer) => Promise<TFile>;
   };
+  let vaultPath = "";
+  if (options.identity) {
+    const identityCandidate = identityVaultFilePath(folderPath, file.name, options.identity);
+    const existing = app.vault.getAbstractFileByPath(identityCandidate);
+    if (existing instanceof TFile) {
+      // Stable job identity: a retry of the same file reuses the already stored original instead
+      // of archiving a second copy (and never re-reads its bytes).
+      return {
+        vaultPath: identityCandidate,
+        obsidianLink: formatImportedDocumentLink({ kind: classifyImportedDocument(file.name, file.type || ""), vaultPath: identityCandidate })
+      };
+    }
+    vaultPath = existing ? uniqueVaultFilePath(app, folderPath, file.name) : identityCandidate;
+  } else {
+    vaultPath = uniqueVaultFilePath(app, folderPath, file.name);
+  }
   if (typeof vault.createBinary !== "function") {
     throw new Error("Current Obsidian vault does not support binary file creation.");
   }
+  const bytes = await readFileBytes(file);
+  const binary = new Uint8Array(bytes).buffer;
   await vault.createBinary(vaultPath, binary);
   return {
     vaultPath,
@@ -362,6 +407,24 @@ function uniqueVaultFilePath(app: App, folderPath: string, fileName: string): st
     counter += 1;
   }
   return candidate;
+}
+
+/** Deterministic vault path for a stable import identity, so retries resolve to the same file. */
+function identityVaultFilePath(folderPath: string, fileName: string, identity: string): string {
+  const safeName = safeImportedFileName(fileName);
+  const extensionIndex = safeName.lastIndexOf(".");
+  const stem = extensionIndex > 0 ? safeName.slice(0, extensionIndex) : safeName;
+  const extension = extensionIndex > 0 ? safeName.slice(extensionIndex) : "";
+  return joinPath(folderPath, `${stem}--${stableImportIdentitySuffix(identity)}${extension}`);
+}
+
+function stableImportIdentitySuffix(identity: string): string {
+  let hash = 5381;
+  const text = String(identity || "");
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) + hash) ^ text.charCodeAt(index);
+  }
+  return Math.abs(hash).toString(36).slice(0, 8).padStart(4, "0");
 }
 
 function safeImportedFileName(fileName: string): string {

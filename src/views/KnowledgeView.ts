@@ -22,20 +22,23 @@ import type PersonalLifeSystemPlugin from "../main";
 import { DisplayFormatService } from "../services/DisplayFormatService";
 import {
   CHAT_IMPORT_ACCEPT,
+  IMPORTED_FILE_MAX_BYTES,
   formatAttachmentSize,
+  preflightImportedFile,
   readImportedFile,
   saveImportedFileToVault,
   type ImportedDocument,
   type ReadableImportFile
 } from "../services/DocumentImportService";
 import { FileSystemService } from "../services/FileSystemService";
+import { LlmWikiDuplicateService, type LlmWikiDuplicateResult } from "../services/LlmWikiDuplicateService";
 import { LlmWikiQueueService } from "../services/LlmWikiQueueService";
 import { LlmWikiBatchService } from "../services/LlmWikiBatchService";
 import { LlmWikiCompilerService, type CompileLlmWikiSourceInput } from "../services/LlmWikiCompilerService";
 import { LlmWikiDraftService } from "../services/LlmWikiDraftService";
 import { LlmWikiPathService } from "../services/LlmWikiPathService";
 import { LlmWikiUndoService } from "../services/LlmWikiUndoService";
-import { buildLlmWikiSourceMarkdown, classifyLlmWikiMaterialLength, simpleLlmWikiHash, type LlmWikiCompileDepth, type LlmWikiPrivacyLevel, type LlmWikiSourceKind } from "../services/llm-wiki-logic";
+import { buildLlmWikiSourceMarkdown, classifyLlmWikiMaterialLength, llmWikiPolicyFrontmatterLines, resolveLlmWikiSourcePolicy, simpleLlmWikiHash, type LlmWikiCompileDepth, type LlmWikiPrivacyLevel, type LlmWikiSourceKind } from "../services/llm-wiki-logic";
 import { buildKeywordLinkedMarkdown, stripKeywordLinksSection } from "../services/KeywordLinkService";
 import { PdfOcrService } from "../services/PdfOcrService";
 import { ProjectDocumentService, type ProjectDocumentAiFormatterInput } from "../services/ProjectDocumentService";
@@ -44,11 +47,14 @@ import { fetchReadableUrl, type WebContextRequestOptions } from "../services/Web
 import type { LifeOSProject } from "../types";
 import { today } from "../utils/dates";
 import {
+  ImportFileJob,
   asRelativeReadableImportFile,
   configureDirectoryInput,
   importFileRelativePath,
   importFileSelectionKey,
-  mergeSupportedImportFiles
+  importFileStatusLabel,
+  mergeSupportedImportFiles,
+  type ImportFileJobOutcome
 } from "../utils/import-file-selection";
 import { renderMarkdownDisplay } from "../utils/markdown-render";
 import { renderStableView } from "../utils/stable-view-refresh";
@@ -112,8 +118,28 @@ interface KnowledgeCaptureInput {
   sourcePath?: string;
 }
 
+/** Result of the shared Raw intake decision (dedup vs. version vs. fresh entry). */
+type KnowledgeRawIntakeStatus = "imported" | "duplicate" | "versioned";
+
+interface RawLlmWikiIntakeOutcome {
+  file: TFile;
+  status: KnowledgeRawIntakeStatus;
+  message: string;
+  duplicateOf?: string;
+  versionOf?: string;
+}
+
+/** One file of a batch import: per-file status plus the resources the attempt produced. */
+interface KnowledgeImportItemResult extends ImportFileJobOutcome {
+  name: string;
+  filePath?: string;
+  attachmentPath?: string;
+  duplicateOf?: string;
+  versionOf?: string;
+}
+
 interface KnowledgeImportHandlers {
-  importFiles: (files: File[], privacy: KnowledgePrivacyChoice, destination: KnowledgeCaptureKind, projectId?: string, originalOnly?: boolean) => Promise<void>;
+  importFiles: (files: File[], privacy: KnowledgePrivacyChoice, destination: KnowledgeCaptureKind, projectId?: string, originalOnly?: boolean) => Promise<KnowledgeImportItemResult[]>;
   importUrl: (
     url: string,
     title: string,
@@ -602,6 +628,8 @@ export class KnowledgeView extends ItemView {
     acceptedAt: string
   ): Promise<{ ok: boolean; targetPath?: string; message: string; warning?: string }> {
     const title = this.inferKnowledgeTitleFromMarkdown(draftMarkdown, "LLM Wiki Draft");
+    // 分类/移动/接受草稿只切换存放位置，必须继承草稿原有的三层权限，绝不自动升级。
+    const draftPolicy = this.normalizeLlmWikiSourcePolicy(this.parseLlmWikiFrontmatter(draftMarkdown));
     let targetPath = "";
     if (destination.kind === "formal") {
       return {
@@ -615,11 +643,12 @@ export class KnowledgeView extends ItemView {
       const document = await projectDocuments.createDocument(project, {
         title,
         kind: "reference",
-        content: body
+        content: body,
+        policy: draftPolicy
       });
       targetPath = document.path;
     } else {
-      const content = this.buildCategorizedKnowledgeMarkdown(destination.kind, title, body, acceptedAt, draftPath);
+      const content = this.buildCategorizedKnowledgeMarkdown(destination.kind, title, body, acceptedAt, draftPath, draftPolicy);
       const folder = KNOWLEDGE_CATEGORY_META[destination.kind].folder;
       targetPath = this.uniqueKnowledgePath(fs, [folder], `${today()}-${this.sanitizeKnowledgeTitle(title)}.md`);
       await ensureFolder(this.app, targetPath.split("/").slice(0, -1).join("/"));
@@ -646,15 +675,15 @@ export class KnowledgeView extends ItemView {
     title: string,
     body: string,
     createdAt: string,
-    sourcePath: string
+    sourcePath: string,
+    policy: { privacyLevel: LlmWikiPrivacyLevel; aiProcessingAllowed: boolean }
   ): string {
     const meta = KNOWLEDGE_CATEGORY_META[kind];
     return buildKeywordLinkedMarkdown([
       "---",
       "type: knowledge-note",
       `category: ${this.escapeYamlValue(meta.label)}`,
-      "privacy_level: normal",
-      "ai_processing_allowed: true",
+      ...llmWikiPolicyFrontmatterLines(policy),
       `source_draft: ${this.escapeYamlValue(sourcePath)}`,
       `created_at: ${createdAt}`,
       "---",
@@ -893,17 +922,10 @@ export class KnowledgeView extends ItemView {
     return String(markdown || "").replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n)?/, "");
   }
 
-  private normalizeLlmWikiPrivacyLevel(value = ""): LlmWikiPrivacyLevel {
-    const normalized = this.normalizeLlmWikiScalar(value);
-    return normalized === "sensitive" || normalized === "private" ? normalized : "normal";
-  }
-
   private normalizeLlmWikiSourcePolicy(frontmatter: Record<string, string>): { privacyLevel: LlmWikiPrivacyLevel; aiProcessingAllowed: boolean } {
-    const privacyLevel = this.normalizeLlmWikiPrivacyLevel(frontmatter.privacy_level);
-    return {
-      privacyLevel,
-      aiProcessingAllowed: true
-    };
+    // Inherit the stored policy verbatim. Forcing the AI flag to `true` here is what let a
+    // `privacy_level: sensitive` / `ai_processing_allowed: false` source reach the model.
+    return resolveLlmWikiSourcePolicy(frontmatter);
   }
 
   private normalizeLlmWikiScalar(value = ""): string {
@@ -1914,7 +1936,7 @@ export class KnowledgeView extends ItemView {
       importFiles: async (files, privacy, destination, projectId, originalOnly) => {
         if (originalOnly) {
           const project = destination === "project" ? await this.requireProjectForDestination(fs, projectId) : null;
-          if (project && !requireProFeature(this.plugin, "projectDocuments")) return;
+          if (project && !requireProFeature(this.plugin, "projectDocuments")) return [];
           const folderPath = project
             ? `${new ProjectDocumentService(this.app, fs).attachmentsPath(project)}/Originals`
             : fs.path("Knowledge", "Attachments", "Originals", destination);
@@ -1925,32 +1947,51 @@ export class KnowledgeView extends ItemView {
           new Notice(`已保存 ${savedFiles.length} 个原文件；未解析正文，也未生成 Markdown。`, 6000);
           await this.render();
           if (savedFiles[0]) await this.app.workspace.getLeaf("tab").openFile(savedFiles[0], { active: true });
-          return;
+          return [];
         }
         if (destination === "project") {
-          const imported = await this.importKnowledgeFilesToProject(fs, files, projectId);
+          const imported = await this.importKnowledgeFilesToProject(fs, files, projectId, privacy);
           new Notice(`已导入 ${imported.length} 个项目文档。`, 6000);
           const firstPath = imported[0]?.document.path;
           const first = firstPath ? this.app.vault.getAbstractFileByPath(firstPath) : null;
           if (first instanceof TFile) await this.app.workspace.getLeaf(false).openFile(first);
           await this.render();
-          return;
+          return [];
         }
-        const imported = await this.importKnowledgeFiles(fs, files, privacy, destination);
+        const results = await this.importKnowledgeFiles(fs, files, privacy, destination);
         const destinationLabel = this.captureDestinationLabel(destination);
-        new Notice(`已导入 ${imported.length} 个资料文件到「${destinationLabel}」。`, 6000);
-        const first = imported[0];
-        if (first) await this.app.workspace.getLeaf(false).openFile(first);
+        const importedCount = results.filter((item) => item.status === "imported").length;
+        const duplicateCount = results.filter((item) => item.status === "duplicate").length;
+        const versionedCount = results.filter((item) => item.status === "versioned").length;
+        const failedCount = results.filter((item) => item.status === "failed" || item.status === "preflight-failed").length;
+        if (failedCount === 0) {
+          new Notice([
+            `已导入 ${importedCount + duplicateCount + versionedCount} 个资料文件到「${destinationLabel}」`,
+            duplicateCount > 0 ? `，其中 ${duplicateCount} 个重复内容已指向已有资料` : "",
+            versionedCount > 0 ? `，${versionedCount} 个来源更新已保存为新版本` : "",
+            "。"
+          ].join(""), 6000);
+        } else {
+          new Notice(`导入完成：成功 ${importedCount + duplicateCount + versionedCount} 个，失败 ${failedCount} 个；可在列表中只重试失败项。`, 7000);
+        }
+        const firstPath = results.find((item) => item.filePath)?.filePath;
+        const first = firstPath ? this.app.vault.getAbstractFileByPath(firstPath) : null;
+        if (first instanceof TFile) await this.app.workspace.getLeaf(false).openFile(first);
         await this.render();
+        return results;
       },
       importUrl: async (url, title, privacy, destination, clipMode, _projectId) => {
         if (destination !== "raw") {
           new Notice(`Web Clipper 会先进入资料收件箱，不会直接写入「${this.captureDestinationLabel(destination)}」。整理成 Draft 后再选择最终分类或项目。`, 7000);
         }
-        const file = await this.importKnowledgeUrl(fs, url, title, privacy, clipMode);
-        new Notice(`网页剪藏已进入 Web Clipper 收件箱：${file.path}`, 6000);
+        const outcome = await this.importKnowledgeUrl(fs, url, title, privacy, clipMode);
+        new Notice([
+          outcome.status === "duplicate"
+            ? `网页已有相同内容，已指向已有条目：${outcome.file.path}`
+            : `网页剪藏已进入 Web Clipper 收件箱：${outcome.file.path}`
+        ].join(""), 6000);
         await this.render();
-        this.focusKnowledgeItem(file.path);
+        this.focusKnowledgeItem(outcome.file.path);
       },
       pasteText: (destination, projectId) => void this.openNewKnowledgeSourceModal(fs, { defaultKind: destination, defaultProjectId: projectId }),
       importProjectDocuments: (projectId) => void this.openProjectDocumentImportFromKnowledge(fs, projectId)
@@ -2035,56 +2076,108 @@ export class KnowledgeView extends ItemView {
     files: File[],
     privacy: KnowledgePrivacyChoice,
     destination: Exclude<KnowledgeCaptureKind, "project"> = "raw"
-  ): Promise<TFile[]> {
+  ): Promise<KnowledgeImportItemResult[]> {
     if (!requireProFeature(this.plugin, "knowledgeImport")) throw new Error("此功能需要 Pro 授权。");
     if (files.length === 0) throw new Error("请先选择要导入的文件。");
-    const importedFiles: TFile[] = [];
+    const results: KnowledgeImportItemResult[] = [];
     const pdfOcr = new PdfOcrService(this.app, {
       engine: this.plugin.settings.pdfOcrEngine,
       paddleEndpoint: this.plugin.settings.paddleOcrEndpoint
     });
     for (const sourceFile of files) {
+      // One bad file must never abort the rest of the batch: every item gets its own result.
       const relativeSourceFile = asRelativeReadableImportFile(sourceFile);
-      const saved = await saveImportedFileToVault(this.app, relativeSourceFile, {
-        folderPath: fs.path("Knowledge", "Attachments", "Imports")
-      });
-      const document = await readImportedFile(relativeSourceFile, {
-        maxBytes: 50 * 1024 * 1024,
-        allowImageVision: false,
-        maxTextChars: null,
-        enablePdfOcr: true,
-        pdfOcr
-      });
-      document.vaultPath = saved.vaultPath;
-      document.obsidianLink = saved.obsidianLink;
-      const title = relativeSourceFile.name.replace(/\.[^.]+$/u, "") || relativeSourceFile.name;
-      const content = this.importedKnowledgeDocumentMarkdown(document);
-      importedFiles.push(destination === "raw"
-        ? await this.createRawLlmWikiSource(fs, {
-          title,
-          content,
-          privacy,
-          sourceKind: "local_file",
-          sourcePath: saved.vaultPath
-        })
-        : await this.createKnowledgeSourceFromModal(fs, {
-          title,
-          content,
-          privacy,
-          kind: destination,
-          sourceKind: "local_file",
-          sourcePath: saved.vaultPath
-        }));
+      const key = importFileSelectionKey(sourceFile);
+      const name = importFileRelativePath(sourceFile);
+      let attachmentPath: string | undefined;
+      try {
+        // Preflight before the original is archived: unsupported types and >50 MB files are
+        // rejected without leaving an unparsable attachment behind.
+        const preflight = preflightImportedFile(relativeSourceFile, { maxBytes: IMPORTED_FILE_MAX_BYTES });
+        if (!preflight.ok) {
+          results.push({ key, name, status: "preflight-failed", message: preflight.message || "文件未通过导入预检。", attachmentPath });
+          continue;
+        }
+        const saved = await saveImportedFileToVault(this.app, relativeSourceFile, {
+          folderPath: fs.path("Knowledge", "Attachments", "Imports"),
+          identity: key
+        });
+        attachmentPath = saved.vaultPath;
+        const document = await readImportedFile(relativeSourceFile, {
+          maxBytes: IMPORTED_FILE_MAX_BYTES,
+          allowImageVision: false,
+          maxTextChars: null,
+          enablePdfOcr: true,
+          pdfOcr
+        });
+        document.vaultPath = saved.vaultPath;
+        document.obsidianLink = saved.obsidianLink;
+        const title = relativeSourceFile.name.replace(/\.[^.]+$/u, "") || relativeSourceFile.name;
+        const content = this.importedKnowledgeDocumentMarkdown(document);
+        if (destination === "raw") {
+          const outcome = await this.intakeRawLlmWikiSource(fs, {
+            title,
+            content,
+            privacy,
+            sourceKind: "local_file",
+            sourcePath: saved.vaultPath
+          });
+          results.push({
+            key,
+            name,
+            status: outcome.status,
+            message: outcome.message,
+            filePath: outcome.file.path,
+            attachmentPath,
+            duplicateOf: outcome.duplicateOf,
+            versionOf: outcome.versionOf
+          });
+        } else {
+          const created = await this.createKnowledgeSourceFromModal(fs, {
+            title,
+            content,
+            privacy,
+            kind: destination,
+            sourceKind: "local_file",
+            sourcePath: saved.vaultPath
+          });
+          results.push({
+            key,
+            name,
+            status: "imported",
+            message: `资料已加入知识库：${created.file.path}`,
+            filePath: created.file.path,
+            attachmentPath
+          });
+        }
+      } catch (error) {
+        const reason = this.errorMessage(error);
+        results.push({
+          key,
+          name,
+          status: "failed",
+          message: attachmentPath
+            ? `解析失败：${reason}（原件已保存，重试会复用：${attachmentPath}）`
+            : `导入失败：${reason}`,
+          attachmentPath
+        });
+      }
     }
-    return importedFiles;
+    return results;
   }
 
-  private async importKnowledgeFilesToProject(fs: FileSystemService, files: File[], projectId?: string) {
+  private async importKnowledgeFilesToProject(fs: FileSystemService, files: File[], projectId: string | undefined, privacy: KnowledgePrivacyChoice) {
     if (!requireProFeature(this.plugin, "projectDocuments")) throw new Error("此功能需要 Pro 授权。");
     if (files.length === 0) throw new Error("请先选择要导入的文件。");
     const project = await this.requireProjectForDestination(fs, projectId);
     const service = new ProjectDocumentService(this.app, fs);
-    return service.importDocuments(project, files.map(asRelativeReadableImportFile));
+    // 选定“敏感资料”时，项目文档必须继承同一权限，不能因为换目录而升级为可发模型。
+    return service.importDocuments(project, files.map(asRelativeReadableImportFile), {
+      policy: resolveLlmWikiSourcePolicy({
+        privacy_level: privacy,
+        ai_processing_allowed: privacy === "sensitive" ? "false" : "true"
+      })
+    });
   }
 
   private async importKnowledgeUrl(
@@ -2093,7 +2186,7 @@ export class KnowledgeView extends ItemView {
     title: string,
     privacy: KnowledgePrivacyChoice,
     clipMode: KnowledgeWebClipMode = "text"
-  ): Promise<TFile> {
+  ): Promise<RawLlmWikiIntakeOutcome> {
     if (!requireProFeature(this.plugin, clipMode === "text-images" ? "webClipper" : "knowledgeImport")) {
       throw new Error("此功能需要 Pro 授权。");
     }
@@ -2102,7 +2195,7 @@ export class KnowledgeView extends ItemView {
     if (clipMode === "text-images") {
       content = await this.buildWebClipContentWithImages(fs, url, inferredTitle, content);
     }
-    return this.createRawLlmWikiSource(fs, {
+    return this.intakeRawLlmWikiSource(fs, {
       title: inferredTitle,
       content: this.buildWebClipInboxMarkdown(url, inferredTitle, content, clipMode),
       privacy,
@@ -2418,6 +2511,25 @@ export class KnowledgeView extends ItemView {
     return { text: response.text, status: response.status };
   }
 
+  /** Shared intake decision: content hash + original-URL identity via the existing service. */
+  private async findRawIntakeDuplicate(
+    fs: FileSystemService,
+    input: { title: string; content: string; originalUrl?: string }
+  ): Promise<LlmWikiDuplicateResult> {
+    const service = new LlmWikiDuplicateService(this.app, this.knowledgeRootFolder(fs), this.plugin.settings.directoryLanguage);
+    return service.findDuplicate(input.title, input.content, input.originalUrl || "");
+  }
+
+  private knowledgeRootFolder(fs: FileSystemService): string {
+    const root = (fs as Partial<FileSystemService>).root;
+    return typeof root === "string" && root ? root : fs.path();
+  }
+
+  /**
+   * Stable named entry point ("create a Raw source"): every caller that only needs the file can
+   * use it. Outcome-aware callers (file import, web clip, paste modal) use
+   * `intakeRawLlmWikiSource` so they can report duplicate/version status per item.
+   */
   private async createRawLlmWikiSource(
     fs: FileSystemService,
     input: {
@@ -2427,26 +2539,77 @@ export class KnowledgeView extends ItemView {
       sourceKind: LlmWikiSourceKind;
       originalUrl?: string;
       sourcePath?: string;
+      /** Explicit declaration only; omitted means "derive from privacy", never "force true". */
+      aiProcessingAllowed?: boolean;
+      /** Explicit "save anyway": an exact duplicate becomes a second entry linked via duplicate_of. */
+      allowDuplicateSave?: boolean;
     }
   ): Promise<TFile> {
+    return (await this.intakeRawLlmWikiSource(fs, input)).file;
+  }
+
+  private async intakeRawLlmWikiSource(
+    fs: FileSystemService,
+    input: {
+      title: string;
+      content: string;
+      privacy: KnowledgePrivacyChoice;
+      sourceKind: LlmWikiSourceKind;
+      originalUrl?: string;
+      sourcePath?: string;
+      aiProcessingAllowed?: boolean;
+      allowDuplicateSave?: boolean;
+    }
+  ): Promise<RawLlmWikiIntakeOutcome> {
     const title = input.title.trim() || "未命名资料";
+    const content = input.content.trim() || "这条资料还没有可检索正文。";
+    // Paste, file import and web clip all share this one decision: reuse the existing entry for
+    // an exact duplicate (content hash + normalized body / original URL), relate a changed
+    // same-URL capture as a version, otherwise create a fresh entry.
+    const duplicate = await this.findRawIntakeDuplicate(fs, { title, content, originalUrl: input.originalUrl });
+    if (duplicate.kind === "exact" && !input.allowDuplicateSave) {
+      const existing = this.app.vault.getAbstractFileByPath(duplicate.existingPath);
+      if (existing instanceof TFile) {
+        const message = `资料库已有完全相同的内容，未重复创建：${duplicate.existingPath}`;
+        new Notice(message, 6000);
+        return { file: existing, status: "duplicate", message, duplicateOf: duplicate.existingPath };
+      }
+    }
     const createdAt = new Date().toISOString();
     const batchId = `knowledge_import_${createdAt.replace(/\D/g, "").slice(0, 12)}`;
-    const id = `src_${createdAt.replace(/\D/g, "").slice(0, 12)}_${simpleLlmWikiHash(`${title}${input.content}`)}`;
-    const path = this.uniqueKnowledgePath(fs, ["LLMWiki", "Raw", "Inbox"], `${createdAt.slice(0, 10)}-${this.sanitizeKnowledgeTitle(title)}-${id}.md`);
-    return ensureFile(this.app, path, buildLlmWikiSourceMarkdown({
+    const id = `src_${createdAt.replace(/\D/g, "").slice(0, 12)}_${simpleLlmWikiHash(`${title}${content}`)}`;
+    const versionOf = duplicate.kind === "updated" && duplicate.existingPath ? duplicate.existingPath : undefined;
+    const duplicateOf = duplicate.kind === "exact" && input.allowDuplicateSave && duplicate.existingPath
+      ? duplicate.existingPath
+      : undefined;
+    const folderParts = versionOf ? ["LLMWiki", "Raw", "Versions"] : ["LLMWiki", "Raw", "Inbox"];
+    const path = this.uniqueKnowledgePath(fs, folderParts, `${createdAt.slice(0, 10)}-${this.sanitizeKnowledgeTitle(title)}-${id}.md`);
+    // 入库即记录三层权限：敏感资料写入 ai_processing_allowed: false，不等待后续整理兜底。
+    const policy = resolveLlmWikiSourcePolicy({
+      privacy_level: input.privacy,
+      ai_processing_allowed: input.aiProcessingAllowed ?? (input.privacy === "sensitive" ? "false" : "true")
+    });
+    const file = await ensureFile(this.app, path, buildLlmWikiSourceMarkdown({
       id,
       title,
       sourceKind: input.sourceKind,
-      content: input.content.trim() || "这条资料还没有可检索正文。",
+      content,
       originalUrl: input.originalUrl,
       sourcePath: input.sourcePath,
       capturedAt: createdAt,
-      privacyLevel: input.privacy,
-      aiProcessingAllowed: true,
+      privacyLevel: policy.privacyLevel,
+      aiProcessingAllowed: policy.aiProcessingAllowed,
       batchId,
-      status: "inbox"
+      status: versionOf ? "versioned" : "inbox",
+      duplicateOf,
+      versionOf
     }));
+    if (versionOf) {
+      const message = `同一来源的内容已更新，已作为新版本保存并关联原条目：${versionOf}`;
+      new Notice(message, 6000);
+      return { file, status: "versioned", message, versionOf };
+    }
+    return { file, status: "imported", message: `资料已加入知识库：${file.path}`, duplicateOf };
   }
 
   private importedKnowledgeDocumentMarkdown(document: ImportedDocument): string {
@@ -2501,8 +2664,15 @@ export class KnowledgeView extends ItemView {
     const input = await openNewKnowledgeSourceModal(this.app, projects, options);
     if (!input) return;
     try {
-      const file = await this.createKnowledgeSourceFromModal(fs, input);
-      new Notice(`资料已加入知识库：${file.path}`, 5000);
+      const { file, rawOutcome } = await this.createKnowledgeSourceFromModal(fs, input);
+      new Notice(
+        rawOutcome?.status === "duplicate"
+          ? `资料库已有相同内容，已指向已有条目：${file.path}`
+          : rawOutcome?.status === "versioned"
+            ? rawOutcome.message
+            : `资料已加入知识库：${file.path}`,
+        5000
+      );
       await this.app.workspace.getLeaf(false).openFile(file);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -2510,7 +2680,10 @@ export class KnowledgeView extends ItemView {
     }
   }
 
-  private async createKnowledgeSourceFromModal(fs: FileSystemService, input: KnowledgeCaptureInput): Promise<TFile> {
+  private async createKnowledgeSourceFromModal(
+    fs: FileSystemService,
+    input: KnowledgeCaptureInput
+  ): Promise<{ file: TFile; rawOutcome?: RawLlmWikiIntakeOutcome }> {
     if (!requireProFeature(this.plugin, input.kind === "project" ? "projectDocuments" : "knowledgeManagement")) {
       throw new Error("此功能需要 Pro 授权。");
     }
@@ -2518,17 +2691,23 @@ export class KnowledgeView extends ItemView {
     const slug = this.sanitizeKnowledgeTitle(title);
     const createdAt = new Date().toISOString();
     const privacy = input.privacy || "normal";
-    const aiProcessingAllowed = "true";
+    // 手动新增资料同样记录三层权限：敏感级别不写 ai_processing_allowed: true。
+    const policy = resolveLlmWikiSourcePolicy({
+      privacy_level: privacy,
+      ai_processing_allowed: privacy === "sensitive" ? "false" : "true"
+    });
 
     if (input.kind === "raw") {
-      return this.createRawLlmWikiSource(fs, {
+      const rawOutcome = await this.intakeRawLlmWikiSource(fs, {
         title,
         content: input.content.trim() || "在这里补充资料正文。",
         privacy,
         sourceKind: input.sourceKind || "manual_markdown",
         originalUrl: input.originalUrl,
-        sourcePath: input.sourcePath
+        sourcePath: input.sourcePath,
+        aiProcessingAllowed: policy.aiProcessingAllowed
       });
+      return { file: rawOutcome.file, rawOutcome };
     }
 
     if (input.kind === "project") {
@@ -2537,10 +2716,11 @@ export class KnowledgeView extends ItemView {
       const document = await service.createDocument(project, {
         title,
         kind: "note",
-        content: input.content.trim() || "在这里补充项目资料正文。"
+        content: input.content.trim() || "在这里补充项目资料正文。",
+        policy
       });
       const file = this.app.vault.getAbstractFileByPath(document.path);
-      if (file instanceof TFile) return file;
+      if (file instanceof TFile) return { file };
       throw new Error(`项目文档已创建但无法打开：${document.path}`);
     }
 
@@ -2552,8 +2732,7 @@ export class KnowledgeView extends ItemView {
       "---",
       "type: knowledge-note",
       `category: ${this.escapeYamlValue(category)}`,
-      `privacy_level: ${privacy}`,
-      `ai_processing_allowed: ${aiProcessingAllowed}`,
+      ...llmWikiPolicyFrontmatterLines(policy),
       `created_at: ${createdAt}`,
       "---",
       "",
@@ -2570,7 +2749,7 @@ export class KnowledgeView extends ItemView {
       "- [ ] 后续整理这条资料",
       ""
     ].join("\n"), { title });
-    return ensureFile(this.app, path, body);
+    return { file: await ensureFile(this.app, path, body) };
   }
 
   private uniqueKnowledgePath(fs: FileSystemService, folderParts: string[], fileName: string): string {
@@ -2881,6 +3060,9 @@ class KnowledgeImportHubModal extends Modal {
   private skippedFileCount = 0;
   private fileListEl!: HTMLElement;
   private fileImportButton!: HTMLButtonElement;
+  private retryImportButton: HTMLButtonElement | null = null;
+  /** Stable per-file outcomes: retry only ever resubmits files whose last attempt failed. */
+  private importJob = new ImportFileJob();
   private privacySelect!: HTMLSelectElement;
   private destinationSelect!: HTMLSelectElement;
   private urlInput!: HTMLInputElement;
@@ -2996,6 +3178,8 @@ class KnowledgeImportHubModal extends Modal {
     createButton(actions, "选择文件", () => input.click(), { icon: "paperclip" });
     createButton(actions, "选择目录", () => directoryInput.click(), { icon: "folder-open" });
     this.fileImportButton = createButton(actions, "导入文件", () => void this.submitFiles(), { primary: true, icon: "upload" });
+    this.retryImportButton = createButton(actions, "重试失败项", () => void this.submitFiles(), { icon: "rotate-cw" });
+    this.retryImportButton.addClass("is-hidden");
     this.fileListEl = card.createDiv({ cls: "lifeos-knowledge-import-file-list" });
     this.renderFileList();
   }
@@ -3061,20 +3245,43 @@ class KnowledgeImportHubModal extends Modal {
     if (!this.fileListEl) return;
     this.fileListEl.empty();
     this.fileImportButton.disabled = this.files.length === 0;
+    const counts = this.importJob.counts();
+    const failedCount = this.importJob.failedCount();
+    if (this.retryImportButton) {
+      this.retryImportButton.toggleClass("is-hidden", failedCount === 0);
+      this.retryImportButton.setText(failedCount > 0 ? `重试失败项（${failedCount}）` : "重试失败项");
+    }
     if (this.files.length === 0) {
       this.fileListEl.createDiv({ cls: "lifeos-muted-text", text: "还没有选择文件。" });
       return;
     }
     this.fileListEl.createDiv({
       cls: "lifeos-knowledge-import-selection-summary",
-      text: `已选择 ${this.files.length} 个文档${this.skippedFileCount > 0 ? ` · 已跳过 ${this.skippedFileCount} 个不支持文件` : ""}`
+      text: [
+        `已选择 ${this.files.length} 个文档`,
+        this.skippedFileCount > 0 ? ` · 已跳过 ${this.skippedFileCount} 个不支持文件` : "",
+        counts.imported > 0 ? ` · 已导入 ${counts.imported}` : "",
+        counts.duplicate > 0 ? ` · 重复 ${counts.duplicate}` : "",
+        counts.versioned > 0 ? ` · 新版本 ${counts.versioned}` : "",
+        counts.failed + counts["preflight-failed"] > 0 ? ` · 失败 ${counts.failed + counts["preflight-failed"]}` : ""
+      ].join("")
     });
     for (const file of this.files.slice(0, 80)) {
+      const outcome = this.importJob.outcomeFor(file);
       const row = this.fileListEl.createDiv({ cls: "lifeos-knowledge-import-file-row" });
+      if (outcome) {
+        row.addClass(`is-${outcome.status}`);
+        row.setAttribute("title", outcome.message);
+      }
       row.createSpan({ text: importFileRelativePath(file) });
       row.createSpan({ cls: "lifeos-muted-text", text: formatAttachmentSize(file.size) });
+      row.createSpan({
+        cls: `lifeos-knowledge-import-file-status${outcome ? ` is-${outcome.status}` : ""}`,
+        text: outcome ? importFileStatusLabel(outcome.status) : "待导入"
+      });
       createButton(row, "移除", () => {
         this.files = this.files.filter((item) => importFileSelectionKey(item) !== importFileSelectionKey(file));
+        this.importJob.forget(file);
         this.renderFileList();
       }, { ghost: true, icon: "x" });
     }
@@ -3095,19 +3302,40 @@ class KnowledgeImportHubModal extends Modal {
       new Notice("仅保存原文件不会生成隐私属性；请选“普通”，或改用解析并生成 Markdown 模式。", 7000);
       return;
     }
+    // Only files that were never attempted or whose last attempt failed are resubmitted, so a
+    // retry never duplicates an already imported item or its stored original.
+    const pending = this.importJob.pendingFiles(this.files);
+    if (pending.length === 0) {
+      new Notice("没有需要重试的文件。", 4000);
+      return;
+    }
     this.fileImportButton.disabled = true;
     this.fileImportButton.setAttr("aria-busy", "true");
     this.fileImportButton.querySelector<HTMLElement>(".lifeos-v2-button-label")
-      ?.setText(`正在导入 ${this.files.length} 个文档…`);
+      ?.setText(`正在导入 ${pending.length} 个文档…`);
     try {
-      await this.handlers.importFiles(this.files, this.selectedPrivacy(), destination, projectId, this.fileModeSelect.value === "original-only");
-      this.close();
+      const results = await this.handlers.importFiles(
+        pending,
+        this.selectedPrivacy(),
+        destination,
+        this.projectIdForImport(destination, projectId),
+        this.fileModeSelect.value === "original-only"
+      );
+      this.importJob.recordAll(results);
+      this.renderFileList();
+      if (this.importJob.failedCount() === 0) this.close();
     } catch (error) {
-      this.fileImportButton.disabled = false;
+      new Notice(error instanceof Error ? error.message : "资料导入失败。", 7000);
+    } finally {
+      this.fileImportButton.disabled = this.files.length === 0;
       this.fileImportButton.removeAttribute("aria-busy");
       this.fileImportButton.querySelector<HTMLElement>(".lifeos-v2-button-label")?.setText("导入文件");
-      new Notice(error instanceof Error ? error.message : "资料导入失败。", 7000);
+      this.renderFileList();
     }
+  }
+
+  private projectIdForImport(destination: KnowledgeCaptureKind, projectId: string | undefined): string | undefined {
+    return destination === "project" ? projectId : undefined;
   }
 
   private async submitUrl(): Promise<void> {

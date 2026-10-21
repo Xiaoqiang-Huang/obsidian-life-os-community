@@ -422,6 +422,7 @@ export class AiWorkspaceView extends ItemView {
       };
       createButton(actions, "导入资料", () => { if (inScope() && requireProFeature(this.plugin, "projectDocuments")) new ImportProjectDocumentsModal(this.app, project, documents, this.plugin, reload).open(); }, { primary: true, icon: "upload" });
       createButton(actions, "新建文档", () => { if (inScope() && requireProFeature(this.plugin, "projectDocuments")) new NewProjectDocumentModal(this.app, project, documents, this.plugin, reload).open(); }, { icon: "file-plus" });
+      createButton(actions, "全文观点分析", () => { if (inScope()) void this.plugin.openProjectAnalysis(project.id); }, { icon: "scan-text" });
       createButton(actions, "批量管理", () => {
         if (!inScope() || !requireProFeature(this.plugin, "projectDocuments")) return;
         const files = records.map(doc => this.app.vault.getAbstractFileByPath(doc.path)).filter((file): file is TFile => file instanceof TFile);

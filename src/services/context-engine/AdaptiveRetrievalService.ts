@@ -10,6 +10,23 @@ export interface AdaptiveRetrievalResult {
   warnings: string[];
 }
 
+interface EvidenceSampling {
+  limit: number;
+  limitReached: boolean;
+  perPath: number;
+  perGroup: number;
+  pathCapSkipped: number;
+  groupCapSkipped: number;
+}
+
+interface DocumentCoverageReport {
+  documentsRead: number;
+  documentsTotal: number;
+  documentsCoverage: number;
+  documentsTruncated: boolean;
+  samplingReasons: string[];
+}
+
 const CONCEPT_GROUPS: Array<{ pattern: RegExp; terms: string[] }> = [
   { pattern: /ocr|文字识别|字符识别|扫描件/i, terms: ["ocr", "文字识别", "扫描件"] },
   { pattern: /方案|设计|架构|流程|方法/i, terms: ["方案", "设计", "架构", "流程"] },
@@ -43,11 +60,19 @@ export class AdaptiveRetrievalService {
     }
 
     const maxResults = Math.max(1, Math.min(24, input.maxResults ?? (route === "focused" ? 8 : 14)));
-    const evidence = this.mergeEvidence(results.map((result) => result.evidence), maxResults, route, input.userMessage);
+    const merge = this.mergeEvidence(results.map((result) => result.evidence), maxResults, route, input.userMessage);
+    const evidence = merge.evidence;
     const warnings = Array.from(new Set(results.flatMap((result) => result.warnings)));
     const last = results[results.length - 1]?.trace;
     const coverage = this.coverage(input.userMessage, evidence);
+    const documents = this.documentCoverage(this.documentScope(input), evidence, merge.sampling, maxResults);
     if (coverage < 0.34 && evidence.length > 0) warnings.push("本地证据只覆盖了问题的一部分，请核对来源后再采用结论。");
+    // A broad/inventory question (列出/盘点/枚举/所有/全部 …) must never present a
+    // sampled document set as if everything had been read. coverage=1 stays concept
+    // coverage; the document counters and the disclosure below carry the truth.
+    if (documents.documentsTruncated && (this.isInventoryIntent(input.userMessage) || route === "broad")) {
+      warnings.push(this.samplingDisclosure(documents));
+    }
 
     return {
       evidence,
@@ -63,6 +88,12 @@ export class AdaptiveRetrievalService {
         selectedCount: evidence.length,
         candidateCount: Math.max(0, ...results.map((result) => result.trace.candidateCount)),
         coverage,
+        conceptCoverage: coverage,
+        documentsRead: documents.documentsRead,
+        documentsTotal: documents.documentsTotal,
+        documentsCoverage: documents.documentsCoverage,
+        documentsTruncated: documents.documentsTruncated,
+        samplingReasons: documents.samplingReasons,
         durationMs: Date.now() - startedAt,
         indexDocuments: last?.indexDocuments ?? 0,
         indexChunks: last?.indexChunks ?? 0,
@@ -108,7 +139,7 @@ export class AdaptiveRetrievalService {
     limit: number,
     route: ContextRetrievalRoute,
     originalMessage: string
-  ): ContextEvidence[] {
+  ): { evidence: ContextEvidence[]; sampling: EvidenceSampling } {
     const byChunk = new Map<string, ContextEvidence>();
     attempts.forEach((evidence, attemptIndex) => evidence.forEach((item, rank) => {
       const key = item.source.chunkId || `${item.source.path}:${item.source.lineStart ?? 0}:${item.source.lineEnd ?? 0}`;
@@ -144,24 +175,109 @@ export class AdaptiveRetrievalService {
     // get the single strongest passage per file.
     const perPath = route === "broad" ? 2 : 1;
     const perGroup = route === "broad" ? 5 : 2;
-    for (const item of sorted) {
-      if (selected.length >= limit) break;
+    const sampling: EvidenceSampling = {
+      limit, limitReached: false, perPath, perGroup, pathCapSkipped: 0, groupCapSkipped: 0
+    };
+    let index = 0;
+    while (index < sorted.length) {
+      if (selected.length >= limit) {
+        // There are still unprocessed candidates: the fragment budget capped the sample.
+        sampling.limitReached = true;
+        break;
+      }
+      const item = sorted[index];
+      index += 1;
       const count = byPath.get(item.source.path) ?? 0;
-      if (count >= perPath) continue;
+      if (count >= perPath) {
+        sampling.pathCapSkipped += 1;
+        continue;
+      }
       const group = this.sourceGroup(item.source.path);
       const groupCount = byGroup.get(group) ?? 0;
-      if (groupCount >= perGroup) continue;
+      if (groupCount >= perGroup) {
+        sampling.groupCapSkipped += 1;
+        continue;
+      }
       selected.push(item);
       byPath.set(item.source.path, count + 1);
       byGroup.set(group, groupCount + 1);
     }
-    return selected;
+    return { evidence: selected, sampling };
   }
 
   private sourceGroup(path: string): string {
     const normalized = String(path || "").replace(/\\/g, "/").toLowerCase();
     const separator = normalized.lastIndexOf("/");
     return separator > 0 ? normalized.slice(0, separator) : normalized;
+  }
+
+  private normalizePath(path: string): string {
+    return String(path || "").replace(/\\/g, "/");
+  }
+
+  /** Markdown documents that retrieval was allowed to read for this request. */
+  private documentScope(input: AdaptiveRetrievalInput): string[] {
+    // An explicit allow-list (including an empty one) is authoritative for this request;
+    // only a caller that omits allowedPaths scopes coverage by the query inventory.
+    const paths = input.allowedPaths ? input.allowedPaths : input.inventory.map((item) => item.path);
+    return Array.from(new Set(
+      paths
+        .map((path) => this.normalizePath(path))
+        .filter((path) => path.toLowerCase().endsWith(".md"))
+    ));
+  }
+
+  /** Document coverage is measured on distinct files, independent of concept coverage. */
+  private documentCoverage(
+    scopeDocuments: string[],
+    evidence: ContextEvidence[],
+    sampling: EvidenceSampling,
+    limit: number
+  ): DocumentCoverageReport {
+    const scope = new Set(scopeDocuments);
+    const readPaths = new Set(
+      evidence
+        .map((item) => this.normalizePath(item.source.path))
+        .filter((path) => scope.size === 0 || scope.has(path))
+    );
+    const documentsRead = readPaths.size;
+    const documentsTotal = scopeDocuments.length;
+    const documentsTruncated = documentsRead < documentsTotal;
+    const samplingReasons: string[] = [];
+    if (documentsTruncated) {
+      if (sampling.groupCapSkipped > 0) {
+        samplingReasons.push(`同一目录最多保留 ${sampling.perGroup} 篇文档，优先来源多样性`);
+      }
+      if (sampling.pathCapSkipped > 0) {
+        samplingReasons.push(`每篇文档最多保留 ${sampling.perPath} 个片段`);
+      }
+      if (sampling.limitReached) {
+        samplingReasons.push(`证据片段上限 ${limit} 条`);
+      }
+      samplingReasons.push(`检索只纳入与问题命中的文档（检索范围共 ${documentsTotal} 篇）`);
+    }
+    return {
+      documentsRead,
+      documentsTotal,
+      documentsCoverage: documentsTotal > 0 ? documentsRead / documentsTotal : 1,
+      documentsTruncated,
+      samplingReasons
+    };
+  }
+
+  /** 列出/盘点/枚举 style questions expect an exhaustive document set, not a sample. */
+  private isInventoryIntent(message: string): boolean {
+    const value = String(message || "");
+    if (!value) return false;
+    if (/盘点|清单|枚举|列出|列举|罗列|有哪些|哪些|逐一|逐个|每一[个篇份条项]|所有|全部|全量|每篇|每份|一份不落|无遗漏/u.test(value)) {
+      return true;
+    }
+    return /\b(?:list|all|every|each|enumerate|inventory)\b/i.test(value);
+  }
+
+  private samplingDisclosure(report: DocumentCoverageReport): string {
+    const reasons = report.samplingReasons.length > 0 ? `（${report.samplingReasons.join("；")}）` : "";
+    return `本次盘点只读取了 ${report.documentsRead}/${report.documentsTotal} 篇资料${reasons}，未覆盖全部文档；如需穷尽全部资料，请使用「项目全文观点分析」入口（会先核对范围与额度），或缩小资料范围后重试。`;
   }
 
   private specificAnchors(message: string): string[] {
@@ -213,6 +329,12 @@ export class AdaptiveRetrievalService {
         selectedCount: 0,
         candidateCount: 0,
         coverage: 1,
+        conceptCoverage: 1,
+        documentsRead: 0,
+        documentsTotal: 0,
+        documentsCoverage: 1,
+        documentsTruncated: false,
+        samplingReasons: [],
         durationMs: Date.now() - startedAt,
         indexDocuments: 0,
         indexChunks: 0,

@@ -25,6 +25,8 @@ export interface AgentToolRuntimeOptions {
 }
 
 export interface LifeOSAgentPendingWrite {
+  hostOperationId?: string;
+  hostSdkIdentity?: string;
   remainingCalls?: LifeOSAgentToolCall[];
   descriptorId: string;
   call: LifeOSAgentToolCall;
@@ -33,6 +35,16 @@ export interface LifeOSAgentPendingWrite {
 }
 
 const PENDING_WRITE_TTL_MS = 30 * 60 * 1000;
+
+/** Search, page reads and link imports must all honor an explicit offline turn. */
+export function isAgentWebToolAllowed(
+  descriptor: LifeOSAgentToolDescriptor | undefined,
+  context: Pick<LifeOSAgentToolExecutionContext, "webSearchMode">
+): boolean {
+  return context.webSearchMode !== "off"
+    || (descriptor?.family !== "web" && descriptor?.id !== "link-save"
+      && descriptor?.risk !== "network" && descriptor?.requiresWeb !== true);
+}
 
 /** Executes typed tools with permission gates, idempotency, and bounded output. */
 export class AgentToolRuntime {
@@ -121,14 +133,17 @@ export class AgentToolRuntime {
     const sessionKey = this.runtimeSessionKey(context);
     const pending = this.pendingWrite(sessionKey);
     if (!pending) return null;
+    if (pending.hostSdkIdentity && pending.hostSdkIdentity !== context.sdkWorkflowIdentity) {
+      return { ...this.failure(pending.call, Date.now(), "sdk-workflow-identity-changed"), needsConfirmation: true, confirmationSummary: pending.confirmationSummary };
+    }
     this.pendingWrites.delete(sessionKey);
     const result = await this.execute(
       {
         ...pending.call,
         id: `${pending.call.id}-confirmed-${Date.now().toString(36)}`,
-        input: { ...pending.call.input }
+        input: { ...pending.call.input, ...(pending.hostOperationId ? { operationId: pending.hostOperationId } : {}) }
       },
-      { ...context, explicitWriteIntent: true },
+      { ...context, explicitWriteIntent: true, ...(pending.hostOperationId ? { sdkTextWorkflow: true } : {}) },
       { ...options, confirmWrite: async () => ({ allowed: true, summary: pending.confirmationSummary }) }
     );
     if (result.ok && pending.remainingCalls?.length) {
@@ -202,6 +217,12 @@ export class AgentToolRuntime {
     if (!descriptor || !descriptor.channels.includes(context.channel)) {
       return this.failure(call, startedAt, `当前渠道不可用工具：${call.name}`);
     }
+    // Gate before validation, cached results, confirmations or executor I/O.
+    // Declarative recipes re-enter execute() for each primitive, so the same
+    // rule also applies when a web tool is nested in a composed tool.
+    if (!isAgentWebToolAllowed(descriptor, context)) {
+      return this.failure(call, startedAt, "本轮联网已关闭，未执行网页搜索、读取或链接导入。请开启联网后重试。");
+    }
     const executor = this.executors.get(call.name);
     if (!executor) return this.failure(call, startedAt, `工具尚未加载执行器：${call.name}`);
     if (descriptor.mode === "write" && context.permissionMode === "read-only") {
@@ -234,6 +255,8 @@ export class AgentToolRuntime {
         if (!confirmation.allowed) {
           const confirmationSummary = confirmation.summary ? `${confirmation.summary}\n${defaultConfirmationSummary}` : defaultConfirmationSummary;
           this.pendingWrites.set(this.runtimeSessionKey(context), {
+            ...(context.sdkTextWorkflow ? { hostOperationId: `${context.turnId}:${descriptor.id}:${call.id}` } : {}),
+            ...(context.sdkWorkflowIdentity ? { hostSdkIdentity: context.sdkWorkflowIdentity } : {}),
             descriptorId: descriptor.id,
             call: {
               id: call.id,
@@ -262,7 +285,8 @@ export class AgentToolRuntime {
       if (context.signal?.aborted) return this.failure(call, startedAt, "执行已取消。");
       const perform = async (): Promise<LifeOSAgentToolResult> => {
       if (context.signal?.aborted) throw new Error("执行已取消");
-      const value = await executor(this.sanitizeInput(call.input, descriptor), context);
+      const value = await executor(this.sanitizeInput(call.input, descriptor), { ...context,
+        toolCallId: context.sdkTextWorkflow && typeof call.input.operationId === "string" ? call.input.operationId : call.id });
       if (context.signal?.aborted && descriptor.mode !== "write") return this.failure(call, startedAt, "执行已取消，未使用迟到的读取结果。");
       const output = typeof value === "string" ? value : value.output;
       const result: LifeOSAgentToolResult = {
@@ -342,7 +366,7 @@ export class AgentToolRuntime {
   }
 
   private cacheKey(call: LifeOSAgentToolCall, context: LifeOSAgentToolExecutionContext): string {
-    return [this.runtimeSessionKey(context), context.turnId, call.name, JSON.stringify(call.input || {})].join("\u001f");
+    return [this.runtimeSessionKey(context), context.turnId, context.webSearchMode || "auto", call.name, JSON.stringify(call.input || {})].join("\u001f");
   }
 
   private runtimeSessionKey(context: LifeOSAgentToolExecutionContext): string {

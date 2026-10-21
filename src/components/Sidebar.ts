@@ -37,6 +37,7 @@ function desktopOrder(plugin: PersonalLifeSystemPlugin): LifeOSNavKey[] {
 }
 export function createSidebar(parent: HTMLElement, plugin: PersonalLifeSystemPlugin, active: LifeOSNavKey): HTMLElement {
   const sidebar = parent.createDiv({ cls: "lifeos-sidebar lifeos-v2-sidebar lifeos-sidebar-minimal lifeos-glass-sidebar" });
+  sidebar.dataset.lifeosScrollKey = "page-sidebar";
   renderMobileNavigation(sidebar, plugin, active);
   const brand = sidebar.createDiv({ cls: "lifeos-brand" });
   setIcon(brand.createSpan({ cls: "lifeos-brand-icon" }), "sparkles");

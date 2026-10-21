@@ -1,6 +1,10 @@
 import { App, Platform, requestUrl } from "obsidian";
 import * as QRCode from "qrcode";
 import { formatWeixinPlainTextReply, type WeixinAssistantResponse, type WeixinInboundRequest } from "./WeixinBotLogic";
+import { WeixinOutbox, FileOutboxStore, OUTBOX_STOP, OUTBOX_REGENERATED, type OutboxRecovery, type OutboxTransport } from "./WeixinOutbox";
+import { createHostOutboxCipher } from "./WeixinOutboxCipher";
+import type { WeixinStreamOptions } from "./WeixinAssistantService";
+import { preflightWeixinSend, mapWeixinSendError, shouldRetryWeixinSend, WEIXIN_SESSION_REFRESH_HINT } from "./WeixinSendPreflight";
 
 declare const require: NodeRequire;
 
@@ -616,8 +620,10 @@ export interface WeixinIlinkServiceOptions {
   canAnalyzeImages?: () => boolean;
   /** Persist the inbound request before the iLink cursor is advanced. */
   stageInboundMessage?: (request: WeixinInboundRequest) => Promise<WeixinInboundRequest>;
-  handleMessage: (request: WeixinInboundRequest) => Promise<WeixinAssistantResponse>;
+  handleMessage: (request: WeixinInboundRequest, stream?: WeixinStreamOptions) => Promise<WeixinAssistantResponse>;
   recoverPendingMessages?: (accountId: string) => Promise<Array<{ request: WeixinInboundRequest; response: WeixinAssistantResponse }>>;
+  /** Stored answer only; outbox recovery must not start a model call. */
+  recoverStoredReply?: (accountId: string, messageId: string) => Promise<string | undefined>;
   markMessageDelivered?: (request: WeixinInboundRequest) => Promise<void>;
   markMessageDeliveryFailed?: (request: WeixinInboundRequest, error: unknown) => Promise<void>;
 }
@@ -640,6 +646,8 @@ export class WeixinIlinkService {
     accounts: []
   };
   private accounts = new Map<string, WeixinAccountRuntime>();
+  private outbox?: WeixinOutbox;
+  private readonly answerControllers = new Map<string, AbortController>();
   private activeLogin: ActiveLogin | null = null;
   private loginGeneration = 0;
   private listeners = new Set<StatusListener>();
@@ -664,6 +672,11 @@ export class WeixinIlinkService {
     if (!runtime || !runtime.status.connected || !runtime.stored.token) {
       throw new Error("对应微信账号当前未连接，请保持 Obsidian 和微信 Bot 运行。");
     }
+    const preflight = preflightWeixinSend({
+      token: runtime.stored.contextTokens[clean(conversationId, 300)] || "",
+      lastInboundAt: runtime.status.lastInboundAt
+    });
+    if (!preflight.ok) throw new Error(preflight.hint || WEIXIN_SESSION_REFRESH_HINT);
     const chunks = splitWeixinReply(formatWeixinPlainTextReply(text));
     for (let index = 0; index < chunks.length; index += 1) {
       await this.sendText(
@@ -989,6 +1002,10 @@ export class WeixinIlinkService {
 
   async stop(): Promise<void> {
     this.stopLogin();
+    for (const controller of this.answerControllers.values()) controller.abort();
+    this.answerControllers.clear();
+    await this.outbox?.dispose();
+    this.outbox = undefined;
     const runtimes = Array.from(this.accounts.values());
     this.stopAllMonitors();
     await Promise.all(runtimes.map((runtime) => this.notifyPresence(runtime, "stop")));
@@ -1003,6 +1020,7 @@ export class WeixinIlinkService {
   private stopMonitor(runtime: WeixinAccountRuntime): void {
     runtime.monitorGeneration += 1;
     this.clearPresenceRetry(runtime);
+    this.abortAnswersFor(runtime);
     runtime.messageQueues.clear();
     runtime.processingMessageIds.clear();
     runtime.status = { ...runtime.status, connected: false, phase: "disconnected", message: "连接已暂停。" };
@@ -1345,25 +1363,93 @@ export class WeixinIlinkService {
     if (!prepared) await this.hydrateInboundImages(message, inbound);
     const contextKey = inbound.conversationId;
     if (message.context_token) runtime.stored.contextTokens[contextKey] = clean(message.context_token, 20_000);
+    const sendPreflight = preflightWeixinSend({
+      token: runtime.stored.contextTokens[contextKey] || "",
+      lastInboundAt: runtime.status.lastInboundAt,
+      freshToken: Boolean(message.context_token)
+    });
+    if (!sendPreflight.ok) {
+      const hint = sendPreflight.hint || WEIXIN_SESSION_REFRESH_HINT;
+      this.updateAccountStatus(runtime, { message: hint, lastError: sendPreflight.code });
+      await this.options.markMessageDeliveryFailed?.(inbound, new Error(hint)).catch(() => undefined);
+      return;
+    }
+    if (inbound.content.trim() === "停止") {
+      const key = this.answerKey(runtime.stored.accountId, inbound.conversationId, inbound.senderId);
+      this.answerControllers.get(key)?.abort();
+      this.answerControllers.delete(key);
+      await this.deliveryOutbox().stopRoute(runtime.stored.accountId, inbound.conversationId, inbound.senderId).catch(() => undefined);
+      await this.sendText(runtime, inbound.senderId, OUTBOX_STOP, runtime.stored.contextTokens[contextKey]).catch(() => undefined);
+      runtime.stored.recentMessageIds = [...runtime.stored.recentMessageIds, inbound.messageId].slice(-MAX_RECENT_MESSAGE_IDS);
+      await this.saveAccounts().catch(() => undefined);
+      await this.options.markMessageDelivered?.(inbound).catch(() => undefined);
+      this.updateAccountStatus(runtime, { lastReplyAt: Date.now(), message: "已停止当前回答。", lastError: "" });
+      return;
+    }
     this.updateAccountStatus(runtime, {
       lastInboundAt: Date.now(),
       message: inbound.media.some((item) => Boolean((item as Record<string, unknown>)?.dataUrl))
         ? "收到微信图片，Life OS 正在调用视觉模型…"
         : "收到微信消息，Life OS 正在生成回复…"
     });
+    const answerKey = this.answerKey(runtime.stored.accountId, inbound.conversationId, inbound.senderId);
+    const controller = new AbortController();
+    this.answerControllers.set(answerKey, controller);
+    let journal: WeixinOutbox | undefined;
+    let outboxId = "";
+    const runId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     try {
-      const result = await this.options.handleMessage(inbound);
+      journal = this.deliveryOutbox();
+      const opened = await journal.open({
+        accountId: runtime.stored.accountId,
+        conversationId: inbound.conversationId,
+        recipientId: inbound.senderId,
+        messageId: inbound.messageId,
+        runId
+      });
+      outboxId = opened.id;
+    } catch {
+      journal = undefined;
+      outboxId = "";
+    }
+    const activeJournal = journal;
+    let journaled = false;
+    const streamClientId = (chunkId: string, kind = "stream") =>
+      stableClientId(`${runtime.stored.accountId}\u001f${inbound.messageId}\u001f${kind}\u001f${runId}\u001f${chunkId}`);
+    const stream: WeixinStreamOptions | undefined = activeJournal && outboxId ? {
+      signal: controller.signal,
+      persist: async (text, chunkId) => {
+        await activeJournal.enqueue(outboxId, text, chunkId, false, streamClientId(chunkId));
+        journaled = true;
+      },
+      send: async (text, chunkId) => {
+        const clientId = streamClientId(chunkId);
+        await activeJournal.enqueue(outboxId, text, chunkId, false, clientId);
+        journaled = true;
+        await this.sendText(runtime, inbound.senderId, text, runtime.stored.contextTokens[contextKey], clientId);
+        await activeJournal.ack(outboxId, chunkId);
+      },
+      // Deep thinking is live-only: the guarded answer is delivered separately,
+      // so journaling raw thinking as answer chunks would corrupt recovery.
+      sendReasoning: async (text, chunkId) => {
+        await this.sendText(runtime, inbound.senderId, text, runtime.stored.contextTokens[contextKey], streamClientId(chunkId, "reasoning"));
+      }
+    } : undefined;
+    try {
+      const result = await this.options.handleMessage(inbound, stream);
       if (this.accounts.get(runtime.stored.accountId) !== runtime) return;
-      const reply = formatWeixinPlainTextReply(result.reply) || "处理完成。";
-      const chunks = splitWeixinReply(reply);
-      for (let index = 0; index < chunks.length; index += 1) {
-        await this.sendText(
-          runtime,
-          inbound.senderId,
-          chunks[index],
-          runtime.stored.contextTokens[contextKey],
-          stableClientId(`${runtime.stored.accountId}\u001f${inbound.messageId}\u001f${index + 1}`)
-        );
+      if (!result.streamed) {
+        const reply = formatWeixinPlainTextReply(result.reply) || "处理完成。";
+        const chunks = splitWeixinReply(reply);
+        for (let index = 0; index < chunks.length; index += 1) {
+          await this.sendText(
+            runtime,
+            inbound.senderId,
+            chunks[index],
+            runtime.stored.contextTokens[contextKey],
+            stableClientId(`${runtime.stored.accountId}\u001f${inbound.messageId}\u001f${index + 1}`)
+          );
+        }
       }
       runtime.stored.recentMessageIds = [...runtime.stored.recentMessageIds, inbound.messageId].slice(-MAX_RECENT_MESSAGE_IDS);
       await this.saveAccounts().catch((error) => {
@@ -1378,15 +1464,29 @@ export class WeixinIlinkService {
         lastError: ""
       });
     } catch (error) {
+      controller.abort();
+      if (activeJournal && outboxId) await activeJournal.stop(outboxId).catch(() => undefined);
       await this.options.markMessageDeliveryFailed?.(inbound, error).catch(() => undefined);
-      const detail = formatWeixinPlainTextReply(errorMessage(error));
-      await this.sendText(
-        runtime,
-        inbound.senderId,
-        `Life OS 处理失败：${detail}`,
-        runtime.stored.contextTokens[contextKey]
-      ).catch(() => undefined);
+      const mapped = mapWeixinSendError(error);
+      if (mapped.code === "prepare-failed") {
+        this.updateAccountStatus(runtime, { message: mapped.hint || WEIXIN_SESSION_REFRESH_HINT, lastError: mapped.code });
+      } else {
+        const detail = formatWeixinPlainTextReply(errorMessage(error));
+        await this.sendText(
+          runtime,
+          inbound.senderId,
+          `Life OS 处理失败：${detail}`,
+          runtime.stored.contextTokens[contextKey]
+        ).catch(() => undefined);
+      }
       throw error;
+    } finally {
+      if (this.answerControllers.get(answerKey) === controller) this.answerControllers.delete(answerKey);
+      if (activeJournal && outboxId) {
+        if (journaled) await activeJournal.close(outboxId, true).catch(() => undefined);
+        else await activeJournal.discard(outboxId).catch(() => undefined);
+        activeJournal.release(outboxId);
+      }
     }
   }
 
@@ -1400,6 +1500,38 @@ export class WeixinIlinkService {
     runtime.recoveryStarted = true;
     runtime.lastRecoveryAt = now;
     try {
+      // Resume encrypted stream chunks first. This never starts a model call;
+      // a stored reply is used only when the exact prefix cannot be decrypted.
+      const outboxRows = new Map<string, OutboxRecovery>();
+      const storedReplies = new Map<string, string>();
+      try {
+        const summary = await this.deliveryOutbox().recover(runtime.stored.accountId, this.outboxTransport(runtime), async route => {
+          const stored = await this.options.recoverStoredReply?.(runtime.stored.accountId, route.messageId);
+          if (stored) storedReplies.set(route.messageId, stored);
+          return stored;
+        });
+        for (const row of summary) {
+          outboxRows.set(row.messageId, row);
+          // An incomplete stream may have been interrupted mid-answer. Resume
+          // its encrypted suffix, but only acknowledge it when the inbound
+          // queue already holds the completed reply. Otherwise the bounded
+          // recovery below regenerates the final answer.
+          if (row.outcome === "resumed" && !row.complete && !storedReplies.has(row.messageId)) {
+            const stored = await this.options.recoverStoredReply?.(runtime.stored.accountId, row.messageId);
+            if (stored) storedReplies.set(row.messageId, stored);
+          }
+          const final = row.outcome === "regenerated"
+            || (row.outcome === "resumed" && (row.complete || storedReplies.has(row.messageId)))
+            || (row.outcome === "skipped" && row.complete);
+          if (final) {
+            await this.options.markMessageDelivered?.(this.recoveryRequest(runtime, row)).catch((error) => {
+              console.warn(`[Life OS] Weixin outbox delivery receipt failed for ${row.messageId}`, errorMessage(error));
+            });
+          }
+        }
+      } catch (error) {
+        console.warn(`[Life OS] Weixin outbox recovery failed for ${runtime.stored.accountId}`, errorMessage(error));
+      }
       const pending = await this.options.recoverPendingMessages(runtime.stored.accountId);
       for (const item of pending) {
         if (this.accounts.get(runtime.stored.accountId) !== runtime || !runtime.status.connected) return;
@@ -1407,8 +1539,13 @@ export class WeixinIlinkService {
           await this.options.markMessageDelivered?.(item.request);
           continue;
         }
+        // Same operationId (messageId) regeneration. Prefix the new answer so a
+        // user who saw the partial prefix knows the tail was regenerated.
+        const row = outboxRows.get(item.request.messageId);
+        const regenerated = row?.outcome === "notice"
+          || (row?.outcome === "resumed" && !row.complete && !storedReplies.has(item.request.messageId));
         try {
-          const reply = formatWeixinPlainTextReply(item.response.reply) || "处理完成。";
+          const reply = `${regenerated ? OUTBOX_REGENERATED : ""}${formatWeixinPlainTextReply(item.response.reply) || "处理完成。"}`;
           const chunks = splitWeixinReply(reply);
           for (let index = 0; index < chunks.length; index += 1) {
             await this.sendText(
@@ -1416,7 +1553,7 @@ export class WeixinIlinkService {
               item.request.senderId,
               chunks[index],
               runtime.stored.contextTokens[item.request.conversationId] || "",
-              stableClientId(`${runtime.stored.accountId}\u001f${item.request.messageId}\u001f${index + 1}`)
+              stableClientId(`${runtime.stored.accountId}\u001f${item.request.messageId}\u001f${regenerated ? "regen\u001f" : ""}${index + 1}`)
             );
           }
           runtime.stored.recentMessageIds = [...runtime.stored.recentMessageIds, item.request.messageId]
@@ -1432,6 +1569,49 @@ export class WeixinIlinkService {
       console.warn(`[Life OS] Weixin durable inbox recovery failed for ${runtime.stored.accountId}`, errorMessage(error));
     } finally {
       runtime.recoveryStarted = false;
+    }
+  }
+
+  private recoveryRequest(runtime: WeixinAccountRuntime, row: OutboxRecovery): WeixinInboundRequest {
+    return {
+      version: 1,
+      channel: "weixin",
+      messageId: row.messageId,
+      accountId: runtime.stored.accountId,
+      conversationId: row.route.conversationId,
+      threadId: "",
+      senderId: row.route.recipientId,
+      senderName: "",
+      isGroup: false,
+      wasMentioned: false,
+      content: "",
+      timestamp: new Date().toISOString(),
+      media: []
+    };
+  }
+
+  private outboxPath(): string {
+    const adapter = this.app.vault.adapter as unknown as { getFullPath?: (path: string) => string };
+    if (!Platform.isDesktopApp || typeof adapter.getFullPath !== "function") throw new Error("微信投递日志仅支持桌面端");
+    return adapter.getFullPath(`${this.app.vault.configDir}/plugins/${this.options.pluginId}/weixin-outbox.json`);
+  }
+  private deliveryOutbox(): WeixinOutbox {
+    return this.outbox ??= new WeixinOutbox(new FileOutboxStore(() => this.outboxPath()), [0, 750, 2000], () => Date.now(), createHostOutboxCipher());
+  }
+  private outboxTransport(runtime: WeixinAccountRuntime): OutboxTransport {
+    return async (route, text, key, clientId, signal) => {
+      if (signal.aborted) throw new Error("OUTBOX_PAUSED");
+      await this.sendText(runtime, route.recipientId, text, runtime.stored.contextTokens[route.conversationId] || "", clientId || key);
+    };
+  }
+  private answerKey(accountId: string, conversationId: string, senderId: string): string {
+    return JSON.stringify([accountId, conversationId, senderId]);
+  }
+  private abortAnswersFor(runtime: WeixinAccountRuntime): void {
+    for (const [key, controller] of this.answerControllers) {
+      let accountId = "";
+      try { accountId = String(JSON.parse(key)?.[0] || ""); } catch { /* malformed local key */ }
+      if (accountId === runtime.stored.accountId) { controller.abort(); this.answerControllers.delete(key); }
     }
   }
 
@@ -1476,7 +1656,7 @@ export class WeixinIlinkService {
         return;
       } catch (error) {
         lastError = error;
-        if (isNonRetryableWeixinError(error) || attempt === SEND_RETRY_DELAYS_MS.length - 1) break;
+        if (!shouldRetryWeixinSend(error) || isNonRetryableWeixinError(error) || attempt === SEND_RETRY_DELAYS_MS.length - 1) break;
         if (this.accounts.get(runtime.stored.accountId) === runtime) {
           this.updateAccountStatus(runtime, {
             message: `微信回复发送出现波动，正在进行第 ${attempt + 2} 次投递…`,

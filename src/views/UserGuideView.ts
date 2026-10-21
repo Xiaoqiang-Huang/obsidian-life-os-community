@@ -178,7 +178,9 @@ export class UserGuideView extends ItemView {
       return;
     }
     if (!requireProFeature(this.plugin, "aiChat")) return;
-    await this.plugin.activateChat(`【插件使用帮助】${question}`);
+    // Fresh session: the manual question must not inherit the previous task's
+    // checkpoint/summary from the conversation that happens to be open.
+    await this.plugin.activateChat(`【插件使用帮助】${question}`, { fresh: true });
   }
 
   private renderHighlights(parent: HTMLElement): void {

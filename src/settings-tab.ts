@@ -1,6 +1,8 @@
 import { persistThemeSelection } from "./ui/theme-selection";
+import { workflowProfileIdentity } from "./services/agent/WorkflowAiClient";
 import { resolveVisionSettings } from "./settings";
 import { normalizeTaskSuggestionDailyLimit } from "./services/TaskSuggestionService";
+import { summarizeAnswerMetrics } from "./services/answer/AnswerMetrics";
 import { readPageSession, savePageSession } from "./utils/page-session-state";
 import { refreshSidebars } from "./components/Sidebar";
 import { renderSkillPicker } from "./components/SkillPicker";
@@ -11,7 +13,7 @@ import { importDocumentBackground } from "./ui/document-appearance";
 import type PersonalLifeSystemPlugin from "./main";
 import { Setting } from "obsidian";
 import type { AgentMemoryMode, AgentMemoryScopeMode, AiProviderType, AiReasoningEffort, AssistantStyle, AssistantVerbosity, ChatContextMode, ChatMode, ChatSendBehavior, ChatWritebackMode, DirectoryLanguage, DisplayLanguage, ExamProfileType, HeatmapRange, LlmWikiCompileDepth, LlmWikiLongMaterialMode, LlmWikiSensitiveDefault, PdfOcrEngine, ThemeStyle, WebSearchProviderType, WeixinBotPermission, WeixinSenderPolicy } from "./settings";
-import { analyzeAiConnectionTestModels, DEFAULT_SETTINGS, EXAM_PROFILE_OPTIONS, getAiProviderPreset, getExamChatModeLabel, getExamProfileLabel, getStoredAiApiKey, getStoredAiProviderConfig, getThemeStyleClasses, normalizeAgentMemoryIdleHours, normalizeAgentMemoryMaxItemsPerSession, normalizeAgentMemoryMaxSessionsPerRun, normalizeAgentMemoryMinConfidence, normalizeAgentMemoryRetentionDays, normalizeAiApiKeyInput, normalizeAiTaskExtractionLimit, normalizeBrowserCapturePort, normalizeChatWritebackMode, normalizeHiddenSidebarItems, normalizeProjectContextTaskExtractionLimit, normalizeThemeStyle, setStoredAiApiKey, setStoredAiProviderConfig, SIDEBAR_CONFIGURABLE_ITEMS, THEME_STYLES, validateAiProviderConfig } from "./settings";
+import { analyzeAiConnectionTestModels, DEFAULT_SETTINGS, EXAM_PROFILE_OPTIONS, getAiProviderPreset, getExamChatModeLabel, getExamProfileLabel, getStoredAiApiKey, getStoredAiProviderConfig, getThemeStyleClasses, normalizeAgentMemoryIdleHours, normalizeAgentMemoryMaxItemsPerSession, normalizeAgentMemoryMaxSessionsPerRun, normalizeAgentMemoryMinConfidence, normalizeAgentMemoryRetentionDays, normalizeAiApiKeyInput, normalizeAiTaskExtractionLimit, normalizeAiWorkspaceRawMaxSourceMB, normalizeAiWorkspaceRawRetention, normalizeBrowserCapturePort, normalizeChatWritebackMode, normalizeHiddenSidebarItems, normalizeProjectContextTaskExtractionLimit, normalizeThemeStyle, setStoredAiApiKey, setStoredAiProviderConfig, SIDEBAR_CONFIGURABLE_ITEMS, THEME_STYLES, validateAiProviderConfig } from "./settings";
 import type { LifeOSNavKey } from "./types";
 import { requireProFeature, resolveLicenseStatus } from "./licensing/entitlement";
 import { createImportedAiSkills, getAiSkillCategories, getAiSkills, getAiSkillsByCategory, normalizeAiSkillIds } from "./services/AiSkillService";
@@ -19,6 +21,9 @@ import { getUiThemeFamilies, getUiThemeMeta, getUiThemesByFamily } from "./ui/th
 import type { UiThemeDensity, UiThemeFamily, UiThemeMaterial, UiThemeMeta } from "./ui/types";
 import { installLifeOSResponsiveShell } from "./utils/responsive-shell";
 import { normalizeAutoReviewTime } from "./services/AutoReviewService";
+import { AiWorkspaceService } from "./services/AiWorkspaceService";
+import { FileSystemService } from "./services/FileSystemService";
+import type { AiWorkspaceRawRetention } from "./services/ai-workspace/types";
 import type { WeixinConnectionStatus } from "./services/weixin/WeixinIlinkService";
 
 const PROVIDERS: Array<[AiProviderType, string]> = [
@@ -43,6 +48,7 @@ type SettingsSectionId =
   | "chat"
   | "safety"
   | "browser"
+  | "workspace"
   | "weixin"
   | "pro"
   | "wiki"
@@ -66,6 +72,7 @@ const SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
   { id: "review", title: "自动复盘草稿", shortTitle: "自动复盘", description: "生成时间、补生成与运行条件", icon: "calendar-clock", group: "core" },
   { id: "weixin", title: "微信连接", shortTitle: "微信连接", description: "扫码账号、权限与远程工作台", icon: "message-circle", group: "connections" },
   { id: "browser", title: "网页 AI 会话保存", shortTitle: "网页会话", description: "浏览器扩展、本地桥与连接令牌", icon: "globe-2", group: "connections" },
+  { id: "workspace", title: "AI 工作区", shortTitle: "AI 工作区", description: "原始快照保留策略与存储清理", icon: "hard-drive", group: "data" },
   { id: "basics", title: "基础信息", shortTitle: "目录与名称", description: "数据目录、语言和系统名称", icon: "folder-cog", group: "data" },
   { id: "safety", title: "数据安全", shortTitle: "数据安全", description: "本地保存、写回与记忆边界", icon: "shield-check", group: "data" },
   { id: "wiki", title: "LLM Wiki", shortTitle: "LLM Wiki", description: "资料整理、引用与 Chat 上下文", icon: "library", group: "more" },
@@ -100,9 +107,13 @@ interface SettingsDraft {
   aiAuthHeader: string;
   aiAuthPrefix: string;
   aiReasoningEffort: AiReasoningEffort;
+  aiChatOutputTokens: number;
+  aiChatTimeoutSeconds: number;
+  aiToolTimeoutSeconds: number;
 }
 
 export class PersonalLifeSystemSettingTab extends PluginSettingTab {
+  private connectionTestAbort: AbortController | null = null;
   private draft!: SettingsDraft;
   private dirty = false;
   private savingAll = false;
@@ -132,6 +143,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
   }
 
   display(): void {
+    this.connectionTestAbort?.abort(); this.connectionTestAbort = null;
     const { containerEl } = this;
     this.weixinStatusUnsubscribe?.();
     this.weixinStatusUnsubscribe = null;
@@ -189,6 +201,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     this.renderChatAi(grid);
     this.renderSafety(grid);
     this.renderBrowserCapture(grid);
+    this.renderAiWorkspaceStorage(grid);
     this.renderWeixinBot(grid);
     this.renderProLicense(grid);
     this.renderLlmWiki(grid);
@@ -225,6 +238,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
   }
 
   hide(): void {
+    this.connectionTestAbort?.abort(); this.connectionTestAbort = null;
     if (this.mode === "full") savePageSession(this.app.vault, this.plugin.getRoot(), "settings", {
       section: this.activeSettingsSection, draft: this.dirty ? this.draft : undefined, at: Date.now()
     });
@@ -319,7 +333,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       chat,
       "上下文",
       this.plugin.settings.defaultChatContextMode ?? "smart",
-      [["smart", "智能上下文"], ["semantic", "语义增强"], ["global", "全局分析"]],
+      [["smart", "智能上下文"], ["semantic", "本地词面混合检索"], ["global", "全局分析"]],
       async (value) => {
         this.plugin.settings.defaultChatContextMode = value;
         await this.saveImmediate("默认上下文模式已保存。");
@@ -629,6 +643,34 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     this.aiProviderStatusEl = card.createDiv({ cls: "lifeos-provider-status" });
     this.refreshAiProviderStatus();
 
+    this.toggle(card, "允许后台 AI 工作流", "默认关闭。明确开启后，自动复盘、周期总结、微信日终整理和新的长期记忆提取可使用当前 AI 配置；可能产生费用，仍需分别开启对应功能。旧记忆队列不会自动迁入。绑定当前已验证配置，切换模型、端点或凭据后需要重新开启。不会开放视觉、原生工具或免确认写入。", this.plugin.settings.sdkAutomaticWorkflowsEnabled === true, async value => {
+      if (value && (!this.plugin.agent.workflowConfigured() || !workflowProfileIdentity(this.plugin.settings))) { new Notice("请先完成普通 AI 配置；后台授权未开启。"); this.display(); return; }
+      this.plugin.settings.sdkAutomaticWorkflowsEnabled = value;
+      this.plugin.settings.sdkAutomaticWorkflowIdentity = value ? workflowProfileIdentity(this.plugin.settings) : "";
+      await this.saveImmediate("SDK 后台文字工作流授权已保存。");
+    });
+    this.toggle(card, "允许自动提取新会话记忆", "默认关闭，需要另行同意可能产生的模型费用；同时需要开启后台文字授权和长期记忆功能。仅处理本配置下新产生的记忆任务，不回放旧队列。结果为待审核候选，不自动确认或创建 Skill。", this.plugin.settings.sdkAutomaticMemoryEnabled === true, async value => {
+      if (value && (!this.plugin.agent.workflowConfigured() || !workflowProfileIdentity(this.plugin.settings) || this.plugin.settings.sdkAutomaticWorkflowsEnabled !== true
+        || this.plugin.settings.sdkAutomaticWorkflowIdentity !== workflowProfileIdentity(this.plugin.settings))) {
+        new Notice("请先完成普通 AI 配置，并明确开启当前配置的后台 AI 授权；记忆提取未开启。"); this.display(); return;
+      }
+      this.plugin.settings.sdkAutomaticMemoryEnabled = value;
+      this.plugin.settings.sdkAutomaticMemoryIdentity = value ? workflowProfileIdentity(this.plugin.settings) : "";
+      await this.saveImmediate("SDK 新会话记忆提取授权已保存。");
+    });
+
+    this.select<"auto" | "off">(
+      card,
+      "本地速答",
+      "本地速答：对有确定本地数据源的问题不调用模型立即回答；关闭后全部交给模型。",
+      this.plugin.settings.instantAnswerMode ?? "auto",
+      [["auto", "自动（推荐）"], ["off", "关闭（全部交给模型）"]],
+      async (value) => {
+        this.plugin.settings.instantAnswerMode = value;
+        await this.saveImmediate("本地速答设置已保存。");
+      }
+    );
+
     const presets = card.createDiv({ cls: "lifeos-provider-grid" });
     for (const [provider, label] of PROVIDERS) {
       const button = presets.createEl("button", { cls: provider === this.draft.aiProvider ? "is-active" : "", attr: { type: "button" } });
@@ -652,10 +694,16 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     this.text(advanced, "Endpoint Path", "接口路径，通常保持供应商预设即可。", this.draft.aiEndpointPath, (value) => this.setDraft("aiEndpointPath", value));
     this.text(advanced, "Auth Header", "鉴权请求头名称，常见值为 Authorization。", this.draft.aiAuthHeader, (value) => this.setDraft("aiAuthHeader", value));
     this.text(advanced, "Auth Prefix", "鉴权前缀，常见值为 Bearer，Ollama 可留空。", this.draft.aiAuthPrefix, (value) => this.setDraft("aiAuthPrefix", value));
+    this.select(advanced, "聊天输出上限（含思考）", "每次模型请求的 token 上限，不是答案字数。max 推理可能在 4096 内耗尽额度；提高上限可能增加费用，不会自动提高。", String(this.draft.aiChatOutputTokens),
+      [["4096", "4096 · 原有额度"], ["8192", "8192"], ["16384", "16384"], ["32768", "32768"], ["65536", "65536"]], async value => { this.draft.aiChatOutputTokens = Number(value); this.dirty = true; });
+    this.select(advanced, "聊天等待上限", "一次 SDK 聊天查询（包含工具往返）的总等待时间；到期停止，不会自动重试。", String(this.draft.aiChatTimeoutSeconds),
+      [["90", "90 秒 · 原有上限"], ["180", "180 秒"], ["300", "300 秒"], ["600", "600 秒"]], async value => { this.draft.aiChatTimeoutSeconds = Number(value); this.dirty = true; });
+    this.select(advanced, "单个工具等待上限", "一次工具调用（如全库检索、索引重建）的最长等待时间；到期按“工具未完成”返回，本轮其余内容仍会交付并附提醒，不会自动重试。", String(this.draft.aiToolTimeoutSeconds),
+      [["30", "30 秒"], ["45", "45 秒 · 默认"], ["90", "90 秒"], ["180", "180 秒"]], async value => { this.draft.aiToolTimeoutSeconds = Number(value); this.dirty = true; });
     this.select<AiReasoningEffort>(
       advanced,
       "Reasoning Effort",
-      "用于支持 reasoning/effort 的模型。默认不发送该参数；不支持时会自动回退。",
+      "用于支持 reasoning/effort 的模型；不支持时明确报错，不会自动降低档位。思考和正文共同占用输出额度。",
       this.draft.aiReasoningEffort ?? "default",
       [["default", "默认"], ["low", "low"], ["medium", "medium"], ["high", "high"], ["max", "max"]],
       async (value) => {
@@ -667,6 +715,32 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
         this.setDraft("aiReasoningEffort", value);
       }
     );
+
+    const performance = card.createEl("details", { cls: "lifeos-settings-advanced" });
+    performance.createEl("summary", { text: "AI 性能（仅本机，近 7 天）" });
+    const metrics = summarizeAnswerMetrics(this.plugin.settings.answerMetrics);
+    const duration = (value: number | null) => value === null ? "暂无数据" : `${(value / 1000).toFixed(2)} s`;
+    const count = (value: number | null) => value === null ? "—" : String(value);
+    performance.createEl("p", { text: `${metrics.count} 次 · 首字 P50/P90 ${duration(metrics.ttftP50)} / ${duration(metrics.ttftP90)} · 总耗时 P50/P90 ${duration(metrics.totalP50)} / ${duration(metrics.totalP90)} · 快路径 ${(metrics.fastShare * 100).toFixed(1)}%（上下文 ${(metrics.fastContextShare * 100).toFixed(1)}%） · 校验提醒 ${(metrics.validationFailureRate * 100).toFixed(1)}%` });
+    performance.createEl("p", { text: `模型 dispatch 总数 ${metrics.dispatchTotal} · 每轮 P50/P90 ${count(metrics.dispatchP50)} / ${count(metrics.dispatchP90)} · 工具 P50/P90 ${count(metrics.toolP50)} / ${count(metrics.toolP90)} · 回退 ${metrics.fallbackTotal} 次 / ${(metrics.fallbackRate * 100).toFixed(1)}%` });
+    performance.createEl("p", { text: `预取命中 ${(metrics.prefetchHitRate * 100).toFixed(1)}% · 预取耗时 P50/P90 ${duration(metrics.prefetchP50)} / ${duration(metrics.prefetchP90)} · reasoning 可用 ${(metrics.reasoningAvailableRate * 100).toFixed(1)}%` });
+    performance.createEl("p", { text: "只保存数值、路由原因和路径哈希；不保存问题、回答、思考或绝对路径。SDK 会把供应商返回的 thinking_delta 投影为思考块；供应商不返回时如实记为不可用，不补写。" });
+    this.select<"auto" | "off">(performance, "快路径", "仅对单点简单问题使用 low 推理、无工具、无联网、45 秒上限；关闭后全部走原有深度路径。影子模式默认开启，只记录路由。", this.plugin.settings.fastPathMode ?? "auto", [["auto", "自动"], ["off", "关闭"]], async value => {
+      this.plugin.settings.fastPathMode = value;
+      await this.saveImmediate("快路径设置已保存。");
+    });
+    this.toggle(performance, "影子模式", "只记录路由，不改变模型执行；关闭后快路径才会真正生效。建议先观察近 7 天指标再关闭。", this.plugin.settings.fastPathShadow !== false, async value => {
+      this.plugin.settings.fastPathShadow = value;
+      await this.saveImmediate("影子模式已保存。");
+    });
+    this.toggle(performance, "显示供应商思考", "默认展开思考过程；只展示供应商真实返回的 thinking 增量，不写入聊天历史、日志、导出或引用证据。供应商不返回时不显示，也不补写。", this.plugin.settings.showReasoning !== false, async value => {
+      this.plugin.settings.showReasoning = value;
+      await this.saveImmediate("思考过程显示设置已保存。");
+    });
+    this.toggle(performance, "本地上下文预取", "仅本机只读预取当前项目的索引、最近文档、任务和相关记忆；移动端不启动，超时放弃，不写 Vault。", this.plugin.settings.prefetchEnabled !== false, async value => {
+      this.plugin.settings.prefetchEnabled = value;
+      await this.saveImmediate("本地上下文预取设置已保存。");
+    });
   }
 
   private renderChatAi(parent: HTMLElement): void {
@@ -707,14 +781,14 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       this.plugin.settings.defaultChatMode = value;
       await this.saveImmediate("默认 Chat 模式已保存。");
     });
-    this.select<ChatContextMode>(card, "默认上下文模式", "控制 Chat 默认如何组织本地上下文，Chat 页仍可临时切换。", this.plugin.settings.defaultChatContextMode ?? "smart", [["smart", "智能上下文"], ["semantic", "语义增强"], ["global", "全局分析"]], async (value) => {
+    this.select<ChatContextMode>(card, "默认上下文模式", "控制 Chat 默认如何组织本地上下文，Chat 页仍可临时切换。「本地词面混合检索」= 关键词匹配 + 内置同义词/别名扩展的本地检索，不含语义模型：同义改写、跨语言提问可能召回不到。", this.plugin.settings.defaultChatContextMode ?? "smart", [["smart", "智能上下文"], ["semantic", "本地词面混合检索"], ["global", "全局分析"]], async (value) => {
       this.plugin.settings.defaultChatContextMode = value;
       await this.saveImmediate("默认上下文模式已保存。");
     });
     this.select<WebSearchProviderType>(
       card,
       "联网检索后端",
-      "内置搜索无需 Key；Tavily 可返回提取后的网页正文，Brave 扩大搜索覆盖，SearXNG 可接入自建实例。配置后会与内置搜索并行，仍经过网址安全、正文相关性和多来源校验。",
+      "默认搜索无需搜索 Key 或登录，主源失败会自动使用备用源；仍经过网址安全、正文相关性与来源校验。已有 Tavily、Brave 或 SearXNG 配置可以继续使用。",
       this.plugin.settings.webSearchProvider ?? "built-in",
       [
         ["built-in", "内置搜索（无需配置）"],
@@ -900,7 +974,10 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     const refreshDiagnostics = async () => {
       const info = await this.plugin.agent.getMemoryDiagnostics();
       diagnostics.setText(`存储 ${info.storeId} · ${info.recordCount} 条回忆（${info.confirmedCount} 条已确认）· ${info.workingStateCount} 个工作检查点 · ${info.queuedJobCount} 个待处理任务${info.failedJobCount ? ` · ${info.failedJobCount} 个失败` : ""}`);
-      diagnostics.setAttr("title", `索引：${info.storePath}\n读取路径：${info.readPath}\n最近记忆：${info.latestRecordAt}`);
+      diagnostics.setAttr("title", `索引：${info.storePath}\n读取路径：${info.readPath}\n最近记忆：${info.latestRecordAt}${info.lastError ? `\n${info.lastError}` : ""}`);
+      // S7: paused legacy work is visible where users look for AI settings, not
+      // only after opening the memory page; reload never resubmits it silently.
+      if (info.lastError) diagnostics.createEl("p", { cls: "lifeos-agent-memory-error", text: info.lastError });
     };
     void refreshDiagnostics().catch((error) => diagnostics.setText(`记忆索引读取失败：${String(error)}`));
     const actions = body.createDiv({ cls: "lifeos-agent-memory-actions" });
@@ -1055,6 +1132,110 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     })());
   }
 
+  private renderAiWorkspaceStorage(parent: HTMLElement): void {
+    const card = this.section(
+      parent,
+      "AI 工作区",
+      "管理 AI 会话导入产生的只读原始快照（.lifeos/raw）的保留策略与占用。清理只删除快照目录，不会动会话笔记、Sessions 或知识库。",
+      "hard-drive"
+    );
+    const service = new AiWorkspaceService(
+      this.app,
+      new FileSystemService(this.app, this.plugin.getRoot(), this.plugin.settings.directoryLanguage),
+      this.plugin.settings,
+      this.plugin.ai,
+      this.plugin.automaticAi
+    );
+    const retentionRow = this.row(card, "保留策略", "每个会话保留的原始快照数量；写入新快照后自动清理超限的旧修订目录。");
+    const retention = retentionRow.createEl("select", { cls: "lifeos-input" });
+    const retentionOptions: Array<[AiWorkspaceRawRetention, string]> = [
+      ["latest", "仅保留最新 1 个（推荐）"],
+      ["three", "保留最新 3 个"],
+      ["all", "全部保留（不自动清理）"]
+    ];
+    for (const [value, label] of retentionOptions) retention.createEl("option", { value, text: label });
+    retention.value = this.plugin.settings.aiWorkspaceRawRetention;
+    retention.onchange = () => void (async () => {
+      this.plugin.settings.aiWorkspaceRawRetention = normalizeAiWorkspaceRawRetention(retention.value);
+      await this.plugin.saveSettings();
+      new Notice(`原始快照保留策略已更新：${this.rawRetentionLabel(this.plugin.settings.aiWorkspaceRawRetention)}。`, 5000);
+      await this.refreshRawSnapshotUsage(service, usageEl);
+    })();
+    const thresholdRow = this.row(card, "最大源文件 (MB)", "源超过该大小时默认不复制快照，并在会话上标记 over-size；0 表示不限。导入弹窗中可对单次导入强制保留。");
+    const threshold = thresholdRow.createEl("input", {
+      cls: "lifeos-input",
+      attr: { type: "number", min: "0", max: "10240", step: "1" }
+    });
+    threshold.value = String(this.plugin.settings.aiWorkspaceRawMaxSourceMB);
+    threshold.onblur = () => void (async () => {
+      this.plugin.settings.aiWorkspaceRawMaxSourceMB = normalizeAiWorkspaceRawMaxSourceMB(threshold.value);
+      threshold.value = String(this.plugin.settings.aiWorkspaceRawMaxSourceMB);
+      await this.plugin.saveSettings();
+      new Notice(`原始快照大小阈值已更新：${this.plugin.settings.aiWorkspaceRawMaxSourceMB > 0 ? `${this.plugin.settings.aiWorkspaceRawMaxSourceMB} MB` : "不限"}。`, 5000);
+    })();
+    const usageRow = this.row(card, "当前占用", "统计 .lifeos/raw 中所有项目/会话的原始快照；可回收量为超出保留策略或已失去索引引用的目录。");
+    const usageEl = usageRow.createDiv({ cls: "lifeos-ai-workspace-raw-usage" });
+    usageEl.setText("正在统计原始快照占用…");
+    const actions = card.createDiv({ cls: "lifeos-settings-actions" });
+    this.button(actions, "刷新占用", () => void this.refreshRawSnapshotUsage(service, usageEl));
+    const pruneButton = this.button(actions, "立即清理（保留最新）", () => void (async () => {
+      try {
+        const usage = await service.rawSnapshotUsage();
+        const safeMode = usage.safeToPrune === false;
+        const result = safeMode
+          ? await service.pruneRawSnapshots({ filesystemKeepLatest: true })
+          : await service.pruneRawSnapshots({ keepLatestOnly: true });
+        if (result.refused === "index-corrupt") {
+          new Notice("工作区索引不可解析，已拒绝按索引清理。请使用“安全模式：按磁盘保留最新”。", 8000);
+        } else {
+          new Notice(result.removedRevisions > 0
+            ? `原始快照清理完成${safeMode ? "（安全模式）" : ""}：回收 ${this.formatStorageBytes(result.reclaimedBytes)}（${result.removedRevisions} 个修订目录）。`
+            : "原始快照没有可回收的旧目录。", 6000);
+        }
+      } catch (error) {
+        new Notice(`原始快照清理失败：${String(error)}`, 7000);
+      }
+      await this.refreshRawSnapshotUsage(service, usageEl, pruneButton);
+    })(), true);
+    void this.refreshRawSnapshotUsage(service, usageEl, pruneButton);
+  }
+
+  private async refreshRawSnapshotUsage(service: AiWorkspaceService, target: HTMLElement, pruneButton?: HTMLButtonElement): Promise<void> {
+    try {
+      const usage = await service.rawSnapshotUsage();
+      if (!target.isConnected) return;
+      target.setText([
+        `占用 ${this.formatStorageBytes(usage.totalBytes)} · ${usage.totalRevisions} 个修订目录`,
+        `可回收 ${this.formatStorageBytes(usage.reclaimableBytes)} · ${usage.reclaimableRevisions} 个`,
+        usage.unknownRevisionDirs > 0
+          ? `其中无索引目录 ${usage.unknownRevisionDirs} 个（${this.formatStorageBytes(usage.unknownBytes)}）`
+          : "",
+        usage.safeToPrune === false
+          ? `工作区索引${usage.indexStatus === "corrupt" ? "不可解析" : "不可用"}：已切换为安全模式（按磁盘保留最新）`
+          : ""
+      ].filter(Boolean).join("；"));
+      if (pruneButton) {
+        pruneButton.setText(usage.safeToPrune === false ? "安全模式：按磁盘保留最新" : "立即清理（保留最新）");
+      }
+    } catch {
+      if (target.isConnected) target.setText("暂时无法统计原始快照占用。");
+    }
+  }
+
+  private rawRetentionLabel(retention: AiWorkspaceRawRetention): string {
+    if (retention === "three") return "保留最新 3 个";
+    if (retention === "all") return "全部保留";
+    return "仅保留最新 1 个";
+  }
+
+  private formatStorageBytes(bytes: number): string {
+    const value = Math.max(0, Number(bytes) || 0);
+    if (value >= 1024 * 1024 * 1024) return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+    if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+    if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+    return `${value} B`;
+  }
+
   private renderWeixinBot(parent: HTMLElement): void {
     const card = this.section(
       parent,
@@ -1090,7 +1271,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     const textModelInput = this.text(
       card,
       "微信文字模型（可选）",
-      "留空时使用“AI 模型”中配置的主模型，不再按名称自动切换模型；填写后仅覆盖微信文字消息。",
+      "此项仅用于原 AI API。启用 Agent SDK 后，微信普通文本与回答修订使用同一个已验证的 SDK 主配置，不读取原 API 密钥或套用这里的模型名；图片仍使用独立视觉配置。",
       this.plugin.settings.weixinTextAiModel,
       (value) => {
         this.plugin.settings.weixinTextAiModel = value;
@@ -1932,80 +2113,25 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     }
     return { ...this.draft, aiApiKey, aiReasoningEffort };
   }
-
   private async testConnection(): Promise<void> {
     const error = this.validateAiDraft();
-    if (error) {
-      new Notice(`AI 连接测试失败：${error}`);
-      return;
-    }
-
-    const snapshot = {
-      aiProvider: this.plugin.settings.aiProvider,
-      aiBaseUrl: this.plugin.settings.aiBaseUrl,
-      aiModel: this.plugin.settings.aiModel,
-      aiApiKey: this.plugin.settings.aiApiKey,
-      aiEndpointPath: this.plugin.settings.aiEndpointPath,
-      aiAuthHeader: this.plugin.settings.aiAuthHeader,
-      aiAuthPrefix: this.plugin.settings.aiAuthPrefix,
-      aiReasoningEffort: this.plugin.settings.aiReasoningEffort,
-      aiApiKeys: { ...(this.plugin.settings.aiApiKeys ?? {}) }
-    };
-
+    if (error) { new Notice(`AI 连接测试失败：${error}`); return; }
+    this.connectionTestAbort?.abort();
+    const stop = new AbortController(); this.connectionTestAbort = stop;
+    const draft = { ...this.normalizedAiDraft() };
+    const fingerprint = JSON.stringify(this.draft);
+    // Prototype supplies only unchanged ordinary options; never assign to live settings.
+    const settings = Object.assign(Object.create(this.plugin.settings), draft);
     try {
-      const draft = this.normalizedAiDraft();
-      const requestedModel = draft.aiModel.trim();
-      Object.assign(this.plugin.settings, draft);
-      setStoredAiApiKey(this.plugin.settings, draft.aiProvider, draft.aiApiKey);
-      const models = await this.plugin.ai.listModels();
-      if (models.length > 0) {
-        const analysis = analyzeAiConnectionTestModels({ ...this.plugin.settings, ...draft }, models);
-        if (analysis.shouldAutoApply && analysis.suggestedModel && analysis.suggestedModel !== requestedModel) {
-          this.draft.aiModel = analysis.suggestedModel;
-          this.dirty = true;
-          new Notice(`AI 连接测试成功：已自动选择可用模型 ${analysis.suggestedModel}。点击“保存设置”后生效。`, 7000);
-          this.display();
-          return;
-        }
-        if (analysis.matchedModel) {
-          new Notice(`AI 连接测试成功：已找到当前模型 ${analysis.matchedModel}`);
-          return;
-        }
-
-        const suggestion = analysis.suggestedModel ? `模型列表当前更像支持 ${analysis.suggestedModel}` : "模型列表暂时没有返回可确认的候选模型";
-        const currentModelHint = requestedModel ? `当前高级设置里的模型 ${requestedModel} 会原样保留，不会自动改写你的高级设置。` : "当前没有填写模型名称，请按返回列表补一个可用模型。";
-        new Notice(`AI 连接测试成功：已连通，但模型列表未找到当前模型。${suggestion}。${currentModelHint}`, 9000);
-        return;
-      }
-
-      const probe = await this.plugin.ai.complete({
-        messages: [
-          { role: "system", content: "You are a connectivity probe. Reply with OK only." },
-          { role: "user", content: "Reply with OK." }
-        ],
-        temperature: 0
-      });
-      if (probe.ok) {
-        new Notice("AI 连接测试成功：模型列表未返回，但实际对话请求已通过。");
-        return;
-      }
-
-      new Notice(`AI 连接测试失败：${probe.error ?? "未通过模型列表或对话握手测试。"}`);
-    } catch (connectionError) {
-      const message = connectionError instanceof Error ? connectionError.message : String(connectionError);
-      new Notice(`AI 连接测试失败：${message}`);
-    } finally {
-      this.plugin.settings.aiProvider = snapshot.aiProvider;
-      this.plugin.settings.aiBaseUrl = snapshot.aiBaseUrl;
-      this.plugin.settings.aiModel = snapshot.aiModel;
-      this.plugin.settings.aiApiKey = snapshot.aiApiKey;
-      this.plugin.settings.aiEndpointPath = snapshot.aiEndpointPath;
-      this.plugin.settings.aiAuthHeader = snapshot.aiAuthHeader;
-      this.plugin.settings.aiAuthPrefix = snapshot.aiAuthPrefix;
-      this.plugin.settings.aiReasoningEffort = snapshot.aiReasoningEffort;
-      this.plugin.settings.aiApiKeys = snapshot.aiApiKeys;
-    }
+      const response = await this.plugin.agent.testConnection(settings, stop.signal,
+        () => this.connectionTestAbort === stop && !stop.signal.aborted && JSON.stringify(this.draft) === fingerprint);
+      if (stop.signal.aborted || this.connectionTestAbort !== stop || JSON.stringify(this.draft) !== fingerprint) return;
+      new Notice(response.ok ? "AI 连接测试成功：当前草稿的实际 SDK 对话请求已通过。未保存或切换配置。"
+        : "AI 连接测试未通过。请检查普通 AI 服务商、模型、端点和凭据；运行时不可用时查看帮助中的诊断说明。不会自动换模型或回退旧 API。", 8000);
+    } catch { if (!stop.signal.aborted && this.connectionTestAbort === stop) new Notice("AI 连接测试未完成；请检查配置及帮助中的运行时诊断，不会自动重跑。"); }
+    finally { if (this.connectionTestAbort === stop) this.connectionTestAbort = null; }
   }
+
 
   private async saveAll(): Promise<void> {
     if (this.savingAll) return;
@@ -2116,7 +2242,10 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       aiEndpointPath: this.plugin.settings.aiEndpointPath,
       aiAuthHeader: this.plugin.settings.aiAuthHeader,
       aiAuthPrefix: this.plugin.settings.aiAuthPrefix,
-      aiReasoningEffort: this.plugin.settings.aiReasoningEffort ?? "default"
+      aiReasoningEffort: this.plugin.settings.aiReasoningEffort ?? "default",
+      aiChatOutputTokens: this.plugin.settings.aiChatOutputTokens ?? 4096,
+      aiChatTimeoutSeconds: this.plugin.settings.aiChatTimeoutSeconds ?? 90,
+      aiToolTimeoutSeconds: this.plugin.settings.aiToolTimeoutSeconds ?? 45
     };
     this.dirty = false;
   }

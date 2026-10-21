@@ -54,6 +54,7 @@ export interface AutoReviewDraft {
 }
 
 export interface AutoReviewServiceOptions {
+  manualAi?: AiClient;
   now?: () => Date;
   hasEntitlement?: () => boolean;
   onDraftCreated?: (draft: AutoReviewDraft) => void;
@@ -94,9 +95,10 @@ export class AutoReviewService {
   }
 
   async runDue(trigger: AutoReviewTrigger = "timer"): Promise<AutoReviewRunResult> {
+    const client = trigger === "manual" ? this.options.manualAi || this.ai : this.ai;
     if (this.running) return { status: "busy", message: "自动复盘正在运行。" };
     if (!this.settings.autoReviewEnabled) return { status: "disabled", message: "自动复盘未开启。" };
-    if (!this.ai.isConfigured()) return { status: "not-configured", message: "AI 尚未配置，未生成自动复盘草稿。" };
+    if (!client.isConfigured()) return { status: "not-configured", message: "AI 或当前 SDK 后台文字授权尚未就绪，未生成自动复盘草稿。" };
     if (!this.hasEntitlement()) return { status: "unauthorized", message: "当前授权不包含 AI 复盘生成。" };
 
     const now = this.now();
@@ -119,7 +121,8 @@ export class AutoReviewService {
         date,
         state,
         trigger === "manual",
-        trigger === "startup"
+        trigger === "startup",
+        client
       );
       // 只有本次补生成流程完整返回后才记录“已检查”。如果 AI 或文件写入抛错，
       // 下次启动仍可重试，而不是被一个过早写入的状态永久跳过。
@@ -235,7 +238,8 @@ export class AutoReviewService {
     date: string,
     state: AutoReviewState,
     force: boolean,
-    retryFailedAttempt = false
+    retryFailedAttempt = false,
+    client: AiClient = this.ai
   ): Promise<AutoReviewRunResult> {
     const window = { start: date, end: date };
     const facts = await this.periodReviews.collectFacts("daily", window);
@@ -265,7 +269,8 @@ export class AutoReviewService {
 
     this.recordAttempt(state, date, facts.sourceHash, "failed");
     await this.saveState(state);
-    const generated = await this.periodReviews.generateDraftWithQuality(this.ai, facts);
+    const generated = await this.periodReviews.generateDraftWithQuality(client, facts);
+    if (!this.settings.autoReviewEnabled || !this.hasEntitlement() || !client.isConfigured()) throw new Error("后台复盘授权已失效，未保存迟到的生成结果。");
     const path = await this.writeDraft(facts, generated.draft, generated.quality);
     const attempt = state.attempts.find((item) => item.date === date && item.sourceHash === facts.sourceHash);
     if (attempt) attempt.result = "created";

@@ -1,7 +1,7 @@
-import { consumeAgentRequest, agentBudgetAborted, combineAgentSignals, type AgentRequestBudget } from "./services/agent/AgentRequestBudget";
-import { extractNativeCalls, unsupportedNativeTools, type AgentNativeTool, type AgentNativeCall } from "./services/agent/AgentNativeTools";
-import { resolveVisionSettings } from "./settings";
-import { Notice, Platform, requestUrl } from "obsidian";
+import { type AgentRequestBudget } from "./services/agent/AgentRequestBudget";
+import { type AgentNativeTool, type AgentNativeCall } from "./services/agent/AgentNativeTools";
+
+import { requestUrl } from "obsidian";
 import { PersonalLifeSystemSettings, getExamAssistantPrompt, getExamProfileLabel, normalizeAiApiKeyInput, validateAiProviderConfig, type AiReasoningEffort } from "./settings";
 import { stripCodeFences } from "./utils";
 
@@ -54,7 +54,11 @@ export interface AiResponse {
 
 export interface AiStreamCallbacks {
   onStart?(): void;
+  /** Provisional text for paint only. Never persist, execute, or treat as a completed answer. */
+  onPreview?(text: string): void;
   onToken?(token: string): void;
+  /** Supplier-emitted hidden reasoning. Never answer text, evidence, or saved chat. */
+  onReasoning?(text: string): void;
   onDone?(text: string): void;
   onError?(error: string): void;
   onAbort?(): void;
@@ -70,31 +74,12 @@ export function appendAiGeneratedFooter(text: string): string {
   return `${trimmed}\n\n${AI_GENERATED_FOOTER}`;
 }
 
-function finalizeTextResponse(request: AiRequest, response: AiResponse): AiResponse {
-  if (!response.ok || request.responseFormat === "json" || !response.text) {
-    return response;
-  }
-  return { ...response, text: appendAiGeneratedFooter(response.text) };
-}
-
-function finalizeStreamText(request: AiRequest, text: string): string {
-  if (request.responseFormat === "json") return text;
-  return appendAiGeneratedFooter(text);
-}
-
 function isAbsoluteUrl(value: string): boolean {
   return /^https?:\/\//i.test(value.trim());
 }
 
 function normalizeUrl(value: string): string {
   return value.trim().replace(/\/+$/, "");
-}
-
-function renderTemplate(text: string, settings: PersonalLifeSystemSettings, model = settings.aiModel): string {
-  return text
-    .replace(/\{\{model\}\}/g, model)
-    .replace(/\{\{apiVersion\}\}/g, settings.aiApiVersion)
-    .replace(/\{\{provider\}\}/g, settings.aiProvider);
 }
 
 function defaultAuthHeader(mode: AiMode): string {
@@ -145,27 +130,8 @@ function buildUrl(baseUrl: string, path: string): string {
   return `${normalizedBase}/${normalizedPath}`;
 }
 
-function hasVersionPrefix(path: string): boolean {
-  return /^v\d+\//i.test(path.trim());
-}
-
 function normalizeModelName(value: string): string {
   return value.trim().toLowerCase().replace(/[\s_-]+/g, "");
-}
-
-function canonicalModelName(value: string): string {
-  const normalized = normalizeModelName(value);
-  if (
-    normalized === normalizeModelName("deepseek-chat") ||
-    normalized === normalizeModelName("deepseek-reasoner")
-  ) {
-    return normalizeModelName("deepseek-v4-flash");
-  }
-  return normalized;
-}
-
-function modelsMatch(available: string, requested: string): boolean {
-  return canonicalModelName(available) === canonicalModelName(requested);
 }
 
 function parseAbsoluteUrl(value: string): URL | null {
@@ -223,39 +189,6 @@ function buildBaseRoots(settings: PersonalLifeSystemSettings): string[] {
   return Array.from(new Set(roots.filter(Boolean)));
 }
 
-function buildEndpointCandidates(settings: PersonalLifeSystemSettings, mode: AiMode, model = settings.aiModel): string[] {
-  const rawBaseUrl = normalizeUrl(settings.aiBaseUrl);
-  if (!rawBaseUrl) {
-    return [];
-  }
-
-  const explicitPath = renderTemplate(settings.aiEndpointPath.trim(), settings, model).trim();
-  const pathCandidates: string[] = [];
-
-  if (explicitPath) {
-    if (isAbsoluteUrl(explicitPath)) {
-      return [normalizeUrl(explicitPath)];
-    }
-    pathCandidates.push(explicitPath);
-    if (!hasVersionPrefix(explicitPath)) {
-      pathCandidates.push(`v1/${explicitPath}`);
-    }
-  } else if (mode === "openai") {
-    pathCandidates.push("chat/completions", "v1/chat/completions");
-  } else {
-    pathCandidates.push("messages", "v1/messages");
-  }
-
-  const urls = isChatEndpointUrl(rawBaseUrl) ? [rawBaseUrl] : [];
-  for (const baseUrl of buildBaseRoots(settings)) {
-    for (const path of pathCandidates) {
-      urls.push(buildUrl(baseUrl, path));
-    }
-  }
-
-  return Array.from(new Set(urls.filter(Boolean)));
-}
-
 export function buildModelEndpointCandidates(settings: PersonalLifeSystemSettings): string[] {
   const roots = buildBaseRoots(settings);
   if (roots.length === 0) {
@@ -273,165 +206,6 @@ export function buildModelEndpointCandidates(settings: PersonalLifeSystemSetting
   }
 
   return Array.from(new Set(urls.filter(Boolean)));
-}
-
-function extractOpenAiText(payload: unknown): string {
-  if (!payload || typeof payload !== "object") {
-    return "";
-  }
-
-  const data = payload as Record<string, unknown>;
-  const choice = Array.isArray(data.choices) ? (data.choices[0] as Record<string, unknown> | undefined) : undefined;
-  const content = choice?.message && typeof choice.message === "object"
-    ? (choice.message as Record<string, unknown>).content
-    : choice?.text;
-
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (Array.isArray(content)) {
-    return content
-      .map((block) => {
-        if (typeof block === "string") {
-          return block;
-        }
-        if (block && typeof block === "object") {
-          return String((block as Record<string, unknown>).text ?? "");
-        }
-        return "";
-      })
-      .join("\n");
-  }
-
-  const outputText = data.output_text;
-  if (typeof outputText === "string") {
-    return outputText;
-  }
-
-  const output = data.output;
-  if (Array.isArray(output)) {
-    return output
-      .map((item) => {
-        if (typeof item === "string") {
-          return item;
-        }
-        if (!item || typeof item !== "object") {
-          return "";
-        }
-        const obj = item as Record<string, unknown>;
-        if (Array.isArray(obj.content)) {
-          return obj.content
-            .map((block) => {
-              if (typeof block === "string") {
-                return block;
-              }
-              if (block && typeof block === "object") {
-                return String((block as Record<string, unknown>).text ?? "");
-              }
-              return "";
-            })
-            .join("\n");
-        }
-        return String(obj.text ?? "");
-      })
-      .join("\n");
-  }
-
-  return "";
-}
-
-function extractAnthropicText(payload: unknown): string {
-  if (!payload || typeof payload !== "object") {
-    return "";
-  }
-
-  const data = payload as Record<string, unknown>;
-  const content = data.content;
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (Array.isArray(content)) {
-    return content
-      .map((block) => {
-        if (typeof block === "string") {
-          return block;
-        }
-        if (block && typeof block === "object") {
-          return String((block as Record<string, unknown>).text ?? "");
-        }
-        return "";
-      })
-      .join("\n");
-  }
-
-  const completion = data.completion;
-  if (typeof completion === "string") {
-    return completion;
-  }
-
-  const outputText = data.output_text;
-  if (typeof outputText === "string") {
-    return outputText;
-  }
-
-  return "";
-}
-
-function toPositiveTokenCount(value: unknown): number | undefined {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    return undefined;
-  }
-  return Math.round(value);
-}
-
-function extractAiUsage(payload: unknown): AiUsage | undefined {
-  if (!payload || typeof payload !== "object") {
-    return undefined;
-  }
-
-  const data = payload as Record<string, unknown>;
-  const usage = (data.usage && typeof data.usage === "object" ? data.usage : data) as Record<string, unknown>;
-  const inputTokens =
-    toPositiveTokenCount(usage.prompt_tokens) ??
-    toPositiveTokenCount(usage.input_tokens) ??
-    toPositiveTokenCount(usage.promptTokens) ??
-    toPositiveTokenCount(usage.inputTokens);
-  const outputTokens =
-    toPositiveTokenCount(usage.completion_tokens) ??
-    toPositiveTokenCount(usage.output_tokens) ??
-    toPositiveTokenCount(usage.completionTokens) ??
-    toPositiveTokenCount(usage.outputTokens);
-  const totalTokens =
-    toPositiveTokenCount(usage.total_tokens) ??
-    toPositiveTokenCount(usage.totalTokens) ??
-    (inputTokens !== undefined || outputTokens !== undefined ? (inputTokens ?? 0) + (outputTokens ?? 0) : undefined);
-
-  if (inputTokens === undefined && outputTokens === undefined && totalTokens === undefined) {
-    return undefined;
-  }
-
-  return { inputTokens, outputTokens, totalTokens };
-}
-
-function extractApiErrorMessage(payload: unknown): string {
-  if (!payload || typeof payload !== "object") {
-    return "";
-  }
-
-  const data = payload as Record<string, unknown>;
-  const error = data.error;
-  if (typeof error === "string") {
-    return error;
-  }
-  if (error && typeof error === "object") {
-    const message = (error as Record<string, unknown>).message;
-    if (typeof message === "string") {
-      return message;
-    }
-  }
-  return "";
 }
 
 function extractModelIds(payload: unknown): string[] {
@@ -471,27 +245,6 @@ function extractModelIds(payload: unknown): string[] {
   return Array.from(new Set(ids));
 }
 
-function extractRequestErrorMessage(error: unknown): string {
-  if (!error) {
-    return "AI 请求失败。";
-  }
-  if (error instanceof Error) {
-    return error.message || "AI 请求失败。";
-  }
-  if (typeof error === "object") {
-    const maybeStatus = error as Record<string, unknown>;
-    const message = maybeStatus.message;
-    if (typeof message === "string" && message.trim()) {
-      return message;
-    }
-    const status = maybeStatus.status ?? maybeStatus.statusCode;
-    if (typeof status === "number") {
-      return `AI 请求失败：HTTP ${status}`;
-    }
-  }
-  return String(error);
-}
-
 function buildRequestHeaders(
   settings: PersonalLifeSystemSettings,
   mode: AiMode
@@ -528,41 +281,6 @@ function getRequestModel(settings: PersonalLifeSystemSettings, request: AiReques
   return request.model?.trim() || settings.aiModel;
 }
 
-function extractTextFromMessageContent(content: AiMessageContent | undefined): string {
-  if (!content) return "";
-  if (typeof content === "string") return content;
-  return content
-    .map((part) => part.type === "text" ? part.text : "")
-    .filter(Boolean)
-    .join("\n");
-}
-
-function dataUrlToAnthropicSource(url: string): { type: "base64"; media_type: string; data: string } | null {
-  const match = url.match(/^data:([^;,]+);base64,(.+)$/i);
-  if (!match) return null;
-  return {
-    type: "base64",
-    media_type: match[1],
-    data: match[2]
-  };
-}
-
-function toAnthropicContent(content: AiMessageContent): string | Array<Record<string, unknown>> {
-  if (typeof content === "string") return content;
-  const parts: Array<Record<string, unknown>> = [];
-  for (const part of content) {
-    if (part.type === "text") {
-      parts.push({ type: "text", text: part.text });
-      continue;
-    }
-    const source = dataUrlToAnthropicSource(part.image_url.url);
-    if (source) {
-      parts.push({ type: "image", source });
-    }
-  }
-  return parts.length > 0 ? parts : "";
-}
-
 function shouldOmitTemperature(settings: PersonalLifeSystemSettings, modelOverride?: string): boolean {
   const provider = settings.aiProvider;
   const model = (modelOverride || settings.aiModel).trim().toLowerCase();
@@ -588,15 +306,6 @@ function applyTemperature(
   return { ...body, temperature: request.temperature ?? 0.4 };
 }
 
-function bodyHasTemperature(body: Record<string, unknown>): boolean {
-  return Object.prototype.hasOwnProperty.call(body, "temperature");
-}
-
-function withoutTemperature(body: Record<string, unknown>): Record<string, unknown> {
-  const { temperature: _temperature, ...rest } = body;
-  return rest;
-}
-
 function normalizeReasoningEffort(value: unknown): AiReasoningEffort {
   return value === "low" || value === "medium" || value === "high" || value === "max" ? value : "default";
 }
@@ -609,16 +318,6 @@ function applyReasoningEffort(
   const effort = normalizeReasoningEffort(request.reasoningEffort ?? settings.aiReasoningEffort);
   if (effort === "default") return body;
   return { ...body, reasoning: { effort } };
-}
-
-function bodyHasReasoningEffort(body: Record<string, unknown>): boolean {
-  const reasoning = body.reasoning;
-  return Boolean(reasoning && typeof reasoning === "object" && Object.prototype.hasOwnProperty.call(reasoning, "effort"));
-}
-
-function withoutReasoningEffort(body: Record<string, unknown>): Record<string, unknown> {
-  const { reasoning: _reasoning, ...rest } = body;
-  return rest;
 }
 
 export function isUnsupportedTemperatureError(error: string): boolean {
@@ -637,35 +336,6 @@ export function isUnsupportedReasoningEffortError(error: string): boolean {
   return /(not supported|unsupported|does not support|unknown|unrecognized|invalid|extra inputs|unexpected|不支持|无效|未知|未识别)/i.test(text);
 }
 
-function shouldRetryWithoutTemperature(body: Record<string, unknown>, error: string): boolean {
-  return bodyHasTemperature(body) && isUnsupportedTemperatureError(error);
-}
-
-function shouldRetryWithoutReasoningEffort(body: Record<string, unknown>, error: string): boolean {
-  return bodyHasReasoningEffort(body) && isUnsupportedReasoningEffortError(error);
-}
-
-function getBodyAttempts(body: Record<string, unknown>, error?: string): Record<string, unknown>[] {
-  if (!error) return [];
-  const attempts: Record<string, unknown>[] = [];
-  if (body.tools && unsupportedNativeTools(error)) {
-    const { tools, tool_choice, ...fallback } = body;
-    attempts.push(fallback);
-  }
-  const retryTemperature = shouldRetryWithoutTemperature(body, error);
-  const retryReasoning = shouldRetryWithoutReasoningEffort(body, error);
-  if (retryTemperature) attempts.push(withoutTemperature(body));
-  if (retryReasoning) attempts.push(withoutReasoningEffort(body));
-  if (retryTemperature && retryReasoning) attempts.push(withoutReasoningEffort(withoutTemperature(body)));
-  const seen = new Set<string>();
-  return attempts.filter((attempt) => {
-    const key = JSON.stringify(attempt);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
 function buildOpenAiBaseBody(
   settings: PersonalLifeSystemSettings,
   request: AiRequest
@@ -675,31 +345,6 @@ function buildOpenAiBaseBody(
     messages: request.messages,
     ...(request.tools?.length ? { tools: request.tools.map(tool => ({ type: "function", function: tool })), tool_choice: "auto" } : {})
   }, settings, request), settings, request);
-}
-
-function buildAnthropicBaseBody(
-  settings: PersonalLifeSystemSettings,
-  request: AiRequest
-): Record<string, unknown> {
-  return applyTemperature({
-    model: getRequestModel(settings, request),
-    max_tokens: 1800,
-    ...(request.tools?.length ? { tools: request.tools.map(tool => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })) } : {}),
-    system: extractTextFromMessageContent(request.messages.find((message) => message.role === "system")?.content),
-    messages: request.messages
-      .filter((message) => message.role !== "system")
-      .map((message) => ({
-        role: message.role === "assistant" ? "assistant" : "user",
-        content: toAnthropicContent(message.content)
-      }))
-  }, settings, request);
-}
-
-function buildAnthropicBody(
-  settings: PersonalLifeSystemSettings,
-  request: AiRequest
-): Record<string, unknown> {
-  return buildAnthropicBaseBody(settings, request);
 }
 
 export function buildOpenAiBodies(
@@ -720,420 +365,15 @@ export function buildOpenAiBodies(
     baseBody
   ];
 }
-
-async function tryCandidates(
-  settings: PersonalLifeSystemSettings,
-  mode: AiMode,
-  request: AiRequest,
-  urls: string[],
-  extractText: (payload: unknown) => string,
-  bodies: Record<string, unknown>[]
-): Promise<AiResponse> {
-  let lastError = "";
-
-  for (const url of urls) {
-    for (const body of bodies) {
-      const attempts = [body];
-      for (let index = 0; index < attempts.length; index++) {
-        const attemptBody = attempts[index];
-      try {
-        consumeAgentRequest(request.requestBudget, attemptBody);
-        const response = await requestUrl({
-          url,
-          method: "POST",
-          headers: buildRequestHeaders(settings, mode),
-          body: JSON.stringify(attemptBody)
-        });
-
-        if (agentBudgetAborted(request.requestBudget)) return { ok: false, error: "执行已取消" };
-        const apiError = extractApiErrorMessage(response.json);
-        if ([401, 403, 429].includes(response.status) || /(?:unauthori[sz]ed|invalid.?api.?key|incorrect.?api.?key|rate.?limit|insufficient.?quota)/iu.test(apiError || "")) {
-          return { ok: false, error: apiError || `HTTP ${response.status}`, terminal: true };
-        }
-        if (apiError) {
-          lastError = apiError;
-          attempts.push(...getBodyAttempts(attemptBody, apiError));
-          continue;
-        }
-
-        const toolCalls = request.tools?.length ? extractNativeCalls(response.json) : [];
-        if (toolCalls.length) return { ok: true, text: extractText(response.json).trim(), toolCalls, usage: extractAiUsage(response.json) };
-        const text = extractText(response.json).trim();
-        if (!text) {
-          lastError = "模型响应为空。";
-          continue;
-        }
-
-        return { ok: true, text: stripCodeFences(text), usage: extractAiUsage(response.json) };
-      } catch (error) {
-        lastError = extractRequestErrorMessage(error);
-        if (/(?:\b401\b|\b403\b|\b429\b|unauthori[sz]ed|invalid.?api.?key|incorrect.?api.?key|rate.?limit|insufficient.?quota)/iu.test(lastError)) return { ok: false, error: lastError, terminal: true };
-        if (request.requestBudget && (agentBudgetAborted(request.requestBudget) || request.requestBudget.used >= request.requestBudget.limit)) return { ok: false, error: lastError };
-        attempts.push(...getBodyAttempts(attemptBody, lastError));
-      }
-      }
-    }
-  }
-
-  return {
-    ok: false,
-    error: lastError || "AI 请求失败。"
-  };
-}
-
+/** Metadata/type compatibility only. Inference must use WorkflowAiClient. */
 export class AiClient {
-  private modelCache = new Map<string, { fetchedAt: number; models: string[] }>();
-
-  constructor(private getSettings: () => PersonalLifeSystemSettings) {}
-
-  isConfigured(): boolean {
+private modelCache = new Map<string, { fetchedAt: number; models: string[] }>();
+constructor(private getSettings: () => PersonalLifeSystemSettings) {}
+isConfigured(): boolean {
     const settings = this.getSettings();
     return !validateAiProviderConfig(settings);
   }
-
-  async complete(request: AiRequest): Promise<AiResponse> {
-    const baseSettings = this.getSettings();
-    const hasImages = request.messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === 'image_url'));
-    const settings = hasImages ? resolveVisionSettings(baseSettings) : baseSettings;
-    if (!settings) {
-      const error = '图片识别未就绪：请确认主模型支持图片，或配置独立视觉模型 API，并开启图片视觉分析。';
-
-      return { ok: false, error };
-    }
-    if (hasImages) request = { ...request, model: settings.aiModel };
-
-    if (validateAiProviderConfig(settings)) {
-      return {
-        ok: false,
-        error: "AI 尚未配置。请在个人人生系统设置中填写 API 信息。"
-      };
-    }
-
-    try {
-      if (settings.checkModelBeforeRequest && !request.skipModelCheck && !request.requestBudget) {
-        const modelWarning = await this.getModelWarning(settings);
-        if (modelWarning) {
-          new Notice(modelWarning);
-        }
-      }
-      if (settings.aiProvider === "auto") {
-        const openai = await this.completeOpenAiCompatible(settings, request);
-        if (openai.ok || openai.terminal) {
-          return finalizeTextResponse(request, openai);
-        }
-        const anthropic = await this.completeAnthropic(settings, request);
-        if (anthropic.ok) {
-          return finalizeTextResponse(request, anthropic);
-        }
-        return {
-          ok: false,
-          error: openai.error || anthropic.error || "AI 请求失败。"
-        };
-      }
-
-      if (settings.aiProvider === "anthropic-compatible") {
-        return finalizeTextResponse(request, await this.completeAnthropic(settings, request));
-      }
-
-      return finalizeTextResponse(request, await this.completeOpenAiCompatible(settings, request));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      new Notice(`AI 请求失败：${message}`);
-      return { ok: false, error: message };
-    }
-  }
-
-  async completeStream(request: AiRequest, callbacks: AiStreamCallbacks, signal?: AbortSignal): Promise<AiResponse> {
-    const combined = combineAgentSignals(request.requestBudget, signal);
-    let notified = false;
-    const onAbort = () => { if (!notified) { notified = true; callbacks.onAbort?.(); } };
-    try {
-      if (combined.signal.aborted) { onAbort(); return {ok:false,error:"已取消"}; }
-      const result = await this.completeStreamInternal(request, {
-        ...callbacks,
-        onToken: token => { if (!combined.signal.aborted) callbacks.onToken?.(token); },
-        onDone: text => { if (!combined.signal.aborted) callbacks.onDone?.(text); },
-        onAbort
-      }, combined.signal);
-      if (combined.signal.aborted) { onAbort(); return {ok:false,error:"已取消"}; }
-      return result;
-    } finally { combined.dispose(); }
-  }
-
-  private async completeStreamInternal(
-    request: AiRequest,
-    callbacks: AiStreamCallbacks,
-    signal?: AbortSignal
-  ): Promise<AiResponse> {
-    const baseSettings = this.getSettings();
-    const hasImages = request.messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === 'image_url'));
-    const settings = hasImages ? resolveVisionSettings(baseSettings) : baseSettings;
-    if (!settings) {
-      const error = '图片识别未就绪：请确认主模型支持图片，或配置独立视觉模型 API，并开启图片视觉分析。';
-      callbacks.onError?.(error);
-      return { ok: false, error };
-    }
-    if (hasImages) request = { ...request, model: settings.aiModel };
-
-    if (validateAiProviderConfig(settings)) {
-      const err = "AI 尚未配置。请在个人人生系统设置中填写 API 信息。";
-      callbacks.onError?.(err);
-      return { ok: false, error: err };
-    }
-
-    if (this.shouldUseNonStreamingFallback()) {
-      return this.completeStreamWithoutBrowserFetch(request, callbacks, signal);
-    }
-
-    try {
-      if (settings.checkModelBeforeRequest && !request.skipModelCheck && !request.requestBudget) {
-        const modelWarning = await this.getModelWarning(settings);
-        if (modelWarning) {
-          new Notice(modelWarning);
-        }
-      }
-
-      callbacks.onStart?.();
-
-      if (settings.aiProvider === "auto") {
-        const openai = await this.streamWithMode(settings, request, callbacks, "openai", signal);
-        if (openai.ok) return openai;
-        if (openai.terminal) { callbacks.onError?.(openai.error || "AI 请求失败"); return openai; }
-        const anthropic = await this.streamWithMode(settings, request, callbacks, "anthropic", signal);
-        if (anthropic.ok) return anthropic;
-        const err = openai.error || anthropic.error || "AI 请求失败。";
-        callbacks.onError?.(err);
-        return { ok: false, error: err };
-      }
-
-      const mode: AiMode = settings.aiProvider === "anthropic-compatible" ? "anthropic" : "openai";
-      return await this.streamWithMode(settings, request, callbacks, mode, signal);
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        callbacks.onAbort?.();
-        return { ok: false, error: "已取消" };
-      }
-      const message = extractRequestErrorMessage(error);
-      callbacks.onError?.(message);
-      return { ok: false, error: message };
-    }
-  }
-
-  private shouldUseNonStreamingFallback(): boolean {
-    return Platform.isMobileApp || typeof fetch !== "function" || typeof ReadableStream === "undefined";
-  }
-
-  private async completeStreamWithoutBrowserFetch(
-    request: AiRequest,
-    callbacks: AiStreamCallbacks,
-    signal?: AbortSignal
-  ): Promise<AiResponse> {
-    if (signal?.aborted) {
-      callbacks.onAbort?.();
-      return { ok: false, error: "已取消" };
-    }
-
-    callbacks.onStart?.();
-    let abortCleanup: (() => void) | undefined;
-    let abortEmitted = false;
-    const emitAbort = (): AiResponse => {
-      if (!abortEmitted) {
-        abortEmitted = true;
-        callbacks.onAbort?.();
-      }
-      return { ok: false, error: "已取消" };
-    };
-    const abortPromise = signal
-      ? new Promise<AiResponse>((resolve) => {
-          const onAbort = () => resolve(emitAbort());
-          if (signal.aborted) {
-            onAbort();
-            return;
-          }
-          signal.addEventListener("abort", onAbort, { once: true });
-          abortCleanup = () => signal.removeEventListener("abort", onAbort);
-        })
-      : null;
-
-    try {
-      const requestPromise = this.complete(request);
-      const result = abortPromise
-        ? await Promise.race([requestPromise, abortPromise])
-        : await requestPromise;
-      if (abortCleanup) abortCleanup();
-      if (signal?.aborted) {
-        return emitAbort();
-      }
-      if (result.ok && typeof result.text === "string") {
-        callbacks.onDone?.(result.text);
-      } else {
-        callbacks.onError?.(result.error ?? "AI 请求失败。");
-      }
-      return result;
-    } catch (error) {
-      if (abortCleanup) abortCleanup();
-      if (signal?.aborted) {
-        return emitAbort();
-      }
-      const message = extractRequestErrorMessage(error);
-      callbacks.onError?.(message);
-      return { ok: false, error: message };
-    }
-  }
-
-  private async streamWithMode(
-    settings: PersonalLifeSystemSettings,
-    request: AiRequest,
-    callbacks: AiStreamCallbacks,
-    mode: AiMode,
-    signal?: AbortSignal
-  ): Promise<AiResponse> {
-    const urls = buildEndpointCandidates(settings, mode, getRequestModel(settings, request));
-    if (urls.length === 0) {
-      return { ok: false, error: "AI Base URL 未配置。" };
-    }
-
-    const headers = { ...buildRequestHeaders(settings, mode) };
-    if (mode === "anthropic") {
-      headers.Accept = "text/event-stream";
-    }
-
-    const bodies = mode === "anthropic"
-      ? [buildAnthropicBody(settings, request)]
-      : buildOpenAiBodies(settings, request).map((body) => ({ ...body, stream: true }));
-
-    let lastError = "";
-    for (const url of urls) {
-      for (const body of bodies) {
-        const attempts = [body];
-        for (let index = 0; index < attempts.length; index++) {
-          const attemptBody = attempts[index];
-      try {
-        consumeAgentRequest(request.requestBudget, attemptBody);
-        const response = await fetch(url, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(attemptBody),
-          signal
-        });
-
-        if (!response.ok) {
-          const errText = await response.text();
-          let errMsg = `HTTP ${response.status}`;
-          try {
-            const errJson = JSON.parse(errText);
-            const apiErr = extractApiErrorMessage(errJson);
-            if (apiErr) errMsg = apiErr;
-          } catch { /* ignore parse error */ }
-          lastError = errMsg;
-          if ([401, 403, 429].includes(response.status)) return { ok: false, error: errMsg, terminal: true };
-          attempts.push(...getBodyAttempts(attemptBody, errMsg));
-          continue;
-        }
-
-        if (!response.body) {
-          const text = await response.text();
-          try {
-            const json = JSON.parse(text);
-            const extracted = mode === "anthropic" ? extractAnthropicText(json) : extractOpenAiText(json);
-            callbacks.onDone?.(extracted);
-            return { ok: true, text: extracted, usage: extractAiUsage(json) };
-          } catch {
-            return { ok: false, error: "无法解析响应。" };
-          }
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let fullText = "";
-        let buffer = "";
-        let usage: AiUsage | undefined;
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            if (mode === "anthropic") {
-              if (line.startsWith("data: ")) {
-                const data = line.slice(6);
-                try {
-                  const chunk = JSON.parse(data);
-                  usage = extractAiUsage(chunk) ?? usage;
-                  if (chunk.type === "content_block_delta") {
-                    const text = chunk.delta?.text ?? "";
-                    if (text) {
-                      fullText += text;
-                      callbacks.onToken?.(text);
-                    }
-                  }
-                } catch { /* skip malformed chunks */ }
-              }
-            } else {
-              if (line.startsWith("data: ")) {
-                const data = line.slice(6);
-                if (data === "[DONE]") continue;
-                try {
-                  const chunk = JSON.parse(data);
-                  usage = extractAiUsage(chunk) ?? usage;
-                  const delta = chunk.choices?.[0]?.delta?.content;
-                  if (typeof delta === "string" && delta) {
-                    fullText += delta;
-                    callbacks.onToken?.(delta);
-                  }
-                } catch { /* skip malformed chunks */ }
-              }
-            }
-          }
-        }
-
-        // Flush remaining buffer
-        if (buffer.trim()) {
-          for (const line of buffer.split("\n")) {
-            const dataLine = line.startsWith("data: ") ? line.slice(6) : null;
-            if (!dataLine || dataLine === "[DONE]") continue;
-            try {
-              const chunk = JSON.parse(dataLine);
-              usage = extractAiUsage(chunk) ?? usage;
-              const text = mode === "anthropic"
-                ? (chunk.delta?.text ?? "")
-                : (chunk.choices?.[0]?.delta?.content ?? "");
-              if (text) {
-                fullText += text;
-                callbacks.onToken?.(text);
-              }
-            } catch { /* skip */ }
-          }
-        }
-
-        const finalText = stripCodeFences(fullText.trim());
-        if (finalText) {
-          const displayText = finalizeStreamText(request, finalText);
-          callbacks.onDone?.(displayText);
-          return { ok: true, text: displayText, usage };
-        }
-        callbacks.onDone?.("");
-        return { ok: true, text: "", usage };
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") throw error;
-        lastError = extractRequestErrorMessage(error);
-        if (/(?:\b401\b|\b403\b|\b429\b|unauthori[sz]ed|invalid.?api.?key|incorrect.?api.?key|rate.?limit|insufficient.?quota)/iu.test(lastError)) return { ok: false, error: lastError, terminal: true };
-        if (request.requestBudget && (agentBudgetAborted(request.requestBudget) || request.requestBudget.used >= request.requestBudget.limit)) return { ok: false, error: lastError };
-        attempts.push(...getBodyAttempts(attemptBody, lastError));
-        continue;
-      }
-        }
-      }
-    }
-
-    return { ok: false, error: lastError || "AI 请求失败。" };
-  }
-
-  async listModels(): Promise<string[]> {
+async listModels(): Promise<string[]> {
     const settings = this.getSettings();
     const cacheKey = this.getModelCacheKey(settings);
     const cached = this.modelCache.get(cacheKey);
@@ -1161,8 +401,7 @@ export class AiClient {
 
     return [];
   }
-
-  private getModelCacheKey(settings: PersonalLifeSystemSettings): string {
+private getModelCacheKey(settings: PersonalLifeSystemSettings): string {
     return [
       settings.aiProvider,
       settings.aiBaseUrl.trim(),
@@ -1172,61 +411,12 @@ export class AiClient {
       settings.aiExtraHeadersJson.trim()
     ].join("|");
   }
-
-  private async getModelWarning(settings: PersonalLifeSystemSettings): Promise<string | null> {
-    if (settings.aiProvider === "ollama") {
-      return null;
-    }
-
-    const models = await this.listModels();
-    if (models.length === 0) {
-      return null;
-    }
-
-    if (models.some((model) => modelsMatch(model, settings.aiModel))) {
-      return null;
-    }
-
-    const grouped = models.slice(0, 12).join("、");
-    return `当前模型“${settings.aiModel}”不在服务可用模型列表中。可用模型示例：${grouped}`;
-  }
-
-  private async completeOpenAiCompatible(
-    settings: PersonalLifeSystemSettings,
-    request: AiRequest
-  ): Promise<AiResponse> {
-    const urls = buildEndpointCandidates(settings, "openai", getRequestModel(settings, request));
-    if (urls.length === 0) {
-      return { ok: false, error: "AI Base URL 未配置。" };
-    }
-    return tryCandidates(
-      settings,
-      "openai",
-      request,
-      urls,
-      extractOpenAiText,
-      buildOpenAiBodies(settings, request)
-    );
-  }
-
-  private async completeAnthropic(
-    settings: PersonalLifeSystemSettings,
-    request: AiRequest
-  ): Promise<AiResponse> {
-    const urls = buildEndpointCandidates(settings, "anthropic", getRequestModel(settings, request));
-    if (urls.length === 0) {
-      return { ok: false, error: "AI Base URL 未配置。" };
-    }
-    return tryCandidates(
-      settings,
-      "anthropic",
-      request,
-      urls,
-      extractAnthropicText,
-      [buildAnthropicBody(settings, request)]
-    );
-  }
+async complete(_request: AiRequest): Promise<AiResponse> { return { ok: false, terminal: true, error: "sdk-unified-entry-required" }; }
+async completeStream(request: AiRequest, callbacks: AiStreamCallbacks, _signal?: AbortSignal): Promise<AiResponse> {
+ const response = await this.complete(request); callbacks.onError?.(response.error || "sdk-unified-entry-required"); return response;
 }
+}
+
 
 export function buildSystemPrompt(settings: PersonalLifeSystemSettings): string {
   const userName = settings.userName || "用户";

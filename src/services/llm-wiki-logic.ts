@@ -93,6 +93,63 @@ function hasCredentialSecretSignal(text: string): boolean {
   return new RegExp(String.raw`${credentialName}[\s\S]{0,80}(?:should stay out|stay out of formal|do not write|do not publish|不要|不得|不应|不允许)`, "i").test(text);
 }
 
+export type LlmWikiCompileCoverageMode = "single-pass" | "segmented" | "local-only";
+
+/** Character range of one bounded compile segment that the model did not process. */
+export interface LlmWikiCompileSegmentRange {
+  index: number;
+  startChar: number;
+  endChar: number;
+  chars: number;
+}
+
+/**
+ * How much of a source the organize pipeline actually covered. Deep mode records the
+ * bounded segments it processed, ordinary mode records the single-pass cut, and the
+ * local-only path records that no text reached AI. A draft must never read as a full
+ * summary while `fullCoverage` is false.
+ */
+export interface LlmWikiCompileCoverage {
+  mode: LlmWikiCompileCoverageMode;
+  totalChars: number;
+  processedChars: number;
+  remainingChars: number;
+  truncated: boolean;
+  fullCoverage: boolean;
+  segmentCount: number;
+  segmentsProcessed: number;
+  unprocessedSegments: LlmWikiCompileSegmentRange[];
+  note: string;
+}
+
+/**
+ * Canonical coverage wording reused by the draft body, the draft frontmatter and the
+ * Knowledge view notice. `buildCompilePrompt` keeps an inline copy of the single-pass
+ * wording because the audit probe evaluates that method in isolation.
+ */
+export function describeLlmWikiCompileCoverage(coverage: LlmWikiCompileCoverage): string {
+  if (coverage.mode === "local-only") {
+    return `未发送 AI：全文 ${coverage.totalChars} 字未进入 AI 处理（本地兜底草稿）`;
+  }
+  if (coverage.mode === "segmented") {
+    if (coverage.fullCoverage) {
+      return `已处理 ${coverage.processedChars}/${coverage.totalChars} 字，分 ${coverage.segmentCount} 段全部处理，未截断`;
+    }
+    const unprocessed = coverage.unprocessedSegments;
+    const first = unprocessed.length ? unprocessed[0] : undefined;
+    const last = unprocessed.length ? unprocessed[unprocessed.length - 1] : undefined;
+    const where = first && last
+      ? first.index === last.index
+        ? `未处理第 ${first.index + 1} 段（${first.chars} 字）`
+        : `未处理第 ${first.index + 1}-${last.index + 1} 段（共 ${coverage.remainingChars} 字）`
+      : `未处理共 ${coverage.remainingChars} 字`;
+    return `部分覆盖：已处理 ${coverage.processedChars}/${coverage.totalChars} 字，分 ${coverage.segmentCount} 段，已处理 ${coverage.segmentsProcessed} 段，${where}`;
+  }
+  return coverage.truncated
+    ? `部分覆盖（未处理文末 ${coverage.remainingChars} 字）：已处理 ${coverage.processedChars}/${coverage.totalChars} 字（1 段）`
+    : `已处理 ${coverage.processedChars}/${coverage.totalChars} 字（1 段，未截断）`;
+}
+
 export interface LlmWikiSourceMarkdownInput {
   id: string;
   title: string;
@@ -123,6 +180,7 @@ export interface LlmWikiDraftMarkdownInput {
   createdAt: string;
   batchId: string;
   body: string;
+  coverage?: LlmWikiCompileCoverage;
 }
 
 export interface LlmWikiBatchMarkdownInput {
@@ -191,6 +249,18 @@ export function buildLlmWikiSourceMarkdown(input: LlmWikiSourceMarkdownInput): s
 }
 
 export function buildLlmWikiDraftMarkdown(input: LlmWikiDraftMarkdownInput): string {
+  const coverageLines = input.coverage
+    ? [
+      `coverage_mode: ${yamlScalar(input.coverage.mode)}`,
+      `coverage_total_chars: ${input.coverage.totalChars}`,
+      `coverage_processed_chars: ${input.coverage.processedChars}`,
+      `coverage_remaining_chars: ${input.coverage.remainingChars}`,
+      `coverage_truncated: ${input.coverage.truncated ? "true" : "false"}`,
+      `coverage_segments_total: ${input.coverage.segmentCount}`,
+      `coverage_segments_processed: ${input.coverage.segmentsProcessed}`,
+      `coverage_note: ${yamlScalar(input.coverage.note)}`
+    ]
+    : [];
   const frontmatter = [
     "---",
     "type: llm-wiki-draft",
@@ -207,6 +277,7 @@ export function buildLlmWikiDraftMarkdown(input: LlmWikiDraftMarkdownInput): str
     yamlList(input.relatedProjects),
     `relation_confidence: ${yamlScalar(input.relationConfidence)}`,
     `relation_reason: ${yamlScalar(input.relationReason)}`,
+    ...coverageLines,
     "accepted_at: \"\"",
     "formal_target: \"\"",
     `batch_id: ${yamlScalar(input.batchId)}`,
@@ -277,6 +348,45 @@ export interface LlmWikiIntakeDecision {
   reason: string;
 }
 
+function policyScalar(value: unknown): string {
+  return String(value ?? "").trim().replace(/^(["'])([\s\S]*)\1$/u, "$2").replace(/\s+#.*$/u, "").trim().toLowerCase();
+}
+
+export function normalizeLlmWikiPrivacyLevel(value: unknown): LlmWikiPrivacyLevel {
+  const normalized = policyScalar(value);
+  return normalized === "sensitive" || normalized === "private" ? normalized : "normal";
+}
+
+/** Missing means "allowed"; only an explicit false forbids AI processing. */
+export function normalizeLlmWikiAiProcessingAllowed(value: unknown): boolean {
+  return policyScalar(value) !== "false";
+}
+
+export interface LlmWikiSourcePolicy {
+  privacyLevel: LlmWikiPrivacyLevel;
+  /** Third layer of savable / locally searchable / model-ready. */
+  aiProcessingAllowed: boolean;
+}
+
+/**
+ * Three separated layers: savable, locally searchable, and model-ready.
+ * Intake, categorization, moves and project imports inherit this verbatim; a source is
+ * never auto-upgraded. `privacy_level: sensitive` and `ai_processing_allowed: false`
+ * both keep the source out of every AI channel, while an ordinary note stays usable.
+ */
+export function resolveLlmWikiSourcePolicy(frontmatter: Record<string, unknown> | null | undefined): LlmWikiSourcePolicy {
+  const privacyLevel = normalizeLlmWikiPrivacyLevel(frontmatter?.privacy_level);
+  return {
+    privacyLevel,
+    aiProcessingAllowed: normalizeLlmWikiAiProcessingAllowed(frontmatter?.ai_processing_allowed) && privacyLevel !== "sensitive"
+  };
+}
+
+/** Frontmatter lines a new knowledge page inherits from its source; never a fresh `normal/true`. */
+export function llmWikiPolicyFrontmatterLines(policy: LlmWikiSourcePolicy): string[] {
+  return [`privacy_level: ${policy.privacyLevel}`, `ai_processing_allowed: ${policy.aiProcessingAllowed ? "true" : "false"}`];
+}
+
 export function classifyLlmWikiIntake(content: string, userInstruction = ""): LlmWikiIntakeDecision {
   const raw = `${userInstruction}\n${content}`;
   const hasUrl = /https?:\/\//i.test(raw);
@@ -313,7 +423,9 @@ export function classifyLlmWikiIntake(content: string, userInstruction = ""): Ll
     secondaryTypes: primaryType === "mixed" ? secondaryTypes : secondaryTypes.filter((type) => type !== primaryType),
     confidence: primaryType === "mixed" ? 0.82 : 0.72,
     privacyLevel,
-    aiProcessingAllowed: true,
+    // Inherit the detected level instead of declaring consent: sensitive intake must never
+    // look AI-eligible to a later caller.
+    aiProcessingAllowed: privacyLevel !== "sensitive",
     requiresConfirmation: primaryType !== "knowledge_source" || privacyLevel !== "normal",
     reason: privacyLevel === "sensitive"
       ? "内容包含敏感信号，默认不保存、不编译、不进入未来上下文。"

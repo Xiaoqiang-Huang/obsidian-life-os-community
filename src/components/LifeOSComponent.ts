@@ -19,5 +19,9 @@ export function createLifeOSShell(
   installLifeOSResponsiveShell(root);
   const shell = root.createDiv({ cls: "lifeos-shell lifeos-v2-shell" });
   createSidebar(shell, plugin, active);
-  return shell.createDiv({ cls: "lifeos-main lifeos-v2-main" });
+  const main = shell.createDiv({ cls: "lifeos-main lifeos-v2-main" });
+  // Desktop layouts scroll this inner pane, not the Obsidian view-content.
+  // A stable key lets background renders restore the replaced pane's position.
+  main.dataset.lifeosScrollKey = "page-main";
+  return main;
 }

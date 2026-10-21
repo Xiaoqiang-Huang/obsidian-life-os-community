@@ -1,5 +1,6 @@
 import type { App } from "obsidian";
 import { localizeLifeOsPathParts, normalizeDirectoryLanguage, type PersonalLifeSystemSettings } from "../settings";
+import { prepareCitableMarkdown } from "./context-engine/ContextSourcePolicyService";
 import type { ContextSection } from "./context-engine/types";
 
 export interface LlmWikiContextSection {
@@ -163,7 +164,11 @@ export class LlmWikiContextService {
   }
 
   private async readFile(file: FileLike): Promise<string> {
-    return String(await (this.app as unknown as { vault: { read: (file: FileLike) => Promise<string> } }).vault.read(file));
+    const raw = String(await (this.app as unknown as { vault: { read: (file: FileLike) => Promise<string> } }).vault.read(file));
+    // Official/draft Wiki pages are model context here; they inherit the same three-layer
+    // policy as the rest of the engine instead of reading the raw Vault text.
+    const decision = prepareCitableMarkdown(file.path, raw, { rootFolder: this.settings.rootFolder || "PersonalLifeSystem" });
+    return decision.allowed && decision.aiEligible ? decision.markdown : "";
   }
 
   private path(...parts: string[]): string {

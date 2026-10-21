@@ -71,10 +71,23 @@ export class AgentMemoryStore {
     return inserted;
   }
 
-  async claimJobs(limit: number, now = new Date(), leaseMs = 60_000): Promise<AgentMemoryExtractionJob[]> {
+  /** Migration is local only. Old provenance never silently binds to a new model. */
+  async pauseIncompatibleJobs(identity: string): Promise<void> {
+    await this.mutate(state => {
+      for (const job of state.jobs) {
+        if (job.status === "completed" || job.status === "paused") continue;
+        if (job.modelBackend === "claude-sdk" && job.sdkWorkflowIdentity === identity) continue;
+        job.status = "paused"; job.error = "AI 配置或任务版本已改变，旧任务已暂停；请检查来源并在当前配置下重新提交，不会自动补跑。";
+        job.updatedAt = new Date().toISOString(); delete job.leaseUntil;
+      }
+    });
+  }
+
+  async claimJobs(limit: number, now = new Date(), leaseMs = 60_000, eligible: (job: AgentMemoryExtractionJob) => boolean = () => true): Promise<AgentMemoryExtractionJob[]> {
     const claimed: AgentMemoryExtractionJob[] = [];
     await this.mutate((state) => {
       for (const job of state.jobs) {
+        if (!eligible(job)) continue;
         if (claimed.length >= Math.max(1, limit)) break;
         const leaseExpired = job.status === "processing"
           && (!job.leaseUntil || new Date(job.leaseUntil).getTime() <= now.getTime());
@@ -265,6 +278,8 @@ export class AgentMemoryStore {
 
   async diagnostics(): Promise<AgentMemoryDiagnostics> {
     const state = await this.loadState();
+    const pausedCount = state.jobs.filter(job => job.status === "paused").length;
+    const migrationWarning = pausedCount ? `${pausedCount} 个旧配置或旧版本记忆任务已暂停，不会自动补跑；请检查来源，在当前普通 AI 配置下重新提交。` : "";
     const latestRecordAt = state.records.reduce(
       (latest, item) => item.updatedAt.localeCompare(latest) > 0 ? item.updatedAt : latest,
       new Date(0).toISOString()
@@ -286,8 +301,8 @@ export class AgentMemoryStore {
       lastMaintenanceAt: state.lastMaintenanceAt,
       storePath: this.storePath(),
       readPath: this.readPath(),
-      ...(this.volatileLastError || state.lastError
-        ? { lastError: this.volatileLastError || state.lastError }
+      ...(this.volatileLastError || state.lastError || migrationWarning
+        ? { lastError: this.volatileLastError || state.lastError || migrationWarning }
         : {})
     };
   }
@@ -444,8 +459,11 @@ export class AgentMemoryStore {
   }
 
   private sanitizeJob(job: AgentMemoryExtractionJob): AgentMemoryExtractionJob {
-    const status = ["queued", "processing", "completed", "failed"].includes(job.status) ? job.status : "queued";
+    const status = ["queued", "processing", "completed", "failed", "paused"].includes(job.status) ? job.status : "queued";
     return {
+      ...(job.modelBackend === "native-api" || job.modelBackend === "claude-sdk" ? { modelBackend: job.modelBackend } : {}),
+      ...(job.modelBackend !== undefined && job.modelBackend !== "native-api" && job.modelBackend !== "claude-sdk" ? { modelBackend: "unsupported" as const } : {}),
+      ...(job.sdkWorkflowIdentity ? { sdkWorkflowIdentity: this.clean(job.sdkWorkflowIdentity, 2000) } : {}),
       id: this.clean(job.id, 180),
       fingerprint: this.clean(job.fingerprint, 80),
       sessionId: this.clean(job.sessionId, 180),

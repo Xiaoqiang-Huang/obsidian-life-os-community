@@ -163,7 +163,7 @@ export class ReviewTagService {
 
   private source(path: string, markdown: string): { evidence: string; origin: EvidenceOrigin } {
     const decision = prepareCitableMarkdown(path, markdown, { rootFolder: this.rootFolder });
-    if (!decision.allowed) return { evidence: "", origin: decision.reason === "no-citable-content" ? "note" : "context-only" };
+    if (!decision.allowed || !decision.aiEligible) return { evidence: "", origin: decision.reason === "no-citable-content" ? "note" : "context-only" };
     // The shared Round14 filter removes autosaved chat/Weixin but retains handwriting and
     // explicit saved-dialogue envelopes. Known AI-only diary sections are never topic evidence.
     const clean = (this.purpose === "document" ? decision.markdown

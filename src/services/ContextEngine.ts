@@ -75,6 +75,34 @@ export class ContextEngine {
     this.graphContext = new GraphContextService(this.metadata, this.rootFolder);
   }
 
+  /** Idle-time index warm-up. It reuses the exact inventory and ensureIndex
+   * path used by build(), is read-only, creates no files and calls no model. */
+  async warmIndex(): Promise<{ updated: number; reused: number; documents: number; chunks: number }> {
+    const inventory = await this.metadata.getInventory();
+    return this.hybridRetrieval.warmIndex(inventory);
+  }
+
+  /**
+   * Model-free evidence retrieval for deterministic local answers. It reuses
+   * the same warm shared index and project scoping as build(), but returns only
+   * the matched evidence so no summary/core context can masquerade as a hit.
+   */
+  async retrieveLocal(
+    userMessage: string,
+    options: { maxResults?: number; projectScopeId?: string } = {}
+  ): Promise<ContextEvidence[]> {
+    const inventory = await this.metadata.getInventory();
+    const scopedInventory = this.scopeInventoryForProject(inventory, options.projectScopeId);
+    const retrieval = await this.adaptiveRetrieval.search({
+      userMessage,
+      inventory: scopedInventory,
+      indexInventory: inventory,
+      allowedPaths: scopedInventory.map((item) => item.path),
+      maxResults: Math.max(1, Math.min(10, options.maxResults ?? 6))
+    });
+    return retrieval.evidence;
+  }
+
   async build(input: ContextEngineBuildInput): Promise<ContextEngineResult> {
     const mode = this.resolveMode(input);
     const maxChars = input.maxChars ?? DEFAULT_CONTEXT_CHARS;
@@ -100,6 +128,10 @@ export class ContextEngine {
     const retrieval = await this.adaptiveRetrieval.search({
       userMessage: retrievalMessage,
       inventory: retrievalInventory,
+      // KB-10: the shared index belongs to the whole Vault. The project scope only
+      // narrows this query (allowedPaths), so A -> B -> global never evicts documents
+      // and never re-chunks/re-tokenizes an unchanged one.
+      indexInventory: inventory,
       allowedPaths: retrievalInventory.map((item) => item.path),
       maxResults: retrievalLimit
     });

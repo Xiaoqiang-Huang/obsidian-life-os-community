@@ -23,6 +23,7 @@ import {
 } from "../licensing/order-recovery";
 import type PersonalLifeSystemPlugin from "../main";
 import { createLifeOSShell } from "../components/LifeOSComponent";
+import { renderStableView } from "../utils/stable-view-refresh";
 import { localizeLifeOsPathParts, normalizeDirectoryLanguage } from "../settings";
 import { ensureFile } from "../utils";
 
@@ -88,20 +89,21 @@ export class ProLicenseView extends ItemView {
   }
 
   private async render(): Promise<void> {
-    const container = this.containerEl.children[1];
-    container.empty();
+    const container = this.containerEl.children[1] as HTMLElement;
     this.purchaseCatalogHost = null;
-    const main = createLifeOSShell(container as HTMLElement, this.plugin, "pro");
-    main.addClass("lifeos-pro-license-view");
+    await renderStableView(container, (staging) => {
+      const main = createLifeOSShell(staging, this.plugin, "pro");
+      main.addClass("lifeos-pro-license-view");
 
-    this.renderHero(main);
-    this.renderStatus(main);
-    this.renderAccountLogin(main);
-    this.renderRecoveryPanel(main);
-    this.renderServerSettings(main);
-    this.renderPurchase(main);
-    this.renderRedeemAndActivate(main);
-    this.renderDataAccess(main);
+      this.renderHero(main);
+      this.renderStatus(main);
+      this.renderAccountLogin(main);
+      this.renderRecoveryPanel(main);
+      this.renderServerSettings(main);
+      this.renderPurchase(main);
+      this.renderRedeemAndActivate(main);
+      this.renderDataAccess(main);
+    });
   }
 
   private get client(): LicenseClient {

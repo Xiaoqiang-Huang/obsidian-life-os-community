@@ -5,6 +5,15 @@ import { ensureFolder } from "../utils/vault";
 
 export const RECOGNITION_FOLDER = "DocumentRecognition";
 const MAX_SOURCE_BYTES = 50 * 1024 * 1024;
+export interface RecognitionPolicy {
+  /** Digest of ordinary vision config, not keys or a model-supplied identity. */
+  identity: string;
+  promptVersion: string;
+  assertCurrent(): void;
+}
+// Across service instances in one Vault. Queue callers, then check the durable
+// Markdown again: concurrent requests never pay twice for the same cached page.
+const recognitionQueues = new WeakMap<object, Map<string, Promise<unknown>>>();
 
 export interface RecognizedPage {
   text: string;
@@ -69,8 +78,8 @@ async function sha256(bytes: Uint8Array): Promise<string> {
   return Array.from(new Uint8Array(hash), (value) => value.toString(16).padStart(2, "0")).join("");
 }
 
-async function cachePath(folder: string, sourcePath: string, bytes: Uint8Array): Promise<{ path: string; digest: string }> {
-  const [digest, identity] = await Promise.all([sha256(bytes), sha256(new TextEncoder().encode(sourcePath))]);
+async function cachePath(folder: string, sourcePath: string, bytes: Uint8Array, policy = ""): Promise<{ path: string; digest: string }> {
+  const [digest, identity] = await Promise.all([sha256(bytes), sha256(new TextEncoder().encode(sourcePath + (policy ? "\n" + policy : "")))]);
   return { path: `${folder}/${digest}-${identity.slice(0, 12)}.md`, digest };
 }
 
@@ -89,7 +98,16 @@ function cloneForSource(markdown: string, source: TFile): string {
 
 /** Derived, user-visible notes live in the Vault but are not independent library documents. */
 export class DocumentRecognitionCacheService {
-  constructor(private readonly app: App, private readonly fs: FileSystemService) {}
+  constructor(private readonly app: App, private readonly fs: FileSystemService, private readonly policy?: RecognitionPolicy) {}
+
+  private policyKey(): string { return this.policy ? JSON.stringify([this.policy.identity, this.policy.promptVersion]) : ""; }
+  private async serial<T>(path: string, task: () => Promise<T>): Promise<T> {
+    let queue = recognitionQueues.get(this.app.vault);
+    if (!queue) { queue = new Map(); recognitionQueues.set(this.app.vault, queue); }
+    const run = (queue.get(path) || Promise.resolve()).catch(() => undefined).then(task);
+    queue.set(path, run);
+    try { return await run; } finally { if (queue.get(path) === run) queue.delete(path); }
+  }
 
   private folder(): string { return this.fs.path("Knowledge", RECOGNITION_FOLDER); }
 
@@ -100,15 +118,19 @@ export class DocumentRecognitionCacheService {
     }
   }
 
-  private async reuseMatchingContent(path: string, digest: string, source: TFile): Promise<string> {
+  private async reuseMatchingContent(path: string, digest: string, source: TFile, policy = "", signal?: AbortSignal): Promise<string> {
     const prefix = `${this.folder()}/${digest}-`;
     for (const candidate of this.app.vault.getMarkdownFiles()) {
       if (candidate.path === path || !candidate.path.startsWith(prefix)) continue;
       const markdown = await this.app.vault.read(candidate);
       if (frontmatterValue(markdown, "type") !== "lifeos-document-recognition"
-        || frontmatterValue(markdown, "source_hash") !== digest) continue;
+        || frontmatterValue(markdown, "source_hash") !== digest
+        || (frontmatterValue(markdown, "recognition_policy") || "") !== policy) continue;
+      if (policy) this.policy?.assertCurrent();
       const cloned = cloneForSource(markdown, source);
       await ensureFolder(this.app, this.folder());
+      if (signal?.aborted) throw new Error("Reading cancelled");
+      if (policy) this.policy?.assertCurrent();
       if (!this.app.vault.getAbstractFileByPath(path)) await this.app.vault.create(path, cloned);
       return cloned;
     }
@@ -116,15 +138,23 @@ export class DocumentRecognitionCacheService {
   }
 
   async currentCaches(): Promise<Map<string, TFile>> {
+    this.policy?.assertCurrent();
     const byOriginal = new Map<string, TFile>();
     const prefix = `${this.folder()}/`;
     for (const candidate of this.app.vault.getMarkdownFiles()) {
       if (!candidate.path.startsWith(prefix)) continue;
+      this.policy?.assertCurrent();
       let identity: ReturnType<typeof recognizedSourceIdentity>;
       try { identity = recognizedSourceIdentity(await this.app.vault.cachedRead(candidate)); }
       catch { continue; }
       if (!identity) continue;
       const source = this.app.vault.getAbstractFileByPath(identity.path);
+      if (source instanceof TFile && source.extension.toLowerCase() === "pdf" && this.policy) {
+        const markdown = await this.app.vault.cachedRead(candidate);
+        if (frontmatterValue(markdown, "recognition_policy") !== this.policyKey()
+          || source.stat.size > MAX_SOURCE_BYTES
+          || frontmatterValue(markdown, "source_hash") !== await sha256(new Uint8Array(await this.app.vault.readBinary(source)))) continue;
+      }
       if (source instanceof TFile && source.stat.size === identity.size && source.stat.mtime === identity.mtime) {
         byOriginal.set(source.path, candidate);
       }
@@ -134,19 +164,30 @@ export class DocumentRecognitionCacheService {
 
   async readPdfPage(source: TFile, pageNumber: number, signal?: AbortSignal,
     recognizeImage?: (imageDataUrl: string, signal?: AbortSignal) => Promise<string>): Promise<RecognizedPage> {
+    return this.serial(source.path, () => this.readPdfPageUnlocked(source, pageNumber, signal, recognizeImage));
+  }
+
+  private async readPdfPageUnlocked(source: TFile, pageNumber: number, signal?: AbortSignal,
+    recognizeImage?: (imageDataUrl: string, signal?: AbortSignal) => Promise<string>): Promise<RecognizedPage> {
+    this.policy?.assertCurrent();
+    if (!Number.isSafeInteger(pageNumber) || pageNumber < 1) throw new Error("PDF 页码必须是正整数");
     if (source.extension.toLowerCase() !== "pdf") throw new Error("仅支持 PDF 按页识别");
     if (source.stat.size > MAX_SOURCE_BYTES) throw new Error("PDF 超过 50 MB 读取上限");
     if (signal?.aborted) throw new Error("Reading cancelled");
     const bytes = new Uint8Array(await this.app.vault.readBinary(source));
     if (signal?.aborted) throw new Error("Reading cancelled");
-    const { path, digest } = await cachePath(this.folder(), source.path, bytes);
+    const { path, digest } = await cachePath(this.folder(), source.path, bytes, this.policyKey());
     let existing = this.app.vault.getAbstractFileByPath(path);
     let current = existing instanceof TFile ? await this.app.vault.read(existing) : "";
     if (!current) {
-      current = await this.reuseMatchingContent(path, digest, source);
+      current = await this.reuseMatchingContent(path, digest, source, this.policyKey(), signal);
       existing = this.app.vault.getAbstractFileByPath(path);
     }
-    const cached = current && recognizedSourcePath(current) === source.path ? readRecognizedPage(current, pageNumber) : null;
+    this.policy?.assertCurrent();
+    if (signal?.aborted) throw new Error("Reading cancelled");
+    const cached = current && recognizedSourcePath(current) === source.path
+      && frontmatterValue(current, "source_hash") === digest
+      && (frontmatterValue(current, "recognition_policy") || "") === this.policyKey() ? readRecognizedPage(current, pageNumber) : null;
     if (cached && (cached.method !== "empty" || !recognizeImage)) {
       const totalPages = Number(frontmatterValue(current, "total_pages")) || pageNumber;
       if (Number(frontmatterValue(current, "source_mtime")) !== source.stat.mtime && existing instanceof TFile) {
@@ -165,12 +206,19 @@ export class DocumentRecognitionCacheService {
       if (text) method = "vision";
     }
     if (signal?.aborted) throw new Error("Reading cancelled");
-    const header = `---\ntype: lifeos-document-recognition\nsource_file: ${JSON.stringify(source.path)}\nsource_hash: ${JSON.stringify(digest)}\nsource_size: ${source.stat.size}\nsource_mtime: ${source.stat.mtime}\ntotal_pages: ${native.totalPages}\n---\n\n# ${source.basename} · 识别文本\n\n> 派生识别结果；请以原文档为准。原文档：[[${source.path}]]\n`;
+    this.policy?.assertCurrent();
+    if (digest !== await sha256(new Uint8Array(await this.app.vault.readBinary(source)))) throw new Error("原文档已改变，未保存过期识别结果");
+    this.policy?.assertCurrent();
+    const header = `---\ntype: lifeos-document-recognition\nsource_file: ${JSON.stringify(source.path)}\nsource_hash: ${JSON.stringify(digest)}\nrecognition_policy: ${JSON.stringify(this.policyKey())}\nsource_size: ${source.stat.size}\nsource_mtime: ${source.stat.mtime}\ntotal_pages: ${native.totalPages}\n---\n\n# ${source.basename} · 识别文本\n\n> 派生识别结果；请以原文档为准。原文档：[[${source.path}]]\n`;
     const section = `\n## 第 ${pageNumber} 页 [${method}]\n\n${text || "（本页没有可识别文字）"}\n`;
     await ensureFolder(this.app, this.folder());
     const latest = this.app.vault.getAbstractFileByPath(path);
+    if (signal?.aborted) throw new Error("Reading cancelled");
+    this.policy?.assertCurrent();
     if (latest instanceof TFile) {
       await this.app.vault.process(latest, (old) => {
+        if (signal?.aborted) throw new Error("Reading cancelled");
+        this.policy?.assertCurrent();
         const previous = readRecognizedPage(old, pageNumber);
         if (!previous) return old + section;
         if (previous.method !== "empty" || method === "empty") return old;
@@ -188,6 +236,11 @@ export class DocumentRecognitionCacheService {
   }
 
   async readDocx(source: TFile, signal?: AbortSignal): Promise<{ text: string; cachePath: string; fromCache: boolean }> {
+    return this.serial(source.path, () => this.readDocxUnlocked(source, signal));
+  }
+
+  private async readDocxUnlocked(source: TFile, signal?: AbortSignal): Promise<{ text: string; cachePath: string; fromCache: boolean }> {
+    this.policy?.assertCurrent();
     if (source.extension.toLowerCase() !== "docx") throw new Error("仅支持 DOCX 正文识别；旧版 .doc 请先转换为 .docx");
     if (source.stat.size > 10 * 1024 * 1024) throw new Error("DOCX 超过 10 MB 读取上限");
     if (signal?.aborted) throw new Error("Reading cancelled");
@@ -195,11 +248,13 @@ export class DocumentRecognitionCacheService {
     const { path, digest } = await cachePath(this.folder(), source.path, bytes);
     let cachedFile = this.app.vault.getAbstractFileByPath(path);
     if (!(cachedFile instanceof TFile)) {
-      await this.reuseMatchingContent(path, digest, source);
+      await this.reuseMatchingContent(path, digest, source, "", signal);
       cachedFile = this.app.vault.getAbstractFileByPath(path);
     }
     if (cachedFile instanceof TFile) {
       const markdown = await this.app.vault.read(cachedFile);
+      if (signal?.aborted) throw new Error("Reading cancelled");
+      this.policy?.assertCurrent();
       if (recognizedSourcePath(markdown) === source.path) {
         const marker = /^## 正文 \[native\]\s*$/mu.exec(markdown);
         if (marker) {
@@ -213,9 +268,13 @@ export class DocumentRecognitionCacheService {
     const extracted = await extractReadableDocumentText({ name: source.name, size: bytes.byteLength,
       arrayBuffer: async () => bytes.slice().buffer }, "word", { maxTextChars: 2_000_000 });
     if (signal?.aborted) throw new Error("Reading cancelled");
+    this.policy?.assertCurrent();
+    if (digest !== await sha256(new Uint8Array(await this.app.vault.readBinary(source)))) throw new Error("原文档已改变，未保存过期正文");
     if (!extracted.text.trim()) throw new Error(extracted.warnings.join("；") || "DOCX 没有可读取正文");
     const markdown = `---\ntype: lifeos-document-recognition\nsource_file: ${JSON.stringify(source.path)}\nsource_hash: ${JSON.stringify(digest)}\nsource_size: ${source.stat.size}\nsource_mtime: ${source.stat.mtime}\n---\n\n# ${source.basename} · 识别文本\n\n> 派生识别结果；请以原文档为准。原文档：[[${source.path}]]\n\n## 正文 [native]\n\n${extracted.text}\n`;
     await ensureFolder(this.app, this.folder());
+    if (signal?.aborted) throw new Error("Reading cancelled");
+    this.policy?.assertCurrent();
     const latest = this.app.vault.getAbstractFileByPath(path);
     if (!(latest instanceof TFile)) await this.app.vault.create(path, markdown);
     return { text: extracted.text, cachePath: path, fromCache: false };

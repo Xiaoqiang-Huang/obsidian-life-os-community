@@ -200,6 +200,12 @@ Create `.obsidian/plugins/personal-life-system/` and copy these three assets fro
 
 Reload Obsidian and enable **Life OS Assistant**. Do not copy another user's `data.json`; it may contain provider configuration, pairing tokens, or license state.
 
+### Desktop AI runtime (separate download)
+
+The three-file community install does not include the local AI runtime. For AI features on **Windows x64**, download the matching `lifeos-runtime-0.3.293-win32-x64.zip` release asset, verify it against `SHA256SUMS-runtime-0.3.293-win32-x64`, and extract it into `.obsidian/plugins/personal-life-system/runtime/` so that `runtime/claude-agent/0.3.293/win32-x64/claude.exe` exists. AI entry points explain this when the runtime is missing; the plugin never downloads executables automatically.
+
+See [`docs/sdk-desktop-installation.md`](docs/sdk-desktop-installation.md) for install, upgrade, rollback, and SHA-256 commands. macOS and Linux runtimes are not declared supported in this release; Linux arm64 would require a self-hosted runner. The runtime is an unaltered upstream binary with separate terms and requires redistribution review before publication.
+
 ### First-time setup
 
 1. Open **Settings → Life OS Assistant** and choose the Life OS root folder in the current vault.

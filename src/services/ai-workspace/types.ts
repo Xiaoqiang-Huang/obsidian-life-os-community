@@ -33,6 +33,13 @@ export const AI_WORKSPACE_DESKTOP_TOOLS = [
 export type AiWorkspaceTool = typeof AI_WORKSPACE_TOOLS[number];
 export type AiWorkspaceAgentPermission = "read-only" | "workspace-write" | "project-write" | "full";
 export type AiWorkspaceSessionLifecycle = "active" | "done" | "paused" | "stale";
+/**
+ * How many read-only raw snapshots are kept per session. `latest` keeps the
+ * newest snapshot only, `three` keeps the newest three, `all` disables the
+ * per-session retention cleanup.
+ */
+export type AiWorkspaceRawRetention = "latest" | "three" | "all";
+export type AiWorkspaceRawSnapshotSkipReason = "over-size";
 export type AiWorkspaceMessageRole = "user" | "assistant" | "tool";
 export type AiWorkspaceImportStatus = "new" | "duplicate" | "append" | "conflict";
 export type AiWorkspaceDailyFactStatus = "pending" | "confirmed" | "dismissed";
@@ -169,6 +176,13 @@ export interface AiWorkspaceRevisionSummary {
   messageCount: number;
   reason: "initial" | "append" | "conflict";
   manifestPath: string;
+  /** Vault path of the kept raw copy for this revision, when one exists. */
+  rawSnapshotPath?: string;
+  /** Content hash of the kept raw copy, used to dedupe identical snapshots. */
+  rawSnapshotHash?: string;
+  rawSnapshotSize?: number;
+  /** True when this revision reused an existing identical snapshot instead of copying. */
+  rawSnapshotDeduped?: boolean;
 }
 
 export interface AiWorkspaceSessionSummary {
@@ -196,6 +210,10 @@ export interface AiWorkspaceSessionSummary {
   fileReferences: AiWorkspaceFileReference[];
   notePath: string;
   rawSnapshotPath?: string;
+  rawSnapshotHash?: string;
+  rawSnapshotSize?: number;
+  rawSnapshotDeduped?: boolean;
+  rawSnapshotSkipped?: AiWorkspaceRawSnapshotSkipReason;
   analysis: AiWorkspaceSessionAnalysis;
   activity?: AiWorkspaceActivitySummary;
   handoff?: AiWorkspaceHandoffSnapshot;
@@ -293,7 +311,14 @@ export interface AiWorkspaceImportOptions {
   includeFileReferences: boolean;
   includeProjectMemory: boolean;
   includeToolMemory: boolean;
-  retainRawSnapshot: boolean;
+  /**
+   * `false` never retains a raw snapshot; `true` retains under the storage
+   * governance policy (per-session retention limit plus
+   * `aiWorkspaceRawMaxSourceMB` threshold); `"force"` is the explicit user
+   * override that keeps a raw snapshot even when the source exceeds the
+   * configured size threshold.
+   */
+  retainRawSnapshot: boolean | "force";
   redactSecrets: boolean;
 }
 
@@ -321,6 +346,56 @@ export interface AiWorkspaceImportResult {
   revisionId: string;
   appendedMessages: number;
   skippedMessages: number;
+}
+
+export interface AiWorkspaceRawSnapshotSessionUsage {
+  sessionId: string;
+  projectId: string;
+  tool: AiWorkspaceTool;
+  /** Number of raw revision directories found on disk for this session. */
+  revisions: number;
+  bytes: number;
+  /** Directories beyond the active retention policy (safe to reclaim). */
+  reclaimableRevisions: number;
+  reclaimableBytes: number;
+  rawSnapshotPath?: string;
+}
+
+export interface AiWorkspaceRawSnapshotProjectUsage {
+  projectId: string;
+  revisions: number;
+  bytes: number;
+  reclaimableRevisions: number;
+  reclaimableBytes: number;
+  sessions: AiWorkspaceRawSnapshotSessionUsage[];
+}
+
+export interface AiWorkspaceRawSnapshotUsage {
+  root: string;
+  retention: AiWorkspaceRawRetention;
+  maxSourceMB: number;
+  totalRevisions: number;
+  totalBytes: number;
+  reclaimableRevisions: number;
+  reclaimableBytes: number;
+  projects: AiWorkspaceRawSnapshotProjectUsage[];
+  /** Revision directories under `.lifeos/raw` with no session in the index. */
+  unknownRevisionDirs: number;
+  unknownBytes: number;
+  scannedAt: string;
+  /** KB-12.1: integrity of the AI workspace index used by prune. */
+  indexStatus: "ok" | "corrupt" | "unavailable";
+  /** KB-12.1: false when the index is broken/empty — index-based prune is unsafe. */
+  safeToPrune: boolean;
+}
+
+export interface AiWorkspaceRawSnapshotPruneResult {
+  removedRevisions: number;
+  reclaimedBytes: number;
+  /** Project ids whose snapshot directories were touched. */
+  projects: string[];
+  /** KB-12.1: set when prune refused to run because the index is broken. */
+  refused?: "index-corrupt";
 }
 
 /**

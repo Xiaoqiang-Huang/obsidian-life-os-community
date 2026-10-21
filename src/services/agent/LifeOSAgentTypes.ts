@@ -1,6 +1,7 @@
 import type { AgentRequestBudget } from "./AgentRequestBudget";
 import type { AiImageUrlContentPart, AiMessage, AiResponse } from "../../ai";
 import type { ChatContextBundle } from "../ChatContextService";
+import type { WebSearchMode } from "../WebContextService";
 import type { AgentCompactionResult } from "./AgentContextCompactor";
 
 export type LifeOSAgentChannel = "desktop" | "weixin";
@@ -106,6 +107,15 @@ export interface LifeOSAgentToolResult {
 export type LifeOSAgentPermissionMode = "read-only" | "confirm" | "explicit-auto";
 
 export interface LifeOSAgentToolExecutionContext {
+  accountScopeId?: string;
+  /** Current entry-point authorization, rechecked by the unified channel. */
+  approval?: () => boolean;
+  /** Assigned by the host Runtime, never accepted from tool arguments. */
+  toolCallId?: string;
+  sdkTextWorkflow?: boolean;
+  sdkWorkflowIdentity?: string;
+  /** Host-owned effective SDK catalog, never accepted from model arguments. */
+  sdkAvailableToolIds?: readonly string[];
   requestBudget?: AgentRequestBudget;
   channel: LifeOSAgentChannel;
   /** Public conversation identity used by tools, routes, logs, and UI events. */
@@ -119,9 +129,16 @@ export interface LifeOSAgentToolExecutionContext {
   turnId: string;
   projectScopeId: string;
   userContent: string;
+  /** Host-derived retrieval scope; never read from model-controlled arguments. */
+  scopeRoots?: readonly string[];
+  scopeSource?: "project" | "explicit" | "global" | "denied";
+  /** Effective host policy; never read from model-controlled arguments. */
+  memoryMode?: import("../../settings").AgentMemoryMode;
   context: ChatContextBundle;
   imageParts: AiImageUrlContentPart[];
   permissionMode: LifeOSAgentPermissionMode;
+  /** Applies to the entire tool chain, including planners and composed tools. */
+  webSearchMode?: WebSearchMode;
   explicitWriteIntent: boolean;
   signal?: AbortSignal;
 }
@@ -135,6 +152,8 @@ export interface LifeOSAgentLoopBudget {
 }
 
 export interface LifeOSAgentLoopResult {
+  /** One allowlisted model-cost tool awaits host execution after the SDK query closes. */
+  deferredTool?: LifeOSAgentToolCall;
   ok: boolean;
   text: string;
   error?: string;

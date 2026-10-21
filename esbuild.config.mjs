@@ -1,7 +1,9 @@
 import esbuild from "esbuild";
+import { desktopLazyNodeBuiltins } from "./src/build/desktop-lazy-node-builtins.mjs";
 import { fileURLToPath } from "node:url";
 import { pdfRuntimeIsolation } from "./src/build/pdf-runtime-isolation.mjs";
 import { reviewSafeJsZip } from "./src/build/review-safe-jszip.mjs";
+import { reviewSafeSdkValidation } from "./src/build/review-safe-sdk-validation.mjs";
 import { readFileSync } from "node:fs";
 import { builtinModules } from "node:module";
 import process from "process";
@@ -12,7 +14,7 @@ await buildUIStyles();
 
 const context = await esbuild.context({
   ...pdfRuntimeIsolation(fileURLToPath(new URL(".", import.meta.url))),
-  plugins: [reviewSafeJsZip],
+  plugins: [reviewSafeJsZip, reviewSafeSdkValidation, desktopLazyNodeBuiltins],
   banner: {
     js: "/* Personal Life System Obsidian Plugin */\n/* Mozilla Readability 0.6.0 — Copyright Mozilla contributors.\n" + readFileSync(new URL("./src/vendor/readability/LICENSE.md", import.meta.url), "utf8").replaceAll("*/", "* /") + "\n*/"
   },
@@ -32,7 +34,8 @@ const context = await esbuild.context({
     "@lezer/common",
     "@lezer/highlight",
     "@lezer/lr",
-    ...builtinModules
+    ...builtinModules,
+    ...builtinModules.map(name => name.startsWith("node:") ? name : `node:${name}`)
   ],
   format: "cjs",
   target: "es2018",
