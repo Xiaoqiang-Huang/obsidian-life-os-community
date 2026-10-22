@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.8 - 2026-10-22
+
+### Fixed
+
+- Fixed source-review dependency installation when review tooling installs production dependencies only. `@ybouane/liquidglass` runs `patch-package` in its postinstall hook, but `patch-package` was previously a dev dependency; it is now a production dependency so the hook resolves in both full and production-only installs. Verified with `npm ci --omit=dev` on Windows and with Linux x64 platform resolution.
+
 ## 0.4.7 - 2026-10-22
 
 ### Fixed

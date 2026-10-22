@@ -192,7 +192,7 @@ After the listing is accepted:
 
 ### Manual installation
 
-Create `.obsidian/plugins/personal-life-system/` and copy these three assets from an exact semantic-version release tag such as `0.4.7`:
+Create `.obsidian/plugins/personal-life-system/` and copy these three assets from an exact semantic-version release tag such as `0.4.8`:
 
 - `main.js`
 - `manifest.json`
