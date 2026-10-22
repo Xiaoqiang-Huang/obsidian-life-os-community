@@ -681,6 +681,8 @@ function median(values: number[]): number {
   return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
 }
 
+/** DOCX is a ZIP container. Decode only the user-selected document in
+ * memory; this path never extracts files to disk or touches plugin files. */
 async function extractDocxText(file: ReadableImportFile): Promise<string> {
   const bytes = await readFileBytes(file);
   let oversizedXml = false;

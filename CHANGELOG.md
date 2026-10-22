@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.7 - 2026-10-22
+
+### Fixed
+
+- Separated internal metadata filenames from Obsidian release assets: saved AI workspace revisions use `revision.json`, the optional bundled runtime uses `runtime.json`, and in-app help no longer refers to a release asset. DOCX import decodes the user-selected document in memory and never extracts into or overwrites the plugin directory. The plugin has no self-update, download, or file-replacement path.
+- The optional complete Windows package must be updated to 0.4.7 together with the plugin because its runtime metadata filename changed. The primary community install remains three files plus a local Claude Code CLI (2.1.293+), which is auto-detected.
+
 ## 0.4.6 - 2026-10-22
 
 ### Fixed

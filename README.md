@@ -192,7 +192,7 @@ After the listing is accepted:
 
 ### Manual installation
 
-Create `.obsidian/plugins/personal-life-system/` and copy these three assets from an exact semantic-version release tag such as `0.3.24`:
+Create `.obsidian/plugins/personal-life-system/` and copy these three assets from an exact semantic-version release tag such as `0.4.7`:
 
 - `main.js`
 - `manifest.json`
@@ -200,11 +200,27 @@ Create `.obsidian/plugins/personal-life-system/` and copy these three assets fro
 
 Reload Obsidian and enable **Life OS Assistant**. Do not copy another user's `data.json`; it may contain provider configuration, pairing tokens, or license state.
 
-### Desktop AI runtime (separate download)
+### Desktop AI runtime (local Claude Code CLI)
 
-The three-file community install does not include the local AI runtime. For AI features on **Windows x64**, download the matching `lifeos-runtime-0.3.293-win32-x64.zip` release asset, verify it against `SHA256SUMS-runtime-0.3.293-win32-x64`, and extract it into `.obsidian/plugins/personal-life-system/runtime/` so that `runtime/claude-agent/0.3.293/win32-x64/claude.exe` exists. AI entry points explain this when the runtime is missing; the plugin never downloads executables automatically.
+The three-file community install does not bundle the native runtime. Install the Claude Code CLI **2.1.293 or newer** using the official installer, reopen the terminal, and verify:
 
-See [`docs/sdk-desktop-installation.md`](docs/sdk-desktop-installation.md) for install, upgrade, rollback, and SHA-256 commands. macOS and Linux runtimes are not declared supported in this release; Linux arm64 would require a self-hosted runner. The runtime is an unaltered upstream binary with separate terms and requires redistribution review before publication.
+Windows PowerShell:
+
+```powershell
+irm https://claude.ai/install.ps1 | iex
+claude --version
+```
+
+macOS / Linux:
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+claude --version
+```
+
+Restart Obsidian. Life OS detects the local CLI automatically; no CLI path, SDK profile, or manual runtime configuration is required. The plugin never downloads, installs, or updates executables.
+
+For an offline Windows x64 setup, use the optional `LifeOS-<version>-win32-x64.zip` asset that exactly matches the plugin version. Back up `.obsidian/plugins/personal-life-system/` before replacing it, and do not mix a full package with a different plugin version. The community three files plus a local Claude Code CLI remain the primary installation path.
 
 ### First-time setup
 

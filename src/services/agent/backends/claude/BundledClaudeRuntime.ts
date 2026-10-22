@@ -1,6 +1,7 @@
 import { PINNED_AGENT_SDK_VERSION } from "./ClaudeSdkRuntime";
 
-/** Only the plugin's own fixed-version runtime. Never PATH, global npm or login discovery. */
+/** Read-only validation of the optional bundled runtime metadata.
+ * This never writes, installs, downloads, or replaces plugin files. */
 export async function resolveBundledClaudeRuntime(pluginDirectory: string, platform: string, arch: string, desktop: boolean): Promise<{ executablePath: string; cliVersion: string }> {
   if (!desktop) throw new Error("sdk-desktop-only");
   if (![["win32", "x64"], ["darwin", "arm64"], ["darwin", "x64"], ["linux", "x64"], ["linux", "arm64"]].some(([p, a]) => p === platform && a === arch)) throw new Error("sdk-bundled-platform-unavailable");
@@ -10,7 +11,7 @@ export async function resolveBundledClaudeRuntime(pluginDirectory: string, platf
   try { root = await fs.realpath(pluginDirectory); }
   catch { throw new Error("sdk-plugin-directory-unavailable"); }
   const folder = path.join(root, "runtime", "claude-agent", PINNED_AGENT_SDK_VERSION, `${platform}-${arch}`);
-  const manifestPath = path.join(folder, "manifest.json");
+  const manifestPath = path.join(folder, "runtime.json");
   let manifest: { sdkVersion?: string; platform?: string; arch?: string; entry?: string; sha256?: string; cliVersion?: string };
   try {
     if (await fs.realpath(manifestPath) !== manifestPath || (await fs.stat(manifestPath)).size > 8192) throw Error();

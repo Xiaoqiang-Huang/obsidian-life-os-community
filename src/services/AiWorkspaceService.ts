@@ -2645,7 +2645,7 @@ export class AiWorkspaceService {
         });
       });
     }
-    const manifestPath = `${revisionRoot}/manifest.json`;
+    const manifestPath = `${revisionRoot}/revision.json`;
     const manifest: AiWorkspaceRevisionManifest = {
       schemaVersion: 1,
       sessionId: input.sessionId,

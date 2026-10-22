@@ -25,15 +25,17 @@ export function createManagedSdkBootstrapPorts<Request, Result>(host: {
   onBridgeFailure?(request: Request, scope: SdkBootstrapContext, code: string, failure?: Readonly<SdkProtocolFailure>): void;
   onBridgePreview?(request: Request, scope: SdkBootstrapContext, text: string): void;
   beforeDispatch?(request: Request, scope: SdkBootstrapContext, body: Record<string, unknown>, protocol: "openai-chat" | "anthropic-messages"): Promise<void>;
+  /** Dependency seam for deterministic runtime-resolution tests. */
+  resolveRuntime?: typeof resolveClaudeRuntime;
 }): SdkBootstrapPorts<Request, Result> {
-  const { desktop, pluginDirectory, platform, arch, executePrepared, beforeDispatch, onBridgeFailure } = host;
+  const { desktop, pluginDirectory, platform, arch, executePrepared, beforeDispatch, onBridgeFailure, resolveRuntime = resolveClaudeRuntime } = host;
   return {
     async prepare(snapshot, signal) {
       if (!desktop) throw new Error("SDK_BOOTSTRAP_DESKTOP_ONLY");
       if (!["openai-bridge", "anthropic-direct", "anthropic-bridge"].includes(snapshot.config.route)) throw new Error("SDK_BOOTSTRAP_ROUTE_UNSUPPORTED");
       if (signal.aborted) throw new Error("SDK_BOOTSTRAP_CANCELLED");
       let resolved: Awaited<ReturnType<typeof resolveClaudeRuntime>>;
-      try { resolved = await resolveClaudeRuntime(pluginDirectory, platform, arch, desktop); }
+      try { resolved = await resolveRuntime(pluginDirectory, platform, arch, desktop); }
       catch { throw new Error("SDK_BOOTSTRAP_RUNTIME_UNAVAILABLE"); }
       if (resolved.source === "bundled" && resolved.cliVersion !== "2.1.293") throw new Error("SDK_BOOTSTRAP_RUNTIME_UNAVAILABLE");
       if (signal.aborted) throw new Error("SDK_BOOTSTRAP_CANCELLED");
