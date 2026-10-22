@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1 - 2026-10-22
+
+### Fixed
+
+- Fixed WeChat replies failing with `Destination file already exists!` on Windows. The transcript writer still prefers an atomic rename, but when the Obsidian Windows adapter refuses to replace an existing target it now writes the already-merged transcript directly instead of turning every reply into a delivery error.
+
+### Validation
+
+- Added a regression fixture for the exact Windows destination-exists message; merged history and the new `你好` turn are preserved.
+
 ## 0.4.0 - 2026-10-21
 
 ### Breaking

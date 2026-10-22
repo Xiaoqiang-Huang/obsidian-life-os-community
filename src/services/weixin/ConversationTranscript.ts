@@ -223,11 +223,28 @@ export async function withTranscriptLock<T>(key: string, task: () => Promise<T>)
   }
 }
 
-async function writeAtomic(adapter: TranscriptAdapter, path: string, markdown: string): Promise<void> {
+function isExistingDestinationError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /destination file already exists|already exists|file exists|EEXIST/iu.test(message);
+}
+
+/** Rename is atomic on POSIX, but Obsidian's Windows DataAdapter refuses to
+ * replace an existing target. In that one case, write the fully merged
+ * transcript directly; the caller already merged old and new messages, so a
+ * failed rename must not turn every WeChat reply into a delivery error. */
+async function writeAtomic(adapter: TranscriptAdapter, path: string, markdown: string): Promise<boolean> {
   const temp = `${path}.tmp-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   try {
     await adapter.write(temp, markdown);
-    await adapter.rename(temp, path);
+    try {
+      await adapter.rename(temp, path);
+      return true;
+    } catch (error) {
+      if (!isExistingDestinationError(error)) throw error;
+      await adapter.write(path, markdown);
+      await adapter.remove(temp).catch(() => undefined);
+      return false;
+    }
   } catch (error) {
     await adapter.remove(temp).catch(() => undefined);
     throw error;
@@ -255,7 +272,7 @@ export async function saveTranscriptMerged(
     }
     const result = mergeTranscriptMarkdown(existing, input);
     if (!result.changed) return { path, appended: 0, total: result.total, atomic: true, preservedOld: false, changed: false };
-    await writeAtomic(adapter, path, result.markdown);
-    return { path, appended: result.appended, total: result.total, atomic: true, preservedOld: false, changed: true };
+    const atomic = await writeAtomic(adapter, path, result.markdown);
+    return { path, appended: result.appended, total: result.total, atomic, preservedOld: false, changed: true };
   });
 }
