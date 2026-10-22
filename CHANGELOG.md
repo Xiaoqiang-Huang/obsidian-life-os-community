@@ -1,10 +1,16 @@
 # Changelog
 
+## 0.4.4 - 2026-10-22
+
+### Changed
+
+- Expanded the runtime-missing error into step-by-step installation guidance: open Windows PowerShell from the Start menu, run the Claude Code installer, reopen PowerShell, verify `claude --version` (2.1.293+), restart Obsidian, and fall back to the complete plugin zip when needed. macOS/Linux terminal instructions are included. External CLIs must match the bundled runtime version (2.1.293+) to avoid protocol mismatches.
+
 ## 0.4.3 - 2026-10-22
 
 ### Changed
 
-- Runtime-missing diagnostics now include concrete installation steps and direct links: the complete Windows x64 plugin package, Windows/macOS/Linux Claude Code CLI commands, the npm alternative, the 2.1.248 minimum, and the need to restart Obsidian. The plugin still never downloads or installs runtime/CLI itself.
+- Runtime-missing diagnostics now include concrete installation steps and direct links: the complete Windows x64 plugin package, Windows/macOS/Linux Claude Code CLI commands, the npm alternative, the 2.1.293 minimum, and the need to restart Obsidian. The plugin still never downloads or installs runtime/CLI itself.
 
 ## 0.4.2 - 2026-10-22
 
@@ -14,7 +20,7 @@
 
 ### Validation
 
-- Candidate discovery skips Windows `.cmd/.bat/.ps1` wrappers, requires CLI 2.1.248 or newer, probes `--version` without a shell, and passes the plugin's isolated provider environment.
+- Candidate discovery skips Windows `.cmd/.bat/.ps1` wrappers, requires CLI 2.1.293 or newer, probes `--version` without a shell, and passes the plugin's isolated provider environment.
 - Added offline external-CLI resolution tests; the full local test suite and community readiness guards pass.
 
 ## 0.4.1 - 2026-10-22

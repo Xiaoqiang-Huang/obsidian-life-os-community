@@ -11,7 +11,7 @@ export interface ExternalClaudeCandidate {
 
 const MIN_CLI_MAJOR = 2;
 const MIN_CLI_MINOR = 1;
-const MIN_CLI_PATCH = 248;
+const MIN_CLI_PATCH = 293;
 
 export function isSupportedClaudeCliVersion(version: string): boolean {
   const match = String(version || "").match(/^(\d+)\.(\d+)\.(\d+)/u);
