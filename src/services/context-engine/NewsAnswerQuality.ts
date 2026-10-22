@@ -1,5 +1,6 @@
 import type { ContextSource } from "./types";
 import { normalizedWebHeadline } from "./WebEvidenceBody";
+import { splitCoordinatedSubject } from "../../utils/sentence-split";
 
 /** News presentation is opt-in; exact user output requirements take precedence. */
 export function isNewsRequest(query: string): boolean {
@@ -32,7 +33,7 @@ export function newsSubjects(query: string): string[] {
   // Single characters inside names (e.g. 协和科技) are not enumeration boundaries.
   let pieces = /[、，,]/u.test(subject) ? subject.split(/[、，,]/u) : subject.split(/\s+(?:and|以及|和|与|及)\s+/iu);
   if (pieces.length === 1) {
-    const coordinated = subject.split(/(?<=(?:公司|集团|科技|大学|机构|组织|团队))(?:以及|和|与|及)(?=.{2,})/u);
+    const coordinated = splitCoordinatedSubject(subject);
     if (coordinated.length > 1 && coordinated.every((s) => s.length >= 2)) pieces = coordinated;
     // Without a clear boundary, don't claim that the composite is one confirmed entity.
     else if (/(.{2,})(?:以及|和|与)(.{2,})/u.test(subject)) return [];

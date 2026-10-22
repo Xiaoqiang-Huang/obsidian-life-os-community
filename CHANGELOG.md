@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.6 - 2026-10-22
+
+### Fixed
+
+- Removed the packaging-only SDK zip helper from the community source tree. It read `main.js`/`manifest.json` and wrote an archive, which the community scanner correctly flagged as a potential self-update mechanism. Packaging remains a private `scripts/` tool and is not shipped in the community source.
+- Replaced `App.loadLocalStorage`/`saveLocalStorage` with the standard `window.localStorage` in project analysis, removing Obsidian APIs newer than the declared `minAppVersion` 1.6.6.
+- Removed all regular-expression lookbehinds from sentence splitting and coordinated-subject parsing so iOS versions before 16.4 are supported.
+
 ## 0.4.5 - 2026-10-22
 
 ### Changed

@@ -1,4 +1,5 @@
 import type { ContextSource } from "./types";
+import { splitSentenceFragments } from "../../utils/sentence-split";
 
 type WebSourceText = Pick<ContextSource, "title" | "excerpt">;
 const UI_LINES = new Set([
@@ -89,7 +90,7 @@ export function selectReadableWebEvidence(source: WebSourceText, query = "", max
     if (text.length <= cap) return text;
     // Keep complete source sentences, with attribution/negation reserved first.
     // An over-budget unbroken assertion is omitted, never shown as a cut prefix.
-    const sentences = text.split(/(?<=[。！？!?；;])|(?<=\.)\s+(?=[A-Z“"'])/u).filter(Boolean);
+    const sentences = splitSentenceFragments(text);
     const reserved = new Set<number>();
     let left = cap;
     const keep = (i: number): void => {

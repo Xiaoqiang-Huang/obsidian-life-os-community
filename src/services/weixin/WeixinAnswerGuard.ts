@@ -3,6 +3,7 @@ import type { ContextSource } from "../context-engine/types";
 import { extractReadableWebBody, hasReadableWebBody, hasUnavailableWebBody, selectReadableWebParagraph, selectReadableWebEvidence } from "../context-engine/WebEvidenceBody";
 import { isNewsRequest, isNewsDependentLine, newsAnswerQualityIssues, newsEvidenceCoverage, newsSubjects, newsFactsForVerification, diversifyNewsResults } from "../context-engine/NewsAnswerQuality";
 import { isWebEvidenceRelevant } from "../WebContextService";
+import { splitSentenceFragments } from "../../utils/sentence-split";
 
 /** A limited attributed news summary is not official confirmation or cross-verification. */
 export function canUsePartialWeixinNewsEvidence(query: string, sources: ContextSource[]): boolean {
@@ -165,8 +166,7 @@ export function buildWeixinCheckedNewsDigest(
       if (!subject || records.filter(r => r.subject === subject).length >= 3) continue;
       const key = paragraph.replace(/\s+/gu, "");
       if (seen.has(key)) continue;
-      const fact = paragraph.replace(/\[S\d+\]/gu, "")
-        .split(/(?<=[。！？!?；;])|(?<=\.)\s+(?=[A-Z“"'])/u).filter(s => s.trim())
+      const fact = splitSentenceFragments(paragraph.replace(/\[S\d+\]/gu, ""))
         .map(sentence => `${sentence.trim()} [${source.citationId}]`).join(" ");
       // Unlike generated claims this is the complete literal source paragraph,
       // including adjacent qualifications, never a rewritten confirmation.
@@ -227,7 +227,8 @@ export function selectWeixinSupportedClaims(
     const fragments = String(answer || "").slice(0, 16_000)
       .replace(/```[\s\S]*?```/gu, " ")
       .replace(/([。！？!?；;])\s*((?:\[S\d+\]\s*)+)/gu, "$2$1")
-      .split(/\n+|(?<=[。！？!?；;])/gu)
+      .split(/\n+/u)
+      .flatMap((part) => splitSentenceFragments(part))
       .map((fragment) => fragment.replace(/^\s*(?:[-*•]|\d+[.)、](?!\d))\s*/u, "").trim())
       .filter((fragment) => fragment.length >= 8 && fragment.length <= 600 && /\[S\d+\]/u.test(fragment));
     for (const fragment of fragments) {

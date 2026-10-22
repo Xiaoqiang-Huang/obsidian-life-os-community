@@ -66,11 +66,12 @@ export class ProjectAnalysisService {
     if (!this.initialization) this.initialization = (async () => {
       if (!Platform.isDesktopApp) throw new Error("analysis-desktop-only");
       const adapter = this.app.vault.adapter as typeof this.app.vault.adapter & { getBasePath?: () => string };
-      if (!adapter.getBasePath || !this.app.loadLocalStorage || !this.app.saveLocalStorage) throw new Error("analysis-persistence-capability-unavailable");
+      const storage = typeof window !== "undefined" ? window.localStorage : null;
+      if (!adapter.getBasePath || !storage) throw new Error("analysis-persistence-capability-unavailable");
       const s = this.settings(); this.fs = this.filesystem(); this.binding = JSON.stringify([s.rootFolder, s.directoryLanguage]);
       const key = "lifeos.analysis.host.v1";
-      let host = this.app.loadLocalStorage(key);
-      if (typeof host !== "string" || !/^[a-zA-Z0-9-]{1,80}$/u.test(host)) { host = newId(); this.app.saveLocalStorage(key, host); }
+      let host = storage.getItem(key);
+      if (typeof host !== "string" || !/^[a-zA-Z0-9-]{1,80}$/u.test(host)) { host = newId(); storage.setItem(key, host); }
       const io = await desktopAnalysisIO(adapter.getBasePath(), this.fs.path("Chat", "Agent", "Working State", "ProjectAnalysis"), String(host));
       this.sdkJobLock = operation => io.withHostLock("project-analysis-sdk-serial", operation);
       const reader: ManifestReader = {
