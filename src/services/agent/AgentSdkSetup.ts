@@ -43,7 +43,7 @@ const errors: Record<string, [string,string]> = {
   'sdk-runtime-required':['尚未检查本机运行时。','优先点击“检查插件自带运行时”；只有自定义部署才需要展开高级区手动指定路径。'],
   'sdk-plugin-directory-unavailable':['无法定位当前插件安装目录。','请在桌面 Obsidian 启用完整插件安装；不会搜索全局运行时或读取旧登录。'],
   'sdk-bundled-platform-unavailable':['当前系统架构没有可用的内置运行时。','选择适合当前平台的完整安装包，或在高级区明确指定本机运行时；移动端继续使用原 API。'],
-  'sdk-bundled-runtime-missing':['插件自带运行时文件缺失。','请安装完整插件包（含 runtime），或安装 Claude Code CLI 2.1.293+：Windows PowerShell 运行 irm https://claude.ai/install.ps1 | iex；macOS/Linux 运行 curl -fsSL https://claude.ai/install.sh | bash；或 npm install -g @anthropic-ai/claude-code。安装后重启 Obsidian。不会自动下载或安装。'],
+  'sdk-bundled-runtime-missing':['插件自带运行时文件缺失。','请按 Claudian 的方式安装 Claude Code CLI 2.1.293+：Windows PowerShell 运行 irm https://claude.ai/install.ps1 | iex；macOS/Linux 运行 curl -fsSL https://claude.ai/install.sh | bash；或 npm install -g @anthropic-ai/claude-code。安装后重启 Obsidian。不会自动下载或安装。'],
   'sdk-bundled-manifest-invalid':['内置运行时清单不匹配。','重新安装与本插件固定 SDK 版本匹配的完整包；不要混用不同平台或版本的 runtime。'],
   'sdk-bundled-integrity-failed':['内置运行时完整性检查失败。','请重新安装完整插件包，不运行损坏或被修改的文件。'],
   'sdk-bundled-version-mismatch':['内置运行时的实际版本与清单不一致。','重新安装匹配版本的完整包，再主动检查；未启用 SDK、未调用模型。'],

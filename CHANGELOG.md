@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.5 - 2026-10-22
+
+### Changed
+
+- Installation now follows the same model as Claudian: install the community three-file plugin, then install/update Claude Code CLI (2.1.293+) and let the plugin auto-detect it. The runtime-missing message starts with opening PowerShell/Terminal and gives the exact install/verify/restart steps.
+- The complete Windows plugin zip remains an optional offline fallback, not the primary installation path.
+
 ## 0.4.4 - 2026-10-22
 
 ### Changed
