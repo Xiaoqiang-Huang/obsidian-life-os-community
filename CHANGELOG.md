@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.2 - 2026-10-22
+
+### Added
+
+- If the plugin does not contain a matching bundled runtime, it now auto-detects a user-installed Claude Code CLI (native executable or npm `cli.js`) and uses it read-only. It never downloads or installs the CLI; a corrupted bundled runtime is still rejected instead of being silently replaced.
+
+### Validation
+
+- Candidate discovery skips Windows `.cmd/.bat/.ps1` wrappers, requires CLI 2.1.248 or newer, probes `--version` without a shell, and passes the plugin's isolated provider environment.
+- Added offline external-CLI resolution tests; the full local test suite and community readiness guards pass.
+
 ## 0.4.1 - 2026-10-22
 
 ### Fixed

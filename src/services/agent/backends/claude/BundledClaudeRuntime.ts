@@ -6,7 +6,9 @@ export async function resolveBundledClaudeRuntime(pluginDirectory: string, platf
   if (![["win32", "x64"], ["darwin", "arm64"], ["darwin", "x64"], ["linux", "x64"], ["linux", "arm64"]].some(([p, a]) => p === platform && a === arch)) throw new Error("sdk-bundled-platform-unavailable");
   const path = await import("node:path"), fs = await import("node:fs/promises");
   if (!pluginDirectory || !path.isAbsolute(pluginDirectory)) throw new Error("sdk-plugin-directory-unavailable");
-  const root = await fs.realpath(pluginDirectory);
+  let root: string;
+  try { root = await fs.realpath(pluginDirectory); }
+  catch { throw new Error("sdk-plugin-directory-unavailable"); }
   const folder = path.join(root, "runtime", "claude-agent", PINNED_AGENT_SDK_VERSION, `${platform}-${arch}`);
   const manifestPath = path.join(folder, "manifest.json");
   let manifest: { sdkVersion?: string; platform?: string; arch?: string; entry?: string; sha256?: string; cliVersion?: string };

@@ -35,7 +35,7 @@ export function sdkBootstrapDiagnostic(code: string): { title: string; action: s
     SDK_ORDINARY_INVALID_CREDENTIAL: ["AI 凭据格式无效", "请检查普通 AI 配置中的 Key，去掉多余引号、标签或换行后重试。"],
     SDK_ORDINARY_INVALID_HEADERS: ["AI 高级请求头有误", "请检查普通 AI 配置的附加请求头 JSON、重复头或不支持的字段。"],
     SDK_ORDINARY_INVALID_CONFIGURATION: ["AI 配置尚不可用", "请核对普通 AI 配置中的服务地址、模型和高级路径；不需要另配 SDK。"],
-    SDK_BOOTSTRAP_RUNTIME_UNAVAILABLE: ["插件的 AI 运行组件缺失或校验失败", "Windows x64 请安装匹配版本的完整桌面包（含 runtime 目录），保留 data.json 和 sdk-state；社区三文件更新不会补齐缺失组件。其他平台请查看支持说明。无需另填 CLI 路径，不会自动下载可执行文件或调用模型。"],
+    SDK_BOOTSTRAP_RUNTIME_UNAVAILABLE: ["插件的 AI 运行组件缺失或校验失败", "请安装匹配版本的完整插件包（含 runtime 目录），或先在系统中安装可用的 Claude Code CLI；插件会自动识别本机 CLI。不会自动下载或安装运行组件，也不会调用模型。"],
     SDK_BOOTSTRAP_APPROVAL_REQUIRED: ["本次操作尚未获得业务授权", "请先确认对应功能的范围和操作。后台任务不会因底层引擎变化自动开启。"],
     SDK_BOOTSTRAP_STALE_CONFIGURATION: ["AI 配置已变化，旧任务已取消", "请检查当前服务商和模型，再手动重新发起；没有自动转交账号或重跑。"],
     SDK_BOOTSTRAP_CLEANUP_FAILED: ["本次任务的资源清理未确认", "请保存编辑后重新加载插件，再手动重试。已发出的请求可能产生费用，请勿连续重复提交。"],

@@ -2,8 +2,9 @@ import type { SdkProtocolFailure } from "./SdkProtocolDiagnostic";
 import type { Options } from "@anthropic-ai/claude-agent-sdk/core";
 import type { AgentProviderProfile, AgentRuntimeProfile } from "../agent/AgentEngineConfig";
 import { AGENT_CAPABILITIES } from "../agent/AgentEngineConfig";
+import { resolveClaudeRuntime } from "../agent/backends/claude/ClaudeRuntimeResolver";
 import { resolveBundledClaudeRuntime } from "../agent/backends/claude/BundledClaudeRuntime";
-import { buildClaudeSdkEnvironment, buildRestrictedClaudeOptions, PINNED_AGENT_SDK_VERSION } from "../agent/backends/claude/ClaudeSdkRuntime";
+import { checkClaudeRuntimePaths, buildClaudeSdkEnvironment, buildRestrictedClaudeOptions, PINNED_AGENT_SDK_VERSION } from "../agent/backends/claude/ClaudeSdkRuntime";
 import { ClaudeProcessHost } from "../agent/backends/claude/ClaudeProcessHost";
 import { startLocalSdkProtocolBridge, type LocalSdkBridge } from "./LocalSdkProtocolBridge";
 import { createNodeSdkTransport } from "./NodeSdkTransport";
@@ -31,10 +32,10 @@ export function createManagedSdkBootstrapPorts<Request, Result>(host: {
       if (!desktop) throw new Error("SDK_BOOTSTRAP_DESKTOP_ONLY");
       if (!["openai-bridge", "anthropic-direct", "anthropic-bridge"].includes(snapshot.config.route)) throw new Error("SDK_BOOTSTRAP_ROUTE_UNSUPPORTED");
       if (signal.aborted) throw new Error("SDK_BOOTSTRAP_CANCELLED");
-      let bundled: { executablePath: string; cliVersion: string };
-      try { bundled = await resolveBundledClaudeRuntime(pluginDirectory, platform, arch, desktop); }
+      let resolved: Awaited<ReturnType<typeof resolveClaudeRuntime>>;
+      try { resolved = await resolveClaudeRuntime(pluginDirectory, platform, arch, desktop); }
       catch { throw new Error("SDK_BOOTSTRAP_RUNTIME_UNAVAILABLE"); }
-      if (bundled.cliVersion !== "2.1.293") throw new Error("SDK_BOOTSTRAP_RUNTIME_UNAVAILABLE");
+      if (resolved.source === "bundled" && resolved.cliVersion !== "2.1.293") throw new Error("SDK_BOOTSTRAP_RUNTIME_UNAVAILABLE");
       if (signal.aborted) throw new Error("SDK_BOOTSTRAP_CANCELLED");
       const fs = await import("node:fs/promises"), path = await import("node:path"), os = await import("node:os"), crypto = await import("node:crypto");
       const tempRoot = await fs.realpath(os.tmpdir());
@@ -105,8 +106,15 @@ export function createManagedSdkBootstrapPorts<Request, Result>(host: {
           const auth = snapshot.directAuthentication(); baseURL = snapshot.config.sdkBaseURL!; mode = auth.mode; credential = auth.credential;
         }
         if (signal.aborted || disposed) throw new Error("SDK_BOOTSTRAP_CANCELLED");
-        const runtime: AgentRuntimeProfile = { id: "builtin-sdk", hostId: "owned-plugin-runtime", platform, arch,
-          executablePath: bundled.executablePath, nodePath: "", sdkVersion: PINNED_AGENT_SDK_VERSION, cliVersion: bundled.cliVersion };
+        const runtime: AgentRuntimeProfile = {
+          id: resolved.source === "bundled" ? "builtin-sdk" : "external-claude-cli",
+          hostId: resolved.source === "bundled" ? "owned-plugin-runtime" : "user-installed-claude-cli",
+          platform, arch,
+          executablePath: resolved.executablePath,
+          nodePath: resolved.nodePath,
+          sdkVersion: PINNED_AGENT_SDK_VERSION,
+          cliVersion: resolved.cliVersion
+        };
         const profile: AgentProviderProfile = { id: "ordinary-ai", revision: 1, label: "Ordinary AI configuration", protocol: "anthropic-messages", baseUrl: baseURL,
           allowLocalHttp: baseURL.startsWith("http:"), authMode: mode, secretRef: "ephemeral-ordinary-ai", mainModel: snapshot.config.model,
           extractionModel: snapshot.config.model, verificationModel: snapshot.config.model,
@@ -116,7 +124,15 @@ export function createManagedSdkBootstrapPorts<Request, Result>(host: {
         return {
           async execute(request, scope) {
             scope.assertCurrent(); if (disposed || signal.aborted) throw new Error("SDK_BOOTSTRAP_CANCELLED");
-            try { const current = await resolveBundledClaudeRuntime(pluginDirectory, platform, arch, desktop); if (current.executablePath !== bundled.executablePath || current.cliVersion !== bundled.cliVersion) throw Error(); } catch { throw new Error("SDK_BOOTSTRAP_RUNTIME_UNAVAILABLE"); }
+            try {
+              if (resolved.source === "bundled") {
+                const current = await resolveBundledClaudeRuntime(pluginDirectory, platform, arch, desktop);
+                if (current.executablePath !== resolved.executablePath || current.cliVersion !== resolved.cliVersion) throw Error();
+              } else {
+                const check = await checkClaudeRuntimePaths(runtime, true);
+                if (!check.readyForVersionProbe) throw Error();
+              }
+            } catch { throw new Error("SDK_BOOTSTRAP_RUNTIME_UNAVAILABLE"); }
             scope.assertCurrent();
             executionController = new AbortController();
             const stop = () => executionController?.abort(); scope.signal.addEventListener("abort", stop, { once: true });
