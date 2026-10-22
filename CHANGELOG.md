@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.9 - 2026-10-22
+
+### Fixed
+
+- Tool-enabled desktop chat now starts with **16** model requests instead of 6, and the tool allowance is capped below the request budget so at least two requests remain for a final answer. A broad multi-file question could previously exhaust the six-request cap during research and fail with `SDK_EXECUTION_REQUEST_BUDGET` before the model ever answered.
+- The same final-answer reserve applies to any lower explicit budget (for example a four-request Weixin turn now allows at most two tool calls), so a tool call can no longer consume the whole request budget.
+- Added regression coverage for a full 12-tool desktop turn and for a low four-request turn; both must finish with an answer.
+
 ## 0.4.8 - 2026-10-22
 
 ### Fixed

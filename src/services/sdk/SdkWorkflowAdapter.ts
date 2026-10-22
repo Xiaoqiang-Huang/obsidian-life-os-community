@@ -9,6 +9,7 @@ import type { AgentToolRuntime } from "../agent/AgentToolRuntime";
 import type { LifeOSAgentEvent, LifeOSAgentLoopResult, LifeOSAgentToolResult } from "../agent/LifeOSAgentTypes";
 import { captureOrdinarySdkConfig, type OrdinarySdkSettings } from "./SdkOrdinaryConfig";
 import { sdkToolTimeoutMs } from "./SdkChatLimits";
+import { DEFAULT_CHAT_MODEL_REQUESTS, DEFAULT_CHAT_TOOL_CALLS, boundedChatToolCalls } from "./SdkChatBudget";
 
 import { sdkExecutionDiagnostic, type SdkExecutionService, type SdkHostTool } from "./SdkExecutionService";
 
@@ -193,8 +194,11 @@ export class SdkWorkflowAdapter {
           const text = receipt ? receipt.ok ? receipt.output : receipt.error || "操作未完成。" : "已取消待确认操作。";
           return { ...result({ ok: !receipt || receipt.ok, text, ...(receipt && !receipt.ok ? { error: text } : {}) }, text), toolResults: receipt ? [receipt] : [], toolCalls: receipt ? 1 : 0 };
         }
-        const maxRequests = Math.min(100, Math.max(1, input.budget?.maxModelCalls ?? context.requestBudget?.limit ?? 6));
-        const maxTools = input.enableTools === false ? 0 : Math.min(100, Math.max(0, input.budget?.maxToolCalls ?? 12));
+        const maxRequests = Math.min(100, Math.max(1, input.budget?.maxModelCalls ?? context.requestBudget?.limit ?? DEFAULT_CHAT_MODEL_REQUESTS));
+        const requestedTools = input.enableTools === false ? 0 : Math.min(100, Math.max(0, input.budget?.maxToolCalls ?? DEFAULT_CHAT_TOOL_CALLS));
+        // Reserve final-answer turns: a tool loop must never consume the whole
+        // request budget before the model can answer from what it has read.
+        const maxTools = boundedChatToolCalls(requestedTools, maxRequests);
         const maxOutputTokens = input.maxOutputTokens ?? snapshot.chatLimits.maxOutputTokens;
         const maxDurationMs = input.maxDurationMs ?? snapshot.chatLimits.maxDurationMs;
         const safeRoots = roots.map(root => root.replace(/\\/g, "/").replace(/\/+$/, ""));

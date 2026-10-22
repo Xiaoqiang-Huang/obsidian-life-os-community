@@ -1283,7 +1283,7 @@ export class LifeOSAgentService {
         approval: options.approval || (() => prepared.channel === "desktop"),
         // A scanned PDF page is sent as a bounded JPEG data URL. Its base64
         // envelope is larger than the text-only 200k limit even for an A4 page.
-        requestBudget: options.requestBudget || agentBudgetOf(this.ai) || {limit: options.budget?.maxModelCalls ?? 6, used:0, signal:options.signal, maxInputChars:512000, maxOutputTokens: options.maxOutputTokens ?? this.getSettings().aiChatOutputTokens ?? 4096},
+        requestBudget: options.requestBudget || agentBudgetOf(this.ai) || {limit: options.budget?.maxModelCalls ?? 16, used:0, signal:options.signal, maxInputChars:512000, maxOutputTokens: options.maxOutputTokens ?? this.getSettings().aiChatOutputTokens ?? 4096},
         channel: prepared.channel,
         sessionId: prepared.sessionId,
         runtimeSessionId: prepared.runtimeMemoryKey,
