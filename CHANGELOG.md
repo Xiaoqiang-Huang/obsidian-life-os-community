@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3 - 2026-10-22
+
+### Changed
+
+- Runtime-missing diagnostics now include concrete installation steps and direct links: the complete Windows x64 plugin package, Windows/macOS/Linux Claude Code CLI commands, the npm alternative, the 2.1.248 minimum, and the need to restart Obsidian. The plugin still never downloads or installs runtime/CLI itself.
+
 ## 0.4.2 - 2026-10-22
 
 ### Added
