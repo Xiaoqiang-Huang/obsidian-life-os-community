@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.11 - 2026-10-23
+
+### Fixed
+
+- The AI selection sidebar keeps its actual mounted host across tab switches and redraws; pin preference is no longer confused with whether the current editor is in a panel.
+- Every tab/selection redraw repositions the rebuilt popover so new nodes do not remain transparent; tab switching is blocked while an edit is being applied.
+- Selection identity now includes the editor, so identical text at the same position in two editors is not treated as the same event. Queued and restored selections preserve explicit keep/process choices.
+- Late answers, session commands, and task resumes cannot clear or contaminate a newer selection's input, session, or display; async boundaries validate the request identity.
+- Restoring selection history restores both the target path and selected Skills; read-only selections stay non-applicable after tab changes or undo.
+
 ## 0.4.10 - 2026-10-23
 
 ### Fixed

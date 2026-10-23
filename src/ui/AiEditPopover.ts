@@ -146,7 +146,13 @@ export class AiEditPopoverController {
   ) {}
 
   openOrQueue(target: AiEditTarget, anchor: AiEditAnchor): boolean {
-    if (this.target && this.target.file === target.file && this.target.text === target.text && this.target.kind === target.kind && (target.kind !== "selection" || (this.target.kind === "selection" && JSON.stringify(this.target.from) === JSON.stringify(target.from) && JSON.stringify(this.target.to) === JSON.stringify(target.to)))) return true;
+    if (this.target && this.target.file === target.file && this.target.text === target.text && this.target.kind === target.kind && (target.kind !== "selection" || (this.target.kind === "selection" && this.target.editor === target.editor && JSON.stringify(this.target.from) === JSON.stringify(target.from) && JSON.stringify(this.target.to) === JSON.stringify(target.to)))) {
+      if (this.pendingTarget) {
+        this.pendingTarget = null;
+        this.renderPendingSelectionNotice();
+      }
+      return true;
+    }
     if (this.applying) { this.queuePendingTarget(target, anchor); return false; }
     const mode = this.studyMode;
     const depth = this.answerDepth;
@@ -280,7 +286,7 @@ export class AiEditPopoverController {
   }
 
   private setActiveTab(tab: "answer" | "edit"): void {
-    if (this.activeTab === tab || this.generating || !this.target || !this.popoverEl) return;
+    if (this.activeTab === tab || this.generating || this.applying || !this.target || !this.popoverEl) return;
     this.selectionPromptPending = false;
     const draft=this.commandInput?.value ?? "";
     this.activeTab = tab;
@@ -293,13 +299,14 @@ export class AiEditPopoverController {
         this.renderMarkdownPreview(this.previewText, false, true);
       } else {
         this.renderPreview(this.target, this.previewText);
-        this.applyButton?.removeAttribute("disabled");
       }
     }
+    this.syncActionState(this.editInstructions.length > 0 ? "继续修改" : "生成预览");
     this.placePopover();
   }
 
   private undoEditToRound(round: number): void {
+    if (this.generating || this.applying) return;
     this.editInstructions = this.editInstructions.slice(0, round);
     this.editPreviewSnapshots = this.editPreviewSnapshots.slice(0, round);
     this.previewText = round > 0 ? this.editPreviewSnapshots[round - 1] : "";
@@ -310,8 +317,8 @@ export class AiEditPopoverController {
       this.renderCurrentPopover(container);
       if (this.previewText) {
         this.renderPreview(this.target, this.previewText);
-        this.applyButton?.removeAttribute("disabled");
       }
+      this.syncActionState(this.editInstructions.length > 0 ? "继续修改" : "生成预览");
       this.placePopover();
     }
   }
@@ -325,7 +332,6 @@ export class AiEditPopoverController {
     this.pendingSelectionEl?.remove();
     this.pendingSelectionEl = null;
     if (!this.pendingTarget || !this.popoverEl) return;
-    if (!this.generating && !this.applying) { this.openPendingTarget(); return; }
     const body = this.popoverEl.querySelector<HTMLElement>(".lifeos-ai-edit-popover-body");
     if (!body) return;
 
@@ -336,7 +342,7 @@ export class AiEditPopoverController {
       ? "当前生成会继续，新选区已准备好。"
       : "已记录新选区。选择下一步，不会覆盖当前回答。");
     notice.appendChild(copy);
-    if (!this.generating) {
+    if (!this.generating && !this.applying) {
       const useNext = document.createElement("button");
       useNext.type = "button";
       useNext.setText("处理新选区");
@@ -357,7 +363,7 @@ export class AiEditPopoverController {
 
   private openPendingTarget(): void {
     const pending = this.pendingTarget;
-    if (!pending || this.generating) return;
+    if (!pending || this.generating || this.applying) return;
     this.pendingTarget = null;
     this.open(pending.target, pending.anchor);
   }
@@ -399,12 +405,17 @@ export class AiEditPopoverController {
   }
 
   private restoreSelectionHistory(id: string): void {
-    if (this.generating) return;
+    if (this.generating || this.applying) return;
     const item = this.selectionHistory.find((candidate) => candidate.id === id);
     if (!item) return;
     const shouldOpenInPanel = this.shouldFollowSelectionInPanel();
     this.close({ preservePanelPreference: true });
     this.target = item.target;
+    this.targetPath = item.target.file.path;
+    this.importedAiSkills = createImportedAiSkills(this.plugin.settings.importedAiSkills);
+    this.selectedSkillIds = normalizeAiSkillIds(
+      this.plugin.settings.inlineAiSkillIds, undefined, this.importedAiSkills, this.plugin.settings.aiSkillOverrides
+    );
     this.anchor = item.anchor;
     this.previewText = item.previewText;
     this.resultKind = "answer";
@@ -422,7 +433,9 @@ export class AiEditPopoverController {
   private renderCurrentPopover(popoverParent: HTMLElement): void {
     if (!this.target) return;
     const target = this.target;
-    const shouldOpenInPanel = this.shouldFollowSelectionInPanel();
+    // A redraw preserves its actual host, independently of whether future
+    // selections should follow the pinned panel (e.g. workspace restoration).
+    const shouldOpenInPanel = popoverParent === this.panelContainerEl && popoverParent.isConnected;
     this.previewEl = null;
     this.commandInput = null;
     this.skillPickerEl = null;
@@ -437,6 +450,7 @@ export class AiEditPopoverController {
       && (target.kind === "selection" || target.kind === "readonly-selection")
     ) {
       this.renderSelectionPrompt(popoverParent, target, shouldOpenInPanel);
+      this.placePopover();
       return;
     }
     const popover = popoverParent.createDiv({ cls: "lifeos-ai-edit-popover" });
@@ -600,6 +614,9 @@ export class AiEditPopoverController {
       });
       this.applyButton.onclick = () => void this.applyPreview();
     }
+    // Every rebuilt node needs its own positioned state. Some callers redraw
+    // without an extra placement pass, so never leave the new node hidden.
+    this.placePopover();
   }
 
   private renderSelectionPrompt(
@@ -660,7 +677,7 @@ export class AiEditPopoverController {
   }
 
   private async generatePreview(): Promise<void> {
-    if (this.generating || !this.target || !this.commandInput || !this.previewEl) return;
+    if (this.generating || this.applying || !this.target || !this.commandInput || !this.previewEl) return;
     if (!Platform.isDesktopApp) { new Notice(sdkDesktopOnlyMessage(), 8000); return; }
     const command = this.commandInput.value.trim();
     if (!command) {
@@ -758,7 +775,7 @@ export class AiEditPopoverController {
   }
 
   private async generateAnswer(depth: AiAnswerDepth, automatic: boolean, modeSwitch = false): Promise<void> {
-    if (this.generating || !this.target || !this.commandInput || !this.previewEl) return;
+    if (this.generating || this.applying || !this.target || !this.commandInput || !this.previewEl) return;
     if (!Platform.isDesktopApp) { new Notice(sdkDesktopOnlyMessage(), 8000); return; }
     if (!requireProFeature(this.plugin, "aiDocumentEdit")) return;
 
@@ -787,10 +804,13 @@ export class AiEditPopoverController {
       this.agentSessionId = `sidebar-${crypto.randomUUID()}`;
     }
     await sessions.adopt("sidebar", this.agentSessionId, target.file.basename, { messages: this.answerHistory });
+    if (!this.isCurrentPreviewRequest(requestId, controller)) return;
     const sessionCommand = parseSessionCommand(typedCommand);
     if (sessionCommand) {
       const reply = await sessions.command("sidebar", crypto.randomUUID(), sessionCommand);
+      if (!this.isCurrentPreviewRequest(requestId, controller)) return;
       const active = await sessions.current("sidebar");
+      if (!this.isCurrentPreviewRequest(requestId, controller)) return;
       if (active.id !== this.agentSessionId) {
         this.agentSessionId = active.id;
         this.answerHistory = (Array.isArray(active.snapshot?.messages) ? active.snapshot.messages : []) as typeof this.answerHistory;
@@ -799,10 +819,13 @@ export class AiEditPopoverController {
     }
     if (isTaskResumeRequest(typedCommand)) {
       const owned = (await sessions.list("sidebar")).map(s => s.id);
+      if (!this.isCurrentPreviewRequest(requestId, controller)) return;
       const found = await this.plugin.agent.findResumableTask(typedCommand, owned, "desktop", "");
+      if (!this.isCurrentPreviewRequest(requestId, controller)) return;
       if (!found.state) { this.renderMarkdownPreview(found.message); return; }
       this.agentSessionId = found.state.sessionId;
       await sessions.command("sidebar", crypto.randomUUID(), { action: "switch", value: this.agentSessionId });
+      if (!this.isCurrentPreviewRequest(requestId, controller)) return;
       this.answerHistory = [];
     }
 
@@ -813,11 +836,12 @@ export class AiEditPopoverController {
       this.currentAnswerQuestion = question;
       let completedText = "";
       const prepared = await this.plugin.agent.prepare({
-        channel: "desktop", sessionId: this.agentSessionId, content: question, selectedSkillIds: this.selectedSkillIds,
+        channel: "desktop", sessionId: this.agentSessionId, signal: controller.signal, content: question, selectedSkillIds: this.selectedSkillIds,
         history: this.answerHistoryMessages(),
         systemInstructions: [this.answerSystemPrompt(promptTarget, depth), "本轮当前选区优先；旧问题不得替代新选区。问答不写入原文。"],
         promptSections: [{ title: "当前选区", content: this.answerUserPrompt(promptTarget, question, depth) }]
       });
+      if (!this.isCurrentPreviewRequest(requestId, controller)) return;
       const response = await this.plugin.agent.completeStream(prepared, {
         temperature: 0.2, reasoningEffort: "default", permissionMode: "read-only", enableTools: true
       }, {
@@ -849,6 +873,7 @@ export class AiEditPopoverController {
         this.answerHistory = this.answerHistory.slice(-10);
       }
       await sessions.adopt("sidebar", this.agentSessionId, target.file.basename, { messages: this.answerHistory });
+      if (!this.isCurrentPreviewRequest(requestId, controller)) return;
       this.currentAnswerQuestion = "";
       this.renderMarkdownPreview(this.previewText);
       if (typedCommand) this.commandInput.value = "";
@@ -891,11 +916,15 @@ export class AiEditPopoverController {
       }
       await applyAiSelectionEdit(this.app, target, targetPath, preview);
       new Notice(target.kind === "canvas" ? "白板已按预览更新" : "内容已按预览更新");
-      this.close();
+      const pending = this.pendingTarget;
+      this.close({ preservePanelPreference: true });
+      this.pendingTarget = pending;
     } catch (error) {
       new Notice(error instanceof Error ? error.message : "应用修改失败。");
     } finally {
       this.applying = false; this.syncActionState("生成预览");
+      if (!this.target && this.pendingTarget) this.openPendingTarget();
+      else this.renderPendingSelectionNotice();
     }
   }
 
