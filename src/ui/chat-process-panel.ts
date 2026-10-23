@@ -40,7 +40,7 @@ export const CHAT_PROCESS_TOOL_LABELS: Record<string, string> = {
 };
 
 const SEARCH_TOOLS = new Set(["lifeos-search", "web-search", "web-page-read"]);
-const FINALIZE_TOOLS = new Set(["knowledge-save", "summary-generate"]);
+const FINALIZE_TOOLS = new Set(["knowledge-save"]);
 const TOOL_EVENT_TYPES = new Set([
   "tool-started",
   "tool-completed",
@@ -300,7 +300,12 @@ export class ChatProcessPanel {
     }
 
     const stage = this.stageForEvent(event);
-    if (stage) this.activate(stage);
+    if (stage) {
+      if (type === "tool-failed") {
+        const view = this.stageViews.find(item => item.id === stage);
+        if (view) this.setState(view, "failed");
+      } else this.activate(stage);
+    }
     this.tick();
   }
 
@@ -439,8 +444,11 @@ export class ChatProcessPanel {
       case "memory-extraction-enqueued":
       case "memory-extraction-completed":
       case "turn-completed":
-      case "turn-stopped":
         return "finalize";
+      case "turn-stopped":
+        // Stopping is not evidence of a completed answer or completed tools.
+        // finish(error/interrupted) marks the actual active stages unfinished.
+        return null;
       default:
         return null;
     }

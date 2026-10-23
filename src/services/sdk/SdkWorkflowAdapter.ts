@@ -351,38 +351,55 @@ export class SdkWorkflowAdapter {
               return { allowed: this.host.hasWriteEntitlement() && context.channel !== "weixin" && answer?.allowed === true }; }
           };
           const continuationDeadlineMs = sdkToolTimeoutMs(this.host.getSettings());
-          const executeContinuation = async (name: string, toolInput: Record<string, unknown>, callId: string): Promise<LifeOSAgentToolResult> => {
+          const executeContinuation = async (name: string, toolInput: Record<string, unknown>, callId: string, modelWorkflow = false): Promise<LifeOSAgentToolResult> => {
             let extraRelease = (): void => { /* host engine without the guard (test seam) */ };
             try { extraRelease = this.host.engine.holdHostContinuation(); } catch { /* keep the unguarded release */ }
-            // Same per-tool deadline as a bridge read (45s default). Each read
-            // releases its own host-continuation hold, even when it times out.
+            // Local reads use the tool deadline. Text generation has its own
+            // configured SDK deadline, not a second hidden 45-second cap.
+            // Both return promptly on user cancellation even if a host parser
+            // fails to settle; its late result is never delivered.
             let released = false;
             const release = (): void => { if (!released) { released = true; extraRelease(); } };
             let timer: ReturnType<typeof setTimeout> | undefined;
+            const readStop = new AbortController(), abortRead = () => readStop.abort();
+            context.signal?.addEventListener("abort", abortRead, { once: true });
+            if (context.signal?.aborted) readStop.abort();
+            let removeAbort = (): void => {};
             try {
-              const execution = this.host.tools.execute({ id: callId, name, input: toolInput }, context, continuationOptions);
-              const guarded = execution.then(value => { release(); return value; }, error => { release(); throw error; });
-              void guarded.catch(() => undefined);
-              return await Promise.race([
-                guarded,
-                new Promise<LifeOSAgentToolResult>(resolve => {
-                  timer = setTimeout(() => resolve({
+              const interrupted = new Promise<LifeOSAgentToolResult>(resolve => {
+                const aborted = () => resolve({ callId, toolId: name, ok: false, output: "", error: "sdk-cancelled", durationMs: 0 });
+                readStop.signal.addEventListener("abort", aborted, { once: true });
+                removeAbort = () => readStop.signal.removeEventListener("abort", aborted);
+                if (readStop.signal.aborted) aborted();
+                if (!modelWorkflow) timer = setTimeout(() => {
+                  resolve({
                     callId, toolId: name, ok: false, output: "", error: "tool-timeout", durationMs: continuationDeadlineMs,
                     metadata: { code: "tool-timeout", hint: `工具超过 ${Math.round(continuationDeadlineMs / 1000)} 秒未返回，已按未完成处理；可缩小范围或稍后重试。` }
-                  }), continuationDeadlineMs);
-                })
-              ]);
+                  });
+                  readStop.abort();
+                }, continuationDeadlineMs);
+              });
+              const execution = this.host.tools.execute({ id: callId, name, input: toolInput }, { ...context, signal: readStop.signal }, continuationOptions);
+              void execution.catch(() => undefined);
+              return await Promise.race([execution, interrupted]);
             } finally {
               if (timer !== undefined) clearTimeout(timer);
+              removeAbort();
+              context.signal?.removeEventListener("abort", abortRead);
+              readStop.abort();
               release();
             }
           };
-          let release = (): void => { /* host engine without the guard (test seam) */ };
-          try { release = this.host.engine.holdHostContinuation(); } catch { /* keep the unguarded release */ }
           let receipt: LifeOSAgentToolResult;
-          try {
-            receipt = await this.host.tools.execute(deferred, context, continuationOptions);
-          } finally { release(); }
+          if (descriptor?.mode === "read") {
+            receipt = await executeContinuation(deferred.name, deferred.input, deferred.id, SDK_TEXT_MODEL_TOOLS.has(deferred.name));
+          } else {
+            // Never race a write: preserve its journal and confirmation result.
+            let release = (): void => {};
+            try { release = this.host.engine.holdHostContinuation(); } catch { /* test seam */ }
+            try { receipt = await this.host.tools.execute(deferred, context, continuationOptions); }
+            finally { release(); }
+          }
           fresh(); bridge.results.push(receipt);
           if (receipt.needsConfirmation) { this.#pendingBindings.set(namespace, binding); bridge.needsConfirmation = true; }
           await emit(receipt.needsConfirmation ? "tool-confirmation-required" : receipt.ok ? "tool-completed" : "tool-failed", `宿主续作 ${deferred.name}`, deferred.name,

@@ -69,12 +69,12 @@ export class SdkBusinessWorkflowService {
         fresh();
         const chain = agentBudgetChain(input.requestBudget);
         const caps = chain.map(b => b.maxOutputTokens).filter((n): n is number => n !== undefined);
-        const outputLimit = Math.min(131072, ...(caps.length ? caps : [4096]));
+        const outputLimit = Math.min(snapshot.chatLimits.maxOutputTokens, ...caps);
         const operationId = await hash(JSON.stringify([namespace, turn])); fresh();
         const sdkScope = { accountScopeId: account, projectScopeId: scope.projectScopeId || "all-projects", sessionId: `workflow:${purpose}`,
           automatic: scope.automatic === true, signal: stop.signal, approval: () => { try { fresh(); return true; } catch { return false; } } };
         const control = { operationId, channel: scope.channel || "desktop", allowImages: () => { try { fresh(); return task === "vision"; } catch { return false; } },
-          limits: { maxModelRequests: 1, maxToolCalls: 0, maxOutputTokens: outputLimit, maxInputBytes: 32 * 1024 * 1024, maxOutputBytes: 4 * 1024 * 1024, maxDurationMs: 90000 } };
+          limits: { maxModelRequests: 1, maxToolCalls: 0, maxOutputTokens: outputLimit, maxInputBytes: 32 * 1024 * 1024, maxOutputBytes: 4 * 1024 * 1024, maxDurationMs: snapshot.chatLimits.maxDurationMs } };
         return callbacks ? this.host.engine.stream(input, {
           onStart: () => { fresh(); started = true; notify(callbacks, "onStart"); },
           onToken: token => { try { fresh(); notify(callbacks, "onToken", token); } catch { stop.abort(); } }

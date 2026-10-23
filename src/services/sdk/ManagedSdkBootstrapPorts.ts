@@ -50,9 +50,11 @@ export function createManagedSdkBootstrapPorts<Request, Result>(host: {
       let dispatchBinding: { request: Request; scope: SdkBootstrapContext } | undefined;
       const dispose = () => {
         if (!closing) {
-          disposed = true; executionController?.abort(); processHost.dispose();
+          disposed = true; executionController?.abort();
           closing = (async () => {
-            if (bridge) await bridge.dispose();
+            // Stop both owned resources even if either cleanup rejects; remove
+            // the child's cwd/files only after both closures are confirmed.
+            await Promise.all([processHost.dispose(), bridge?.dispose()]);
             // Recursive removal is only for our own verified disposable directory.
             // Never accepts a target path or deletes the plugin runtime/Vault.
             const rel = path.relative(tempRoot, folder);

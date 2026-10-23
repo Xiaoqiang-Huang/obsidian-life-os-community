@@ -90,6 +90,13 @@ async function readResponse(response: Response, max: number, signal: AbortSignal
   const combined = new Uint8Array(size); let at = 0; for (const piece of pieces) { combined.set(piece, at); at += piece.length; } return combined;
 }
 
+async function cancelResponse(response: Response, signal: AbortSignal): Promise<void> {
+  if (!response.body) return;
+  // Error/header rejection paths need the same abort-aware cleanup as a
+  // streaming reader. An uncooperative cancel must not strand bridge.dispose.
+  await abortable(response.body.cancel().catch(() => undefined), signal).catch(() => undefined);
+}
+
 export async function startLocalSdkProtocolBridge(options: LocalSdkBridgeOptions): Promise<LocalSdkBridge> {
   // Must run before any Node imports or socket operation.
   if (!options.desktop) throw new Error("SDK_BRIDGE_DESKTOP_ONLY");
@@ -158,10 +165,10 @@ export async function startLocalSdkProtocolBridge(options: LocalSdkBridgeOptions
       stage = "upstream";
       const upstream = await abortable(transport(upstreamURL, { method: "POST", headers, body: JSON.stringify(converted), signal, redirect: "manual" }), signal);
       status = upstream.status;
-      if (!upstream.ok) { await upstream.body?.cancel().catch(() => undefined); throw new BridgeFault("SDK_BRIDGE_UPSTREAM_STATUS", upstream.status >= 400 && upstream.status <= 599 ? upstream.status : 502); }
+      if (!upstream.ok) { await cancelResponse(upstream, signal); throw new BridgeFault("SDK_BRIDGE_UPSTREAM_STATUS", upstream.status >= 400 && upstream.status <= 599 ? upstream.status : 502); }
       stage = "response-headers";
       if (streaming) {
-        if (!/text\/event-stream/i.test(upstream.headers.get("content-type") || "")) { await upstream.body?.cancel().catch(() => undefined); throw new Error("SDK_BRIDGE_INVALID_CONTENT_TYPE"); }
+        if (!/text\/event-stream/i.test(upstream.headers.get("content-type") || "")) { await cancelResponse(upstream, signal); throw new Error("SDK_BRIDGE_INVALID_CONTENT_TYPE"); }
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", "x-accel-buffering": "no" });
         await write(res, encodeAnthropicSSE({ type: "ping" }), signal);
         const decoder = new OpenAIStreamAccumulator(maxOutput, Math.min(maxOutput, 2 * 1024 * 1024), preview);
@@ -179,7 +186,7 @@ export async function startLocalSdkProtocolBridge(options: LocalSdkBridgeOptions
         for (const event of events) await write(res, event, signal);
         if (signal.aborted) throw new Error("SDK_BRIDGE_ABORTED"); res.end();
       } else {
-        if (!/application\/json/i.test(upstream.headers.get("content-type") || "")) { await upstream.body?.cancel().catch(() => undefined); throw new Error("SDK_BRIDGE_INVALID_CONTENT_TYPE"); }
+        if (!/application\/json/i.test(upstream.headers.get("content-type") || "")) { await cancelResponse(upstream, signal); throw new Error("SDK_BRIDGE_INVALID_CONTENT_TYPE"); }
         stage = "response-final";
         const bytes = await readResponse(upstream, maxOutput, signal);
         const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));

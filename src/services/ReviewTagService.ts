@@ -1,4 +1,3 @@
-import { withAiDeadline } from "../utils/ai-deadline";
 import { App, TFile, parseYaml } from "obsidian";
 import type { AiClient } from "../ai";
 import { stableReviewHash } from "./ReviewEvidenceService";
@@ -55,7 +54,7 @@ export class ReviewTagService {
       const reusable = verifiedCandidates(old.candidates, source.evidence);
       if (reusable.length === old.candidates.length) return plan(reusable);
     }
-    const response = await withAiDeadline(ai.complete({
+    const response = await ai.complete({
       responseFormat: "json",
       temperature: 0,
       messages: [
@@ -71,7 +70,7 @@ export class ReviewTagService {
         ].join("\n") },
         { role: "user", content: source.evidence }
       ]
-    }));
+    });
     if (!response.ok || !response.text) throw new Error(response.error || "标签生成失败，原标签未改动。");
     let parsed: { tags?: unknown };
     try { parsed = JSON.parse(response.text.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```\s*$/iu, "$1")); }

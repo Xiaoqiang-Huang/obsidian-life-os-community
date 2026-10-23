@@ -1927,9 +1927,10 @@ export class LifeOSAgentService {
   }
 
   private toolWorkflowClient(context: LifeOSAgentToolExecutionContext, purpose: string): AiClient {
-    return this.workflowClient({ purpose, channel: context.channel, projectScopeId: context.projectScopeId,
+    return withAgentBudget(this.workflowClient({ purpose, channel: context.channel, projectScopeId: context.projectScopeId,
       accountScopeId: context.accountScopeId || context.runtimeSessionId || context.sessionId, executionId: context.toolCallId || context.turnId,
-      requiredSdkIdentity: workflowProfileIdentity(this.getSettings()), approval: context.approval || (() => context.channel === "desktop") });
+      requiredSdkIdentity: workflowProfileIdentity(this.getSettings()), approval: context.approval || (() => context.channel === "desktop") }),
+      { limit: Number.MAX_SAFE_INTEGER, used: 0, signal: context.signal });
   }
 
   private async runEvidenceSubagent(label: string, query: string, context: ChatContextBundle, signal?: AbortSignal, parent?: AgentRequestBudget, execution?: LifeOSAgentToolExecutionContext): Promise<string> {

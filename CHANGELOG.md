@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.10 - 2026-10-23
+
+### Fixed
+
+- AI generation now follows the configured wait and output limits; removed a conflicting legacy timeout wrapper.
+- Long-period reviews no longer exhaust the final-answer request budget; a failed repair keeps the already-paid first draft, and local section regeneration cannot leave stale prose.
+- Failed or stopped turns no longer mark process stages as completed; read-only host continuations handle cancellation and deadlines correctly.
+- Resource cleanup waits for owned child processes to close and the local bridge to shut down before deleting the disposable working directory. Error-response cleanup is cancellation-aware and cannot strand bridge disposal.
+- Cleanup-failure isolation, directory ownership checks, write confirmation, and user-data protection are unchanged.
+
 ## 0.4.9 - 2026-10-22
 
 ### Fixed
