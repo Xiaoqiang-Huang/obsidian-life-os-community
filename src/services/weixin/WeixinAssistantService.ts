@@ -50,6 +50,7 @@ import { FileSystemService } from "../FileSystemService";
 import { LocalInstantAnswerService } from "../LocalInstantAnswerService";
 import {
   LifeOSAgentService,
+  type LifeOSAgentRunResult,
   type LifeOSAgentPreparedTurn,
   type LifeOSAgentBuildMessagesInput
 } from "../LifeOSAgentService";
@@ -420,7 +421,10 @@ export class WeixinAssistantService {
         console.warn(`[Life OS] Weixin image lifecycle finalize failed for ${durableRequest.messageId}`, error);
       });
       await this.inboundQueue.markResponded(durableRequest, response);
-      return (await this.inboundQueue.stage(durableRequest)).response || response;
+      const stored = (await this.inboundQueue.stage(durableRequest)).response || response;
+      // Only this live invocation owns the streaming receipt. Never persist it:
+      // a restart must still deliver a stored answer that has not been ACKed.
+      return response.streamed ? { ...stored, streamed: true } : stored;
     } catch (error) {
       const isBillingFailure = /(?:\b402\b|payment\s*required|insufficient\s*(?:balance|credits?)|余额不足|欠费|计费状态)/iu.test(
         error instanceof Error ? error.message : String(error || "")
@@ -904,17 +908,21 @@ export class WeixinAssistantService {
       permissionMode: "read-only" as const,
       explicitWriteIntent: false
     };
-    const response = delivery && stream
-      ? await this.agent.completeStream(prepared, deepOptions, {
-        // Deep answers stay guarded and are delivered as a whole by the durable
-        // channel transport; only supplier thinking is streamed live.
-        onReasoning: (text) => {
-          this.metricReasoning = true;
-          if (this.settings.showReasoning !== false) delivery.push("reasoning", text);
-        }
-      }, stream.signal)
-      : await this.agent.complete(prepared, deepOptions);
-    await delivery?.finishReasoning(stream?.signal.aborted ? "interrupted" : "completed");
+    let response: LifeOSAgentRunResult;
+    try {
+      response = delivery && stream
+        ? await this.agent.completeStream(prepared, deepOptions, {
+          // Deep answers stay guarded and are delivered as a whole by the durable
+          // channel transport; only supplier thinking is streamed live.
+          onReasoning: (text) => {
+            this.metricReasoning = true;
+            if (this.settings.showReasoning !== false) delivery.push("reasoning", text);
+          }
+        }, stream.signal)
+        : await this.agent.complete(prepared, deepOptions);
+    } finally {
+      await delivery?.finishReasoning(stream?.signal.aborted ? "interrupted" : "completed");
+    }
     if (!response.ok || !response.text.trim()) {
       // KB-13B: when the turn died after the user's own link could not be read,
       // the notice carries the real reason and the A1 fallback search clues
@@ -1810,35 +1818,46 @@ export class WeixinAssistantService {
       allowedGroups: this.settings.weixinAllowedGroups
     }, accessRequest).allowed;
     const delivery = stream ? new WeixinAnswerStream(stream.send, `answer-${request.messageId}`, 1200, stream.persist) : null;
+    const thinking = stream && this.settings.showReasoning !== false
+      ? new WeixinAnswerStream(stream.sendReasoning ?? stream.send, `reasoning-${request.messageId}`, 1200)
+      : null;
     const filter = new VisibleAnswerFilter();
     let visiblePartial = "";
     this.metricEffort = "low";
     this.metricTrace?.dispatchModel();
-    const response = await this.agent.completeStream(prepared, {
-      approval: prepared.channelApproval,
-      requestBudget: { limit: 1, used: 0, maxInputChars: 512000, maxOutputTokens: FAST_MAX_OUTPUT_TOKENS },
-      webSearchMode: "off",
-      reasoningEffort: "low",
-      temperature: 0.35,
-      permissionMode: "read-only",
-      explicitWriteIntent: false,
-      enableTools: false,
-      maxOutputTokens: FAST_MAX_OUTPUT_TOKENS,
-      maxDurationMs: FAST_MAX_DURATION_MS,
-      budget: { maxModelCalls: 1, maxToolCalls: FAST_MAX_TOOL_CALLS }
-    }, {
-      onToken: (text) => {
-        this.metricTrace?.firstToken();
-        const visible = filter.push(text);
-        visiblePartial += visible;
-        delivery?.push("answer", visible);
-      },
-      onReasoning: (text) => {
-        this.metricReasoning = true;
-        if (this.settings.showReasoning !== false) delivery?.push("reasoning", text);
-      },
-      onPreview: () => { this.metricTrace?.firstToken(); }
-    }, stream?.signal);
+    let response: LifeOSAgentRunResult;
+    try {
+      response = await this.agent.completeStream(prepared, {
+        approval: prepared.channelApproval,
+        requestBudget: { limit: 1, used: 0, maxInputChars: 512000, maxOutputTokens: FAST_MAX_OUTPUT_TOKENS },
+        webSearchMode: "off",
+        reasoningEffort: "low",
+        temperature: 0.35,
+        permissionMode: "read-only",
+        explicitWriteIntent: false,
+        enableTools: false,
+        maxOutputTokens: FAST_MAX_OUTPUT_TOKENS,
+        maxDurationMs: FAST_MAX_DURATION_MS,
+        budget: { maxModelCalls: 1, maxToolCalls: FAST_MAX_TOOL_CALLS }
+      }, {
+        onToken: (text) => {
+          this.metricTrace?.firstToken();
+          const visible = filter.push(text);
+          visiblePartial += visible;
+          delivery?.push("answer", visible);
+        },
+        onReasoning: (text) => {
+          this.metricReasoning = true;
+          thinking?.push("reasoning", text);
+        },
+        onPreview: () => { this.metricTrace?.firstToken(); }
+      }, stream?.signal);
+    } catch (error) {
+      delivery?.discardPending();
+      throw error;
+    } finally {
+      await thinking?.finishReasoning(stream?.signal.aborted ? "interrupted" : "completed");
+    }
     const trailing = filter.push("", true);
     visiblePartial += trailing;
     delivery?.push("answer", trailing);

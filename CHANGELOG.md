@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.12 - 2026-10-24
+
+### Fixed
+
+- Weixin turns no longer leave a completed formal answer behind a failed or stalled reasoning projection. Reasoning and formal-answer delivery are separated, and hiding reasoning still delivers the formal answer.
+- Fast Weixin turns use the same split: a thinking send failure cannot poison or delay the formal-answer queue. SDK failures close the thinking projection and late tokens are ignored.
+- Explicit stop tombstones survive inbox receipt failures and recovery; cancelled answers are never regenerated. Ordinary delivery failures keep the encrypted pending answer and incomplete state instead of pretending the user stopped.
+- Restart replay no longer inherits a live `streamed` receipt, preventing duplicate bodies and missing re-sends.
+
 ## 0.4.11 - 2026-10-23
 
 ### Fixed

@@ -1423,18 +1423,22 @@ export class WeixinIlinkService {
         journaled = true;
       },
       send: async (text, chunkId) => {
+        if (controller.signal.aborted) throw new Error("WEIXIN_ANSWER_CANCELLED");
         const clientId = streamClientId(chunkId);
         await activeJournal.enqueue(outboxId, text, chunkId, false, clientId);
         journaled = true;
+        if (controller.signal.aborted) throw new Error("WEIXIN_ANSWER_CANCELLED");
         await this.sendText(runtime, inbound.senderId, text, runtime.stored.contextTokens[contextKey], clientId);
         await activeJournal.ack(outboxId, chunkId);
       },
       // Deep thinking is live-only: the guarded answer is delivered separately,
       // so journaling raw thinking as answer chunks would corrupt recovery.
       sendReasoning: async (text, chunkId) => {
+        if (controller.signal.aborted) throw new Error("WEIXIN_ANSWER_CANCELLED");
         await this.sendText(runtime, inbound.senderId, text, runtime.stored.contextTokens[contextKey], streamClientId(chunkId, "reasoning"));
       }
     } : undefined;
+    let deliveryCompleted = false;
     try {
       const result = await this.options.handleMessage(inbound, stream);
       if (this.accounts.get(runtime.stored.accountId) !== runtime) return;
@@ -1451,6 +1455,7 @@ export class WeixinIlinkService {
           );
         }
       }
+      deliveryCompleted = true;
       runtime.stored.recentMessageIds = [...runtime.stored.recentMessageIds, inbound.messageId].slice(-MAX_RECENT_MESSAGE_IDS);
       await this.saveAccounts().catch((error) => {
         console.warn(`[Life OS] Weixin account cursor persistence failed for ${runtime.stored.accountId}`, errorMessage(error));
@@ -1464,8 +1469,11 @@ export class WeixinIlinkService {
         lastError: ""
       });
     } catch (error) {
+      const interrupted = controller.signal.aborted;
       controller.abort();
-      if (activeJournal && outboxId) await activeJournal.stop(outboxId).catch(() => undefined);
+      // A transport failure is not a user stop: retain encrypted unACKed blocks
+      // so recovery can still deliver the answer instead of just a stop marker.
+      if (interrupted && activeJournal && outboxId) await activeJournal.stop(outboxId).catch(() => undefined);
       await this.options.markMessageDeliveryFailed?.(inbound, error).catch(() => undefined);
       const mapped = mapWeixinSendError(error);
       if (mapped.code === "prepare-failed") {
@@ -1483,7 +1491,7 @@ export class WeixinIlinkService {
     } finally {
       if (this.answerControllers.get(answerKey) === controller) this.answerControllers.delete(answerKey);
       if (activeJournal && outboxId) {
-        if (journaled) await activeJournal.close(outboxId, true).catch(() => undefined);
+        if (journaled) await activeJournal.close(outboxId, deliveryCompleted).catch(() => undefined);
         else await activeJournal.discard(outboxId).catch(() => undefined);
         activeJournal.release(outboxId);
       }
@@ -1504,6 +1512,7 @@ export class WeixinIlinkService {
       // a stored reply is used only when the exact prefix cannot be decrypted.
       const outboxRows = new Map<string, OutboxRecovery>();
       const storedReplies = new Map<string, string>();
+      let stoppedReceiptPending = false;
       try {
         const summary = await this.deliveryOutbox().recover(runtime.stored.accountId, this.outboxTransport(runtime), async route => {
           const stored = await this.options.recoverStoredReply?.(runtime.stored.accountId, route.messageId);
@@ -1516,15 +1525,17 @@ export class WeixinIlinkService {
           // its encrypted suffix, but only acknowledge it when the inbound
           // queue already holds the completed reply. Otherwise the bounded
           // recovery below regenerates the final answer.
-          if (row.outcome === "resumed" && !row.complete && !storedReplies.has(row.messageId)) {
+          if (!row.stopped && row.outcome === "resumed" && !row.complete && !storedReplies.has(row.messageId)) {
             const stored = await this.options.recoverStoredReply?.(runtime.stored.accountId, row.messageId);
             if (stored) storedReplies.set(row.messageId, stored);
           }
-          const final = row.outcome === "regenerated"
+          const final = row.stopped === true || row.outcome === "regenerated"
             || (row.outcome === "resumed" && (row.complete || storedReplies.has(row.messageId)))
             || (row.outcome === "skipped" && row.complete);
           if (final) {
+            if (row.stopped && !this.options.markMessageDelivered) stoppedReceiptPending = true;
             await this.options.markMessageDelivered?.(this.recoveryRequest(runtime, row)).catch((error) => {
+              if (row.stopped) stoppedReceiptPending = true;
               console.warn(`[Life OS] Weixin outbox delivery receipt failed for ${row.messageId}`, errorMessage(error));
             });
           }
@@ -1532,6 +1543,9 @@ export class WeixinIlinkService {
       } catch (error) {
         console.warn(`[Life OS] Weixin outbox recovery failed for ${runtime.stored.accountId}`, errorMessage(error));
       }
+      // Do not run an inbound regenerator until the durable explicit stop has
+      // been settled. Its outbox tombstone is returned again on the next poll.
+      if (stoppedReceiptPending) return;
       const pending = await this.options.recoverPendingMessages(runtime.stored.accountId);
       for (const item of pending) {
         if (this.accounts.get(runtime.stored.accountId) !== runtime || !runtime.status.connected) return;

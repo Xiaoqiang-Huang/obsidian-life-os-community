@@ -36,6 +36,8 @@ export interface OutboxRecovery {
   outcome: OutboxOutcome;
   /** The stream carried the whole answer (a normal close), not a crash mid-answer. */
   complete: boolean;
+  /** Durable explicit stop, including when its marker was already ACKed. */
+  stopped?: boolean;
   reason?: string;
 }
 
@@ -282,14 +284,14 @@ export class WeixinOutbox {
   async recover(accountId: string, transport: OutboxTransport, regenerate?: OutboxRegenerate): Promise<OutboxRecovery[]> {
     await this.ready();
     const ids = Object.values(this.state.streams).filter(stream => stream.route.accountId === accountId && !this.owned.has(stream.id)
-      && (!stream.closed || stream.blocks.some(block => block.state === "pending" || block.state === "lost"))).map(stream => stream.id);
+      && (stream.stopped || !stream.closed || stream.blocks.some(block => block.state === "pending" || block.state === "lost"))).map(stream => stream.id);
     const rows: OutboxRecovery[] = [];
     for (const id of ids) {
       try { rows.push(await this.recoverStream(id, transport, regenerate)); }
       catch (error) {
         const stream = this.state.streams[id];
         rows.push({ messageId: stream?.route.messageId || "", route: stream?.route || { accountId, conversationId: "", recipientId: "", messageId: "" },
-          outcome: "failed", complete: false, reason: error instanceof Error ? error.message : "OUTBOX_RECOVERY_FAILED" });
+          outcome: "failed", complete: false, stopped: stream?.stopped, reason: error instanceof Error ? error.message : "OUTBOX_RECOVERY_FAILED" });
       }
     }
     return rows;
@@ -348,7 +350,7 @@ export class WeixinOutbox {
     // caller must let the durable inbound queue regenerate instead of treating
     // this as a delivered answer.
     if (after?.failed && (outcome === "resumed" || outcome === "regenerated")) outcome = "notice";
-    return { messageId: stream.route.messageId, route: stream.route, outcome, complete };
+    return { messageId: stream.route.messageId, route: stream.route, outcome, complete, stopped: stream.stopped };
   }
   private async appendRecovery(id: string, text: string): Promise<void> {
     const chunks = splitChunks(text);

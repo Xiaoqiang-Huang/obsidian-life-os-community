@@ -46,6 +46,7 @@ export class WeixinAnswerStream {
       while (this.queue.length) {
         const item = this.queue[0];
         await item.persisted;
+        if (this.queue[0] !== item) continue; // Cancelled while persistence was pending.
         await this.send(item.text, item.id);
         if (this.queue[0] === item) this.queue.shift(); // Only acknowledged prefixes are removed.
       }
@@ -81,19 +82,19 @@ export class WeixinAnswerStream {
     if (this.failure) throw this.failure;
   }
 
-  /** Flush supplier thinking without sending a final answer or completion
-   * marker. Used by the deep Weixin path, whose guarded answer is delivered
-   * separately by the durable channel transport. */
-  async finishReasoning(state: "completed" | "interrupted" = "completed"): Promise<void> {
+  /** Thinking is live-only and optional. Once the model settles, drop unsent
+   * thinking and never wait for its transport before delivering the answer.
+   * An already issued send cannot be retracted; drain owns its rejection. */
+  async finishReasoning(_state: "completed" | "interrupted" = "completed"): Promise<void> {
+    this.discardPending();
+  }
+
+  /** Close only this in-memory projection. Already journaled answer blocks
+   * remain owned by the durable outbox for recovery; issued sends are not undone. */
+  discardPending(): void {
     this.closed = true;
     if (this.timer) { clearTimeout(this.timer); this.timer = undefined; }
-    if (state === "interrupted") {
-      this.buffers = { reasoning: "", answer: "" };
-      this.queue = [];
-    } else {
-      this.flush();
-    }
-    await this.draining;
-    if (this.failure) throw this.failure;
+    this.buffers = { reasoning: "", answer: "" };
+    this.queue = [];
   }
 }

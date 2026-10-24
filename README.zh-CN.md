@@ -192,7 +192,7 @@ Life OS 已把微信 iLink Bot 连接层直接内置到插件中，不需要安�
 
 ### 手动安装
 
-创建 `.obsidian/plugins/personal-life-system/`，从精确语义版本 Tag（例如 `0.4.11`）中复制以下三个文件：
+创建 `.obsidian/plugins/personal-life-system/`，从精确语义版本 Tag（例如 `0.4.12`）中复制以下三个文件：
 
 - `main.js`
 - `manifest.json`
