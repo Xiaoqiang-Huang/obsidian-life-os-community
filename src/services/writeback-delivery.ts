@@ -27,7 +27,8 @@ export async function deliverWriteback(app: App, items: WritebackItem[], appendO
         assertCurrent?.();
         if (!item.id || !item.targetPath || item.targetPath.startsWith("/") || /[\\:\u0000-\u001f]/u.test(item.targetPath)
           || item.targetPath.split("/").some(p => !p || p === "." || p === "..")) throw new Error("无效写回目标，未写入。");
-        const key = await sha(`${item.id}\n${item.targetPath}`), contentHash = await sha(`${appendOnly ? "append" : item.kind}\n${item.content}`);
+        const initial = item.kind !== "replace" && typeof item.initialContent === "string" ? item.initialContent : "";
+        const key = await sha(`${item.id}\n${item.targetPath}`), contentHash = await sha(`${appendOnly ? "append" : item.kind}\n${item.content}${initial ? `\ncreation-template:\n${initial}` : ""}`);
         const prefix = `<!-- lifeos-writeback:v1:${key}:`, marker = `${prefix}${contentHash} -->`;
         assertCurrent?.();
         const existing = app.vault.getAbstractFileByPath(item.targetPath);
@@ -41,7 +42,7 @@ export async function deliverWriteback(app: App, items: WritebackItem[], appendO
         if (!await applyCanonicalTaskWriteback(app, delivered, appendOnly, true, (before, after) => rememberWritebackUndo(app, item.id, { path: item.targetPath, before, after }))) {
           if (!appendOnly && item.kind === "replace" && item.expectedOriginal === undefined) throw new Error("替换内容需要先预览原文，未覆盖文件。");
           if (!appendOnly && item.kind === "replace" && item.expectedOriginal !== before) throw new Error("原文已被修改或删除，请重新预览；没有覆盖人工修改。");
-          const after = !appendOnly && item.kind === "replace" ? delivered.content : (before ?? "") + delivered.content;
+          const after = !appendOnly && item.kind === "replace" ? delivered.content : (before ?? initial) + delivered.content;
           if (existing instanceof TFile) {
             if (typeof app.vault.process !== "function") throw new Error("当前宿主不支持安全写入，请升级 Obsidian。");
             assertCurrent?.();

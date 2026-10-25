@@ -19,6 +19,8 @@ export interface WritebackItem {
   sourcePath?: string;
   /** Snapshot approved by the user; null means the file did not exist. */
   expectedOriginal?: string | null;
+  /** Approved creation-only bytes. Ignored when the target already exists or is replaced. */
+  initialContent?: string;
   checked: boolean;
 }
 

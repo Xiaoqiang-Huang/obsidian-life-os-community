@@ -45,7 +45,7 @@ import { redactWorkspaceSecrets } from "../ai-workspace/logic";
 import type { ContextSource } from "../context-engine/types";
 import { ContextEngine } from "../ContextEngine";
 import { ProjectPrefetchService, type ProjectPrefetchScope } from "../context-engine/ProjectPrefetchService";
-import { DailyNoteService } from "../DailyNoteService";
+import { DailyNoteService, renderDailyNoteTemplate } from "../DailyNoteService";
 import { FileSystemService } from "../FileSystemService";
 import { LocalInstantAnswerService } from "../LocalInstantAnswerService";
 import {
@@ -3418,6 +3418,7 @@ export class WeixinAssistantService {
       title,
       content,
       targetPath,
+      ...(envelope.kind === "daily" ? { initialContent: renderDailyNoteTemplate(this.settings.dailyNoteTemplate, date, this.settings.assistantName || "Life OS") } : {}),
       checked: true
     };
   }

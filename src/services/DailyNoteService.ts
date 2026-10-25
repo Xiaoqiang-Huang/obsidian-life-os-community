@@ -1,10 +1,17 @@
 import { App, TFile } from "obsidian";
 import { DEFAULT_LIGHT_DAILY_TEMPLATE, FULL_DAILY_TEMPLATE } from "../constants";
-import type { PersonalLifeSystemSettings } from "../settings";
+import { normalizeDailyNoteTemplate, type PersonalLifeSystemSettings } from "../settings";
 import { formatTime, today } from "../utils/dates";
 import { ensureFile, readFile, joinPath, normalizePath } from "../utils/vault";
 import { extractQuickRecordEntries } from "../utils/quick-records";
 import { FileSystemService } from "./FileSystemService";
+
+/** Literal, one-pass placeholders only. No script, include, filesystem or network evaluation. */
+export function renderDailyNoteTemplate(value: unknown, date: string, assistantName = "Life OS"): string {
+  const configured = normalizeDailyNoteTemplate(value);
+  const template = configured.trim() ? configured : DEFAULT_LIGHT_DAILY_TEMPLATE;
+  return template.replace(/\{\{(date|assistantName)\}\}/g, (_token, key: string) => key === "date" ? date : assistantName);
+}
 
 export class DailyNoteService {
   constructor(
@@ -69,10 +76,8 @@ export class DailyNoteService {
   }
 
   private renderTemplate(date: string, fullTemplate: boolean): string {
-    const template = fullTemplate ? FULL_DAILY_TEMPLATE : DEFAULT_LIGHT_DAILY_TEMPLATE;
-    return template
-      .replace(/\{\{date\}\}/g, date)
-      .replace(/\{\{assistantName\}\}/g, this.settings?.assistantName || "Life OS");
+    return renderDailyNoteTemplate(fullTemplate ? FULL_DAILY_TEMPLATE : this.settings?.dailyNoteTemplate,
+      date, this.settings?.assistantName || "Life OS");
   }
 
   private getDailyNotesFolder(): string | null {

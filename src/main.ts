@@ -1,3 +1,4 @@
+import { normalizeDailyNoteTemplate } from "./settings";
 import { PdfOcrService } from "./services/PdfOcrService";
 import { capturePdfTextSelection } from "./ui/pdf-selection";
 import type { ProjectAnalysisService } from "./services/ProjectAnalysisService";
@@ -828,6 +829,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
     const storedRawGovernanceVersion = Number((storedData as Record<string, unknown>).aiWorkspaceRawGovernanceVersion || 0);
     const needsAiWorkspaceRawGovernanceMigration = storedRawGovernanceVersion < 1;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, storedData);
+    this.settings.dailyNoteTemplate = normalizeDailyNoteTemplate(storedData.dailyNoteTemplate);
     this.settings.fastPathMode = this.settings.fastPathMode === "off" ? "off" : "auto";
     this.settings.fastPathShadow = this.settings.fastPathShadow !== false;
     this.settings.fastPathDisabledIntents = Array.isArray(this.settings.fastPathDisabledIntents)

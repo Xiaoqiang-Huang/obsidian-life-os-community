@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.18 - 2026-10-25
+
+### Added
+
+- Settings → Basic → Daily note template lets users edit Markdown directly, with literal `{{date}}` and `{{assistantName}}` placeholders, a plaintext preview, concise/full presets, and restore-default. Empty keeps the built-in concise template.
+- New daily notes, quick capture, desktop AI writes, and Weixin daily writes share the same renderer. Only missing files are created; existing daily notes are never overwritten.
+- Weixin pending writes capture the template and assistant name at proposal time; later settings changes do not alter a pending write, and no empty daily shell is created before confirmation.
+
+### Fixed
+
+- The two placeholders are literal single-pass replacements; unknown placeholders stay as text. JavaScript, Templater, and template scripts are never executed.
+- A new daily file and its first entry are created together; retries are idempotent and revoked authorization cannot leave an empty note.
+- Retains earlier Weixin Skill, diary/task/reminder writes, sidebar, final-answer delivery, unlimited ordinary tool count, and image/document fixes.
+
 ## 0.4.17 - 2026-10-25
 
 ### Added

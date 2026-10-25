@@ -1,3 +1,4 @@
+import { renderDailyNoteTemplate } from "../services/DailyNoteService";
 import { useSdkToolContext } from "../services/sdk/SdkContextPolicy";
 import { sdkDesktopOnlyMessage } from "../services/sdk/SdkInternalBootstrap";
 import { useLightweightGreeting, emptyGreetingContext } from "../services/agent/GreetingTurnPolicy";
@@ -3926,6 +3927,7 @@ export class LifeOSChatView extends ItemView {
       title: "写入今日日记",
       content: `\n${markUserSavedConversation(`## AI 对话记录\n\n${body.join("\n\n")}\n`)}\n`,
       targetPath: this.plugin.getTodayNotePath(date),
+      initialContent: renderDailyNoteTemplate(this.plugin.settings.dailyNoteTemplate, date, this.plugin.settings.assistantName || "Life OS"),
       checked: true
     };
   }
@@ -3937,6 +3939,7 @@ export class LifeOSChatView extends ItemView {
       title: candidate.title,
       content: `\n${markUserSavedConversation(this.appendAttachmentReferences(candidate.content.trim(), documents))}\n`,
       targetPath: candidate.targetPath,
+      initialContent: renderDailyNoteTemplate(this.plugin.settings.dailyNoteTemplate, candidate.targetPath.match(/(\d{4}-\d{2}-\d{2})\.md$/u)?.[1] || today(), this.plugin.settings.assistantName || "Life OS"),
       checked: true
     };
   }

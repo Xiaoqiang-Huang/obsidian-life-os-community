@@ -529,6 +529,8 @@ export interface PersonalLifeSystemSettings {
   firstRunState: { draft: string; id: string; preset: string; pending?: { id: string; snapshot: string }; receipt?: { id: string; path: string; hash: string; savedAt: string } };
   checkinDraft: { date: string; root: string; original: string | null; duration: string; tasks: string; first: string; second: string; mood: string; summary: string } | null;
   useDailyNotesPlugin: boolean;
+  /** Markdown used only when creating a normal daily note; blank uses built-in light. */
+  dailyNoteTemplate: string;
   systemName: string;
   assistantName: string;
   userName: string;
@@ -1325,6 +1327,10 @@ export function analyzeAiConnectionTestModels(
   };
 }
 
+export function normalizeDailyNoteTemplate(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
 export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   agentExecution: createDefaultAgentEngineConfig(),
   sdkAutomaticWorkflowsEnabled: false,
@@ -1339,6 +1345,7 @@ export const DEFAULT_SETTINGS: PersonalLifeSystemSettings = {
   uiDensity: "standard",
   sidebarPinnedItems: [],
   useDailyNotesPlugin: false,
+  dailyNoteTemplate: "",
   systemName: "Life OS",
   assistantName: "Life OS",
   userName: "",

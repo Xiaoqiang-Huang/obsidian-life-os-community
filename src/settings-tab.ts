@@ -1,6 +1,9 @@
+import { DEFAULT_LIGHT_DAILY_TEMPLATE, FULL_DAILY_TEMPLATE } from "./constants";
+import { renderDailyNoteTemplate } from "./services/DailyNoteService";
+import { today } from "./utils/dates";
 import { persistThemeSelection } from "./ui/theme-selection";
 import { workflowProfileIdentity } from "./services/agent/WorkflowAiClient";
-import { resolveVisionSettings } from "./settings";
+import { resolveVisionSettings, normalizeDailyNoteTemplate } from "./settings";
 import { normalizeTaskSuggestionDailyLimit } from "./services/TaskSuggestionService";
 import { summarizeAnswerMetrics } from "./services/answer/AnswerMetrics";
 import { readPageSession, savePageSession } from "./utils/page-session-state";
@@ -95,6 +98,7 @@ const SETTINGS_GROUP_LABELS: Array<{ id: SettingsSectionDefinition["group"]; lab
 ];
 
 interface SettingsDraft {
+  dailyNoteTemplate: string;
   rootFolder: string;
   systemName: string;
   assistantName: string;
@@ -137,7 +141,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
       const saved = readPageSession<{ section: SettingsSectionId; draft?: SettingsDraft; at: number }>(app.vault, plugin.getRoot(), "settings");
       if (saved) {
         this.activeSettingsSection = saved.section;
-        if (saved.draft && Date.now() - saved.at < 30 * 60_000) { this.draft = saved.draft; this.dirty = true; }
+        if (saved.draft && Date.now() - saved.at < 30 * 60_000) { this.draft = { ...this.draft, ...saved.draft, dailyNoteTemplate: normalizeDailyNoteTemplate(saved.draft.dailyNoteTemplate ?? this.plugin.settings.dailyNoteTemplate) }; this.dirty = true; }
       }
     }
   }
@@ -618,6 +622,28 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     );
     this.text(card, "系统名称", "显示在侧边栏和工作台顶部。", this.draft.systemName, (value) => this.setDraft("systemName", value || "Life OS"));
     this.text(card, "助手名称", "AI 助手在聊天页使用的名字。", this.draft.assistantName, (value) => this.setDraft("assistantName", value || "Life OS"));
+    this.renderDailyTemplateSettings(card);
+  }
+
+  private renderDailyTemplateSettings(card: HTMLElement): void {
+    const row = this.row(card, "每日日记模板", "编辑新建日记使用的 Markdown。支持 {{date}}（日记日期）和 {{assistantName}}（助手名称）；留空使用内置简洁模板。点击顶部“保存设置”后生效，不修改已有日记；“完整版模板”命令仍使用内置完整版。模板中的脚本、嵌入表达式不会执行。");
+    row.addClass("lifeos-setting-row-vertical");
+    const editor = row.createEl("textarea", { cls: "lifeos-input", attr: { rows: "14", "aria-label": "每日日记模板", spellcheck: "false" } });
+    editor.value = normalizeDailyNoteTemplate(this.draft.dailyNoteTemplate);
+    editor.style.width = "100%";
+    editor.oninput = () => this.setDraft("dailyNoteTemplate", editor.value);
+    const actions = row.createDiv({ cls: "lifeos-setting-actions" });
+    const load = (value: string) => { editor.value = value; this.setDraft("dailyNoteTemplate", value); };
+    this.button(actions, "载入简洁模板", () => load(DEFAULT_LIGHT_DAILY_TEMPLATE));
+    this.button(actions, "载入完整版模板", () => load(FULL_DAILY_TEMPLATE));
+    this.button(actions, "恢复内置默认", () => load(""));
+    row.createDiv({ cls: "lifeos-setting-description", text: "预览（纯文本，仅预览，不创建或修改文件）" });
+    const preview = row.createEl("pre", { attr: { "data-lifeos-daily-template-preview": "true", "aria-live": "polite" } });
+    preview.style.whiteSpace = "pre-wrap";
+    preview.style.overflowWrap = "anywhere";
+    preview.style.maxHeight = "20rem";
+    preview.style.overflow = "auto";
+    preview.textContent = renderDailyNoteTemplate(this.draft.dailyNoteTemplate, today(), this.draft.assistantName || "Life OS");
   }
 
   private renderVisionSettings(card: HTMLElement): void {
@@ -2111,7 +2137,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     if (aiReasoningEffort !== this.draft.aiReasoningEffort) {
       this.draft.aiReasoningEffort = aiReasoningEffort;
     }
-    return { ...this.draft, aiApiKey, aiReasoningEffort };
+    return { ...this.draft, dailyNoteTemplate: normalizeDailyNoteTemplate(this.draft.dailyNoteTemplate), aiApiKey, aiReasoningEffort };
   }
   private async testConnection(): Promise<void> {
     const error = this.validateAiDraft();
@@ -2231,6 +2257,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
 
   private resetDraft(): void {
     this.draft = {
+      dailyNoteTemplate: normalizeDailyNoteTemplate(this.plugin.settings.dailyNoteTemplate),
       rootFolder: this.plugin.settings.rootFolder,
       systemName: this.plugin.settings.systemName,
       assistantName: this.plugin.settings.assistantName,
@@ -2279,6 +2306,10 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
   private setDraft(key: keyof SettingsDraft, value: string): void {
     this.draft[key] = value as never;
     this.dirty = true;
+    if (key === "dailyNoteTemplate" || key === "assistantName") {
+      const preview = this.containerEl.querySelector<HTMLElement>("[data-lifeos-daily-template-preview]");
+      if (preview) preview.textContent = renderDailyNoteTemplate(this.draft.dailyNoteTemplate, today(), this.draft.assistantName || "Life OS");
+    }
     if (key.startsWith("ai")) {
       this.refreshAiProviderStatus();
     }
