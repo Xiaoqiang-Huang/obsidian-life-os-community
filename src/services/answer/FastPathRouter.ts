@@ -71,7 +71,7 @@ export function routeAnswer(input: FastPathInput): AnswerDecision {
   else if (hasLifeOSWriteIntent(question)) reason = "write";
   else if ((question.match(/[?？]/g) || []).length > 1 || /[;；\n]/u.test(question)) reason = "multiple-questions";
   else {
-    const contextIntent = input.contextualFast ? fastContextIntent(question) : null;
+    const contextIntent = input.contextualFast && !input.customSkill ? fastContextIntent(question) : null;
     if (contextIntent) {
       intent = contextIntent;
       reason = contextIntent === "diary" ? "diary-context" : "search-context";

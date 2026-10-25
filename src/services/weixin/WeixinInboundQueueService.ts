@@ -220,7 +220,11 @@ export class WeixinInboundQueueService {
           name: String(record.name || "").slice(0, 200),
           size: Math.max(0, Number(record.size || 0)),
           vaultPath: String(record.vaultPath || "").slice(0, 1_000),
-          error: String(record.error || "").slice(0, 500)
+            text: String(record.text || "").slice(0, 24_000),
+            transcript: String(record.transcript || "").slice(0, 12_000),
+            parsed: record.parsed === true,
+            warnings: Array.isArray(record.warnings) ? record.warnings.slice(0, 8).map(item => String(item).slice(0, 500)) : [],
+            error: String(record.error || "").slice(0, 500)
         };
       })
     };

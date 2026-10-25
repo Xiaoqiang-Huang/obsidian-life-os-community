@@ -18,6 +18,18 @@ export interface WeixinStoredImage {
   lastReferencedAt: string;
 }
 
+export interface WeixinStoredDocument {
+  name: string;
+  type: "文件";
+  text: string;
+  vaultPath: string;
+  size: number;
+  warnings: string[];
+  parsed: true;
+  createdAt: string;
+  sourceMessageId: string;
+}
+
 export interface WeixinPendingOperation {
   kind: "link-save";
   url: string;
@@ -39,7 +51,11 @@ export interface WeixinConversationState {
    */
   lastSubstantiveQuery: string;
   lastSkillIds: string[];
+  /** One-shot explicit selection awaiting its first substantive question. */
+  pendingSkillIds: string[];
+  lastSkillMessageId: string;
   recentImages: WeixinStoredImage[];
+  recentDocuments: WeixinStoredDocument[];
   pendingOperation: WeixinPendingOperation | null;
 }
 
@@ -61,7 +77,10 @@ function emptyState(): WeixinConversationState {
     lastStandaloneQuery: "",
     lastSubstantiveQuery: "",
     lastSkillIds: [],
+    pendingSkillIds: [],
+    lastSkillMessageId: "",
     recentImages: [],
+    recentDocuments: [],
     pendingOperation: null
   };
 }
@@ -77,6 +96,23 @@ export class WeixinConversationStateService {
     const storedImages: WeixinStoredImage[] = [];
     for (let index = 0; index < request.media.length; index += 1) {
       const media = asRecord(request.media[index]);
+      if (media.type === "文件") {
+        const { fileBase64, ...safe } = media;
+        if (typeof fileBase64 === "string" && fileBase64) {
+          const binary = this.decodeBase64(fileBase64);
+          if (binary.byteLength > 50 * 1024 * 1024) throw new Error("微信文档超过 50 MB 持久化上限");
+          const extension = String(media.name || "").split(".").pop()?.toLowerCase() || "bin";
+          const safeExtension = /^(?:pdf|docx?|txt|md|markdown|csv|json|png|jpe?g|webp|gif)$/u.test(extension) ? extension : "bin";
+          const id = this.stableHash(["document", request.accountId, request.conversationId, request.senderId, request.threadId, request.agentSessionId, request.messageId, String(index)].join("\u001f"));
+          const folder = this.fs.path("Chat", "Weixin", "Attachments", this.safeDate(request.timestamp));
+          const path = `${folder}/${id}.${safeExtension}`;
+          await ensureFolder(this.app, folder);
+          if (!(this.app.vault.getAbstractFileByPath(path) instanceof TFile)) await this.app.vault.createBinary(path, binary);
+          safe.vaultPath = path;
+        }
+        persistedMedia.push(safe);
+        continue;
+      }
       const dataUrl = String(media.dataUrl || "");
       if (!/^data:image\/(?:png|jpe?g|webp|gif);base64,/iu.test(dataUrl)) {
         persistedMedia.push(request.media[index]);
@@ -101,7 +137,30 @@ export class WeixinConversationStateService {
           .slice(-MAX_STORED_IMAGES);
       });
     }
+    const documents = persistedMedia.map(item => {
+      const media = asRecord(item);
+      return media.type === "文件" && media.parsed === true && String(media.text || "").trim()
+        ? this.normalizeStoredDocument({ ...media, createdAt: this.safeTimestamp(request.timestamp), sourceMessageId: request.messageId }) : null;
+    }).filter((item): item is WeixinStoredDocument => Boolean(item));
+    if (documents.length) await this.update(request, next => {
+      const other = next.recentDocuments.filter(item => item.sourceMessageId !== request.messageId);
+      next.recentDocuments = [...other, ...documents].slice(-8);
+    });
     return { ...request, media: persistedMedia };
+  }
+
+  async hydrateRecentDocuments(request: WeixinInboundRequest, includeImages = false): Promise<WeixinInboundRequest> {
+    if (request.media.some(item => asRecord(item).type === "文件")) return request;
+    const state = await this.load(request);
+    const latest = state.recentDocuments[state.recentDocuments.length - 1];
+    if (includeImages) {
+      const images = state.recentImages.filter(item => item.state !== "archived");
+      const image = images[images.length - 1];
+      if (image && (!latest || Date.parse(image.createdAt) > Date.parse(latest.createdAt))) return this.hydrateRecentImages(request);
+    }
+    if (!latest) return request;
+    const batch = state.recentDocuments.filter(item => item.sourceMessageId === latest.sourceMessageId).slice(-4);
+    return { ...request, media: [...request.media, ...batch] };
   }
 
   async hydrateRecentImages(request: WeixinInboundRequest): Promise<WeixinInboundRequest> {
@@ -183,7 +242,7 @@ export class WeixinConversationStateService {
     const media: unknown[] = [];
     for (const item of request.media) {
       const record = asRecord(item);
-      if (String(record.dataUrl || "")) {
+      if (record.type === "文件" || String(record.dataUrl || "")) {
         media.push(item);
         continue;
       }
@@ -231,10 +290,12 @@ export class WeixinConversationStateService {
     });
   }
 
-  async rememberSkills(request: WeixinInboundRequest, skillIds: string[]): Promise<void> {
+  async rememberSkills(request: WeixinInboundRequest, skillIds: string[], options: { pendingQuestion?: boolean } = {}): Promise<void> {
     const ids = Array.from(new Set(skillIds.map((item) => String(item || "").trim()).filter(Boolean))).slice(0, 8);
     await this.update(request, (state) => {
       state.lastSkillIds = ids;
+      state.lastSkillMessageId = String(request.messageId || "").slice(0, 300);
+      state.pendingSkillIds = options.pendingQuestion ? ids : [];
     });
   }
 
@@ -271,9 +332,12 @@ export class WeixinConversationStateService {
           lastSkillIds: Array.isArray(parsed.lastSkillIds)
             ? parsed.lastSkillIds.map(String).filter(Boolean).slice(0, 8)
             : [],
+          pendingSkillIds: Array.isArray(parsed.pendingSkillIds) ? parsed.pendingSkillIds.map(String).filter(Boolean).slice(0, 8) : [],
+        lastSkillMessageId: String(parsed.lastSkillMessageId || "").slice(0, 300),
           recentImages: Array.isArray(parsed.recentImages)
             ? parsed.recentImages.map((item) => this.normalizeStoredImage(item)).filter((item): item is WeixinStoredImage => Boolean(item))
             : [],
+          recentDocuments: Array.isArray(parsed.recentDocuments) ? parsed.recentDocuments.map(item => this.normalizeStoredDocument(item)).filter((item): item is WeixinStoredDocument => Boolean(item)) : [],
           pendingOperation: this.normalizePendingOperation(parsed.pendingOperation)
         };
       }
@@ -369,9 +433,12 @@ export class WeixinConversationStateService {
         lastStandaloneQuery: String(parsed.lastStandaloneQuery || "").slice(0, 12_000),
         lastSubstantiveQuery: String(parsed.lastSubstantiveQuery || parsed.lastStandaloneQuery || "").slice(0, 12_000),
         lastSkillIds: Array.isArray(parsed.lastSkillIds) ? parsed.lastSkillIds.map(String).filter(Boolean).slice(0, 8) : [],
+        pendingSkillIds: Array.isArray(parsed.pendingSkillIds) ? parsed.pendingSkillIds.map(String).filter(Boolean).slice(0, 8) : [],
+        lastSkillMessageId: String(parsed.lastSkillMessageId || "").slice(0, 300),
         recentImages: Array.isArray(parsed.recentImages)
           ? parsed.recentImages.map((item) => this.normalizeStoredImage(item)).filter((item): item is WeixinStoredImage => Boolean(item))
           : [],
+        recentDocuments: Array.isArray(parsed.recentDocuments) ? parsed.recentDocuments.map(item => this.normalizeStoredDocument(item)).filter((item): item is WeixinStoredDocument => Boolean(item)) : [],
         pendingOperation: this.normalizePendingOperation(parsed.pendingOperation)
       });
     } catch {
@@ -384,8 +451,18 @@ export class WeixinConversationStateService {
     state.recentImages = state.recentImages
       .filter((item) => Date.parse(item.createdAt) + IMAGE_RETENTION_MS > now)
       .slice(-MAX_STORED_IMAGES);
+    state.recentDocuments = (state.recentDocuments || []).filter(item => Date.parse(item.createdAt) + IMAGE_RETENTION_MS > now).slice(-8);
     if (state.pendingOperation && Date.parse(state.pendingOperation.expiresAt) <= now) state.pendingOperation = null;
     return state;
+  }
+
+  private normalizeStoredDocument(value: unknown): WeixinStoredDocument | null {
+    const record = asRecord(value);
+    if (record.type !== "文件" || record.parsed !== true || !String(record.text || "").trim() || !Number.isFinite(Date.parse(String(record.createdAt || "")))) return null;
+    return { type: "文件", name: String(record.name || "微信文档").slice(0, 200), text: String(record.text).slice(0, 24_000),
+      vaultPath: String(record.vaultPath || "").slice(0, 1000), size: Math.max(0, Number(record.size || 0)), parsed: true,
+      warnings: Array.isArray(record.warnings) ? record.warnings.slice(0, 8).map(item => String(item).slice(0, 500)) : [],
+      createdAt: String(record.createdAt), sourceMessageId: String(record.sourceMessageId || "").slice(0, 300) };
   }
 
   private normalizeStoredImage(value: unknown): WeixinStoredImage | null {

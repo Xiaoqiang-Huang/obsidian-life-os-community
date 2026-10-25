@@ -1,3 +1,4 @@
+import type { ReadImportedFileOptions } from "../DocumentImportService";
 import { App, Platform, requestUrl } from "obsidian";
 import * as QRCode from "qrcode";
 import { formatWeixinPlainTextReply, type WeixinAssistantResponse, type WeixinInboundRequest } from "./WeixinBotLogic";
@@ -106,7 +107,7 @@ interface WeixinMessageItem {
   msg_id?: string;
   text_item?: { text?: string };
   voice_item?: { text?: string; playtime?: number };
-  file_item?: { file_name?: string; len?: string };
+  file_item?: WeixinFileItem;
   image_item?: WeixinImageItem;
   video_item?: { media?: WeixinCdnMedia };
   ref_msg?: { title?: string; message_item?: WeixinMessageItem };
@@ -128,6 +129,12 @@ export interface WeixinImageItem {
   thumb_height?: number;
   thumb_width?: number;
   hd_size?: number;
+}
+
+export interface WeixinFileItem {
+  media?: WeixinCdnMedia;
+  file_name?: string;
+  len?: string;
 }
 
 export interface WeixinDownloadedImage {
@@ -383,18 +390,18 @@ function safeWeixinMediaUrl(value: unknown): string {
   return parsed.toString();
 }
 
-function mediaDownloadUrl(image: WeixinImageItem): string {
-  const fullUrl = clean(image.media?.full_url || image.url, 8_000);
+function mediaDownloadUrl(image: WeixinImageItem | WeixinFileItem): string {
+  const fullUrl = clean(image.media?.full_url || ("url" in image ? image.url : ""), 8_000);
   if (fullUrl) return safeWeixinMediaUrl(fullUrl);
   const query = clean(image.media?.encrypt_query_param, 8_000);
   if (!query) throw new Error("微信图片缺少下载引用");
   return `${DEFAULT_CDN_BASE}/download?encrypted_query_param=${encodeURIComponent(query)}`;
 }
 
-function imageAesKey(image: WeixinImageItem): Uint8Array | null {
+function imageAesKey(image: WeixinImageItem | WeixinFileItem): Uint8Array | null {
   const bufferModule = loadDesktopModule<typeof import("buffer")>("buffer");
   const BufferCtor = bufferModule.Buffer;
-  const rawHex = clean(image.aeskey, 128);
+  const rawHex = clean("aeskey" in image ? image.aeskey : "", 128);
   if (rawHex) {
     if (!/^[0-9a-f]{32}$/iu.test(rawHex)) throw new Error("微信图片 AES 密钥格式无效");
     return BufferCtor.from(rawHex, "hex");
@@ -451,6 +458,26 @@ export async function downloadWeixinImageDataUrl(image: WeixinImageItem): Promis
     mimeType,
     size: plain.length
   };
+}
+
+/** File transport uses the same CDN reference and AES encoding as images. */
+export async function downloadWeixinFileBytes(file: WeixinFileItem): Promise<Uint8Array> {
+  if (!Platform.isDesktopApp) throw new Error("微信文档读取仅支持 Obsidian 桌面端");
+  const limit = 50 * 1024 * 1024;
+  if (Number(file.len || 0) > limit) throw new Error("微信文档超过 50 MB 限制");
+  if (!file.media?.aes_key) throw new Error("微信文档缺少解密密钥，请重发文件");
+  const response = await withRequestTimeout(requestUrl({ url: mediaDownloadUrl(file), method: "GET" }), IMAGE_DOWNLOAD_TIMEOUT_MS, "微信文档下载");
+  if (response.status < 200 || response.status >= 300) throw new Error(`微信文档下载失败：HTTP ${response.status}`);
+  const { Buffer } = loadDesktopModule<typeof import("buffer")>("buffer");
+  const encrypted = Buffer.from(response.arrayBuffer);
+  if (!encrypted.length || encrypted.length > limit + 16) throw new Error("微信文档内容为空或超过 50 MB 限制");
+  const key = imageAesKey(file);
+  if (!key) throw new Error("微信文档缺少解密密钥");
+  const cryptoModule = loadDesktopModule<typeof import("crypto")>("crypto");
+  const decipher = cryptoModule.createDecipheriv("aes-128-ecb", key, null);
+  const plain = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+  if (!plain.length || plain.length > limit) throw new Error("微信文档解密后的大小无效");
+  return plain;
 }
 
 function randomWechatUin(): string {
@@ -618,6 +645,7 @@ export interface WeixinIlinkServiceOptions {
   isEnabled: () => boolean;
   canHydrateMedia?: (request: WeixinInboundRequest) => boolean;
   canAnalyzeImages?: () => boolean;
+  documentReadOptions?: () => Pick<ReadImportedFileOptions, "enablePdfOcr" | "pdfOcr">;
   /** Persist the inbound request before the iLink cursor is advanced. */
   stageInboundMessage?: (request: WeixinInboundRequest) => Promise<WeixinInboundRequest>;
   handleMessage: (request: WeixinInboundRequest, stream?: WeixinStreamOptions) => Promise<WeixinAssistantResponse>;
@@ -1324,6 +1352,47 @@ export class WeixinIlinkService {
     }
   }
 
+  private async hydrateInboundDocuments(message: WeixinMessage, inbound: WeixinInboundRequest): Promise<void> {
+    const items = (message.item_list || []).filter(item => item.type === 4 && item.file_item);
+    if (!items.length || (this.options.canHydrateMedia && !this.options.canHydrateMedia(inbound))) return;
+    const targets = inbound.media.filter(item => (item as Record<string, unknown>)?.type === "文件") as Array<Record<string, unknown>>;
+    const parser = await import("../DocumentImportService");
+    let totalBytes = 0;
+    for (let index = 0; index < items.length; index += 1) {
+      const target = targets[index];
+      if (!target) continue;
+      if (index >= 4) { target.error = "一次最多读取 4 个文档"; continue; }
+      try {
+        const name = String(target.name || "");
+        const preflight = parser.preflightImportedFile({ name, size: Number(target.size || 0) }, { maxBytes: parser.IMPORTED_FILE_MAX_BYTES });
+        if (!preflight.ok) throw new Error(preflight.message);
+        const bytes = await downloadWeixinFileBytes(items[index].file_item!);
+        totalBytes += bytes.byteLength;
+        if (totalBytes > parser.IMPORTED_FILE_MAX_BYTES) throw new Error("本条消息文档总量超过 50 MB 限制");
+        if (this.options.canHydrateMedia && !this.options.canHydrateMedia(inbound)) throw new Error("文档读取授权已失效");
+        const imported = await parser.readImportedFile({ name, size: bytes.byteLength, arrayBuffer: async () => Uint8Array.from(bytes).buffer }, {
+          maxBytes: parser.IMPORTED_FILE_MAX_BYTES, maxTextChars: 24_000,
+          ...this.options.documentReadOptions?.(), allowImageVision: this.options.canAnalyzeImages?.() === true
+        });
+        if (this.options.canHydrateMedia && !this.options.canHydrateMedia(inbound)) throw new Error("文档读取授权已失效");
+        target.size = bytes.byteLength;
+        target.text = imported.kind === "image" ? "" : imported.text;
+        target.warnings = imported.warnings;
+        target.parsed = true;
+        if (imported.dataUrl) {
+          target.type = "图片"; target.dataUrl = imported.dataUrl;
+          target.mimeType = imported.dataUrl.slice(5, imported.dataUrl.indexOf(";"));
+        } else {
+          const { Buffer } = loadDesktopModule<typeof import("buffer")>("buffer");
+          target.fileBase64 = Buffer.from(bytes).toString("base64");
+          if (!imported.text.trim()) target.error = imported.warnings.join("；") || "没有提取到可分析的正文";
+        }
+      } catch (error) {
+        target.error = `文档读取失败：${errorMessage(error).replace(/https?:\/\/\S+/giu, "微信 CDN").slice(0, 300)}`;
+      }
+    }
+  }
+
   private async prepareInboundForQueue(
     runtime: WeixinAccountRuntime,
     message: WeixinMessage
@@ -1337,6 +1406,7 @@ export class WeixinIlinkService {
       || runtime.stored.recentMessageIds.includes(queueId)
     ) return;
     await this.hydrateInboundImages(message, inbound);
+    await this.hydrateInboundDocuments(message, inbound);
     if (message.context_token) {
       runtime.stored.contextTokens[inbound.conversationId] = clean(message.context_token, 20_000);
     }

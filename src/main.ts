@@ -1,3 +1,4 @@
+import { PdfOcrService } from "./services/PdfOcrService";
 import { capturePdfTextSelection } from "./ui/pdf-selection";
 import type { ProjectAnalysisService } from "./services/ProjectAnalysisService";
 import { sdkDesktopOnlyMessage } from "./services/sdk/SdkInternalBootstrap";
@@ -1120,6 +1121,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
         allowedGroups: this.settings.weixinAllowedGroups
       }, request).allowed,
       canAnalyzeImages: () => Boolean(resolveVisionSettings(this.settings)),
+      documentReadOptions: () => ({ enablePdfOcr: true, pdfOcr: new PdfOcrService(this.app, { engine: this.settings.pdfOcrEngine, paddleEndpoint: this.settings.paddleOcrEndpoint }) }),
       stageInboundMessage: (request) => this.getWeixinAssistantService().stageInboundMessage(request),
       handleMessage: (request, stream) => this.getWeixinAssistantService().handleMessage(request, stream),
       recoverPendingMessages: (accountId) => this.getWeixinAssistantService().recoverPendingMessages(accountId),
@@ -1268,6 +1270,7 @@ export default class PersonalLifeSystemPlugin extends Plugin implements IPlugin 
           allowedGroups: this.settings.weixinAllowedGroups
         }, request).allowed,
         canAnalyzeImages: () => Boolean(resolveVisionSettings(this.settings)),
+      documentReadOptions: () => ({ enablePdfOcr: true, pdfOcr: new PdfOcrService(this.app, { engine: this.settings.pdfOcrEngine, paddleEndpoint: this.settings.paddleOcrEndpoint }) }),
         stageInboundMessage: (request) => this.getWeixinAssistantService().stageInboundMessage(request),
         handleMessage: (request, stream) => this.getWeixinAssistantService().handleMessage(request, stream),
         recoverPendingMessages: (accountId) => this.getWeixinAssistantService().recoverPendingMessages(accountId),

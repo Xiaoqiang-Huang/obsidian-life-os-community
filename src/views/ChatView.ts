@@ -52,7 +52,7 @@ import {
   type LifeOSAgentBuildMessagesInput
 } from "../services/LifeOSAgentService";
 import type {  LifeOSAgentToolResult } from "../services/agent/LifeOSAgentTypes";
-import { CHAT_IMPORT_ACCEPT, buildImportedDocumentsContextMarkdown, buildImportedDocumentsMarkdown, buildImportedDocumentsSummary, formatAttachmentSize, formatImportedDocumentReference, readImportedFile, saveImportedFileToVault, type ImportedDocument } from "../services/DocumentImportService";
+import { CHAT_IMPORT_ACCEPT, buildImportedDocumentsContextMarkdown, buildImportedDocumentsMarkdown, buildImportedDocumentsSummary, formatAttachmentSize, formatImportedDocumentReference, readImportedFile, saveImportedFileToVault, resolveImportedDocumentReferences, importedDocumentAnalysisError, type ImportedDocument } from "../services/DocumentImportService";
 import { PdfOcrService } from "../services/PdfOcrService";
 import { DocumentRecognitionCacheService } from "../services/DocumentRecognitionCacheService";
 import { buildNumericEvidenceMarkdown, extractNumericEvidence, hasNumericIntent, type NumericEvidence } from "../services/NumericEvidenceService";
@@ -789,6 +789,12 @@ export class LifeOSChatView extends ItemView {
   }
 
   private async selectComposerFile(file: TFile, trigger: ComposerTrigger): Promise<void> {
+    if (this.composerFileImportsPending > 0) { new Notice("附件仍在读取，请等待当前导入完成。"); return; }
+    const owner = this.importedDocuments;
+    const sessionId = this.agentSessionId;
+    const projectId = this.selectedProjectScopeId;
+    const stillCurrent = () => this.isViewOpen && this.agentSessionId === sessionId
+      && this.selectedProjectScopeId === projectId && this.importedDocuments === owner;
     if (!requireProFeature(this.plugin, "knowledgeImport")) return;
     const maxCount = Math.max(1, this.plugin.settings.maxChatAttachmentCount ?? 5);
     const maxBytes = Math.max(256 * 1024, this.plugin.settings.maxChatAttachmentBytes ?? 6 * 1024 * 1024);
@@ -820,7 +826,12 @@ export class LifeOSChatView extends ItemView {
             size: file.stat.size, kind: "pdf", text: text.slice(0, 24_000), warnings: [
               "本轮仅引用已识别的 PDF 页面；如需未识别页或整本内容，请明确要求继续按页读取。"
             ] };
-          if (page?.requiresOcr) imported.warnings.push("首页没有可提取文字，可能需要视觉识别。");
+          if (!text.trim()) {
+            imported = await readImportedFile({ name: file.name, size: file.stat.size, arrayBuffer: () => this.app.vault.readBinary(file) }, {
+              maxBytes, maxTextChars: 24_000, allowImageVision: false, enablePdfOcr: true,
+              pdfOcr: new PdfOcrService(this.app, { engine: this.plugin.settings.pdfOcrEngine, paddleEndpoint: this.plugin.settings.paddleOcrEndpoint })
+            });
+          }
         }
       } else {
         imported = await readImportedFile({
@@ -830,12 +841,14 @@ export class LifeOSChatView extends ItemView {
         }, { maxBytes, allowImageVision: this.canUseVisionModel(), enablePdfOcr: false });
         if (imported.text.length >= 24_000) imported.warnings.push("正文较长，本轮先引用前段；可以继续指定章节深入读取。");
       }
+      if (!stillCurrent()) return;
       imported.vaultPath = file.path;
       imported.obsidianLink = `[[${file.path}]]`;
       this.importedDocuments.push(imported);
       this.renderAttachmentList();
       this.persistActiveChatState();
     } catch (error) {
+      if (!stillCurrent()) return;
       if (this.inputEl.value === selectedValue) {
         this.inputEl.value = previousValue;
         this.inputEl.setSelectionRange(trigger.end, trigger.end);
@@ -2573,6 +2586,13 @@ export class LifeOSChatView extends ItemView {
   }
 
   private async handleAttachmentFiles(files: FileList | File[] | null): Promise<void> {
+    if (this.composerFileImportsPending > 0) { new Notice("附件仍在读取，请等待当前导入完成。"); return; }
+    const owner = this.importedDocuments;
+    const sessionId = this.agentSessionId;
+    const projectId = this.selectedProjectScopeId;
+    const stillCurrent = () => this.isViewOpen && this.agentSessionId === sessionId
+      && this.selectedProjectScopeId === projectId && this.importedDocuments === owner;
+    const archiveFolder = this.chatAttachmentArchiveFolder();
     const incoming = Array.from(files ?? []);
     if (incoming.length === 0) return;
     if (!requireProFeature(this.plugin, "knowledgeImport")) return;
@@ -2583,7 +2603,10 @@ export class LifeOSChatView extends ItemView {
       return;
     }
 
+    this.composerFileImportsPending += 1;
+    try {
     for (const file of incoming) {
+      if (!stillCurrent()) break;
       try {
         const imported = await readImportedFile(file, {
           maxBytes,
@@ -2594,9 +2617,10 @@ export class LifeOSChatView extends ItemView {
             paddleEndpoint: this.plugin.settings.paddleOcrEndpoint
           })
         });
+        if (!stillCurrent()) break;
         try {
           const saved = await saveImportedFileToVault(this.app, file, {
-            folderPath: this.chatAttachmentArchiveFolder()
+            folderPath: archiveFolder
           });
           imported.vaultPath = saved.vaultPath;
           imported.obsidianLink = saved.obsidianLink;
@@ -2604,16 +2628,21 @@ export class LifeOSChatView extends ItemView {
           const message = archiveError instanceof Error ? archiveError.message : String(archiveError);
           imported.warnings.push(`附件未归档到 Vault：${message}`);
         }
+        if (!stillCurrent()) break;
+        if (this.importedDocuments.length >= maxCount) { new Notice(`最多同时导入 ${maxCount} 个文件。`); break; }
         this.importedDocuments.push(imported);
         if (imported.kind === "image" && !imported.dataUrl) {
           new Notice("图片已作为附件记录。识别图片需要先在设置中启用并填写视觉模型。", 6000);
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        if (!stillCurrent()) break;
         new Notice(`文件导入失败：${message}`, 7000);
       }
     }
 
+    } finally { this.composerFileImportsPending -= 1; }
+    if (!stillCurrent()) return;
     if (this.fileInputEl) this.fileInputEl.value = "";
     this.renderAttachmentList();
     this.keepComposerVisible(true);
@@ -3025,7 +3054,11 @@ export class LifeOSChatView extends ItemView {
     const selectedSkill = getAiSkills(this.selectedSkillIds, this.importedAiSkills, this.plugin.settings.aiSkillOverrides)[0];
     const content = promptWithoutSelectedSkill(this.inputEl.value, selectedSkill?.name);
     if (await this.manageAgentSession(content)) return;
-    const documents = [...this.importedDocuments];
+    const documents = resolveImportedDocumentReferences(content, [...this.importedDocuments], this.lastImportedDocuments);
+    if (this.aiToggleEl.value === "on") {
+      const attachmentError = importedDocumentAnalysisError(documents, this.canUseVisionModel());
+      if (attachmentError) { new Notice(attachmentError, 10000); return; }
+    }
     if (documents.length === 0 &&
       /(?:项目|文档|资料)/u.test(content) && /(?:所有|全部|完整|全文|所有观点|全面)/u.test(content) &&
       /(?:分析|总结|提炼|观点|综合|列出|列举|盘点|枚举|清单)/u.test(content)) {

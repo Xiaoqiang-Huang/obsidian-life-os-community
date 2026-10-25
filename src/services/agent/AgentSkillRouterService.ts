@@ -20,10 +20,17 @@ const STOP_TOKENS = new Set(["方法", "思路", "分析", "资料", "技能", "
 export class AgentSkillRouterService {
   constructor(private getSettings: () => PersonalLifeSystemSettings) {}
 
-  route(query: string, explicitIds: string[] = [], defaultSkillId = "lifeos-general"): LifeOSAgentSkillRoute {
+  route(query: string, explicitIds: string[] = [], defaultSkillId = "lifeos-general", selectionLocked = false): LifeOSAgentSkillRoute {
     const index = this.index();
     const known = new Set(index.map((item) => item.skill.id));
     const explicit = Array.from(new Set(explicitIds.filter((id) => known.has(id))));
+    // The Weixin host already resolved this message's explicit/pending/follow-up
+    // choice. A quoted comparison target must not reroute it a second time.
+    // Desktop callers keep their existing named-query precedence.
+    if (selectionLocked && explicit.length) return {
+      selectedIds: explicit, matchedIds: explicit.filter(id => !GENERIC_SKILL_IDS.has(id)),
+      confidence: 1, reason: "explicit", indexSummary: this.summary(index, explicit)
+    };
     const normalizedQuery = this.normalize(query);
     const named = index.filter((item) => item.aliases.some((alias) => alias.length >= 2 && normalizedQuery.includes(alias)));
     if (named.length > 0) {

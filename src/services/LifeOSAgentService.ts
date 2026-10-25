@@ -491,7 +491,8 @@ export class LifeOSAgentService {
     const skillRoute = this.skillRouter.route(
       input.content,
       input.selectedSkillIds || [],
-      input.defaultSkillId || this.getSettings().defaultAiSkillId || "lifeos-general"
+      input.defaultSkillId || this.getSettings().defaultAiSkillId || "lifeos-general",
+      input.channel === "weixin" && input.selectedSkillIds !== undefined
     );
     const selectedSkillIds = skillRoute.selectedIds;
     const selectedSkills = this.resolveSkills(selectedSkillIds);
@@ -679,7 +680,8 @@ export class LifeOSAgentService {
     const skillRoute = this.skillRouter.route(
       input.content,
       input.selectedSkillIds || [],
-      input.defaultSkillId || settings.defaultAiSkillId || "lifeos-general"
+      input.defaultSkillId || settings.defaultAiSkillId || "lifeos-general",
+      input.channel === "weixin" && input.selectedSkillIds !== undefined
     );
     const selectedSkillIds = skillRoute.selectedIds;
     const selectedSkills = this.resolveSkills(selectedSkillIds);
@@ -1688,11 +1690,11 @@ export class LifeOSAgentService {
       });
       return `已保存项目文档：${document.path}`;
     });
-    register("skill-select", async (input) => {
-      const route = this.skillRouter.route(String(input.query || ""), [], this.getSettings().defaultAiSkillId || "lifeos-general");
+    register("skill-select", async (input, context) => {
+      const route = this.skillRouter.route(String(input.query || ""), [], context.channel === "weixin" ? "lifeos-general" : this.getSettings().defaultAiSkillId || "lifeos-general");
       const selected = this.resolveSkills(route.selectedIds);
       const names = selected.map(item => item.name);
-      return `命中 Skill：${names.join(" + ")}\n路由：${route.reason}\n置信度：${route.confidence.toFixed(2)}\n按需加载的方法（不改变权限）：\n${selected.map(item => `## ${item.name}\n${item.systemPrompt}`).join("\n\n").slice(0, 8000)}`;
+      return `${route.reason === "default" ? "未命中专用 Skill；以下仅为默认方法，不代表已切换会话" : "命中 Skill"}：${names.join(" + ")}\n路由：${route.reason}\n置信度：${route.confidence.toFixed(2)}\n按需加载的方法（不改变权限）：\n${selected.map(item => `## ${item.name}\n${item.systemPrompt}`).join("\n\n").slice(0, 8000)}`;
     });
     register("vision", async (input, context) => this.runVisionSubagent(String(input.instruction || context.userContent), context.imageParts, false, context.signal, context.requestBudget, context));
     register("ocr-read", async (input, context) => this.runVisionSubagent(String(input.instruction || "请提取图片中的可见文字和版面结构。"), context.imageParts, true, context.signal, context.requestBudget, context));

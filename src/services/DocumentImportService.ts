@@ -108,7 +108,7 @@ export const CHAT_IMPORT_ACCEPT = [
 export function classifyImportedDocument(name: string, mimeType = ""): ImportedDocumentKind {
   const lowerName = name.toLowerCase();
   const lowerMime = mimeType.toLowerCase();
-  if (lowerMime.startsWith("image/")) return "image";
+  if (lowerMime.startsWith("image/") || /\.(?:png|jpe?g|webp|gif)$/u.test(lowerName)) return "image";
   if (lowerMime === PDF_MIME_MARKER || lowerName.endsWith(".pdf")) return "pdf";
   if (lowerMime === DOCX_MIME_MARKER || lowerName.endsWith(".docx") || lowerName.endsWith(".doc")) return "word";
   if (lowerMime.includes("json") || lowerName.endsWith(".json")) return "json";
@@ -165,7 +165,11 @@ export async function readImportedFile(
 
   if (kind === "image") {
     if (options.allowImageVision) {
-      dataUrl = await readFileAsDataUrl(file, mimeType || inferImageMime(file.name));
+      const imageMime = /^image\/(?:png|jpe?g|webp|gif)$/iu.test(mimeType) ? mimeType : inferImageMime(file.name);
+      if (mimeType.startsWith("image/") && !/^image\/(?:png|jpe?g|webp|gif)$/iu.test(mimeType)) {
+        throw new Error("此图片格式不能直接送入视觉模型，请转换为 PNG、JPEG、WebP 或 GIF。");
+      }
+      dataUrl = await readFileAsDataUrl(file, imageMime);
       text = `[Image attachment: ${file.name}]`;
     } else {
       warnings.push("Image recognition requires a configured vision model.");
@@ -267,6 +271,24 @@ export async function extractReadableDocumentText(
   return { text: "", warnings: [`Unsupported file type for local text extraction: ${file.name}`] };
 }
 
+/** Only explicit references may reuse the last bound batch, never an unrelated new topic. */
+export function resolveImportedDocumentReferences(query: string, current: ImportedDocument[], previous: ImportedDocument[]): ImportedDocument[] {
+  if (current.length > 0) return current;
+  const image = /(?:这|那|前面|之前|刚才|上面|上一)(?:的)?(?:一)?(?:张|幅|道)?(?:图片|图|截图|照片|题目|题)/u.test(query);
+  const document = /(?:这|那|前面|之前|刚才|上面|上一|已上传)(?:的)?(?:一)?(?:份|个|篇)?(?:文档|文件|资料|PDF|Word|表格|附件)|(?:附件)(?:中|里|的)/iu.test(query);
+  if (!image && !document) return [];
+  return previous.filter(item => (document && /附件/u.test(query)) || image && document || (image ? item.kind === "image" : item.kind !== "image"));
+}
+
+/** Fail closed when not one selected attachment can supply actual content. */
+export function importedDocumentAnalysisError(documents: ImportedDocument[], visionEnabled: boolean): string {
+  if (!documents.length) return "";
+  const readable = documents.some(item => item.kind === "image"
+    ? visionEnabled && /^data:image\/(?:png|jpe?g|webp|gif);base64,[a-z0-9+/=]+$/iu.test(item.dataUrl || "")
+    : Boolean(item.text.trim()));
+  return readable ? "" : "附件尚无可分析的内容。图片需要已配置的视觉模型；扫描 PDF 需要可用 OCR；旧版 DOC 请转为 DOCX。请检查附件提示后重试，未发起模型请求。";
+}
+
 export function buildImportedDocumentsMarkdown(documents: ImportedDocument[]): string {
   const usable = documents.filter((item) => item.text.trim() || item.warnings.length > 0);
   if (usable.length === 0) return "";
@@ -318,7 +340,7 @@ export function buildImportedDocumentsContextMarkdown(
     }
     if (document.text.trim()) {
       const excerpt = importedDocumentRelevantPassages(document.text, query, maxDocumentChars, maxBlocks);
-      parts.push(`Relevant content:\n\n${excerpt}`);
+      parts.push(`Coverage: ${excerpt === document.text.trim() ? "provided text" : "partial excerpts; not a complete-document review"}\n\nRelevant content:\n\n${excerpt}`);
     }
   }
   return parts.join("\n\n").trim();

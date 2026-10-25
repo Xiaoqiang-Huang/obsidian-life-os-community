@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.17 - 2026-10-25
+
+### Added
+
+- Weixin and desktop support image/document ingestion: encrypted Weixin files are downloaded to the trusted CDN path, decrypted, parsed by the existing native parsers, and passed to the Agent as bounded text with warnings. Original files stay in a fixed per-session attachment directory and retries do not duplicate them.
+- PDF text, DOCX, TXT/MD/CSV/JSON are supported; scanned PDFs reuse the configured OCR endpoint and images use the configured vision model. Legacy DOC requires conversion to DOCX.
+- Explicit “刚才文档/这个附件/前面那张图” follow-ups can reuse the current bounded attachment; a new topic does not inherit it. Account/sender/thread/logical-session isolation is retained.
+- Includes the 0.4.16 Weixin Skill routing fixes: `/lifeos skill` and `/skill`, stable IDs, pending selection across restart, clear/replace behavior, and negation/quotation guards.
+
+### Fixed
+
+- Desktop Vault images without MIME are recognized by supported extension; batch imports and @files bind to the current session/project/attachment owner, and late results cannot enter a closed view or new session.
+- Composer blocks sending during import and concurrent attachment-count increases; empty-body @PDF uses the configured OCR path.
+- All-unreadable attachments never trigger a fake analysis; partial parse/truncation is labelled, and attachments remain evidence rather than executable instructions.
+- Weixin file bytes are copied exactly instead of accidentally exposing a Node Buffer pool slice; four file metadata parts cannot hide a later image part.
+- Retains earlier Weixin formal-answer, sidebar, task/reminder write, ordinary tool-count, timeout, and permission fixes.
+
 ## 0.4.15 - 2026-10-25
 
 ### Added
