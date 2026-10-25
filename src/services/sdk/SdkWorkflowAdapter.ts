@@ -195,9 +195,9 @@ export class SdkWorkflowAdapter {
           return { ...result({ ok: !receipt || receipt.ok, text, ...(receipt && !receipt.ok ? { error: text } : {}) }, text), toolResults: receipt ? [receipt] : [], toolCalls: receipt ? 1 : 0 };
         }
         const maxRequests = Math.min(100, Math.max(1, input.budget?.maxModelCalls ?? context.requestBudget?.limit ?? DEFAULT_CHAT_MODEL_REQUESTS));
-        const requestedTools = input.enableTools === false ? 0 : Math.min(100, Math.max(0, input.budget?.maxToolCalls ?? DEFAULT_CHAT_TOOL_CALLS));
-        // Reserve final-answer turns: a tool loop must never consume the whole
-        // request budget before the model can answer from what it has read.
+        const requestedTools = input.enableTools === false ? 0 : input.budget?.maxToolCalls ?? DEFAULT_CHAT_TOOL_CALLS;
+        // Ordinary answers have no tool-count ceiling. Preserve zero/explicit
+        // finite caller policies without turning the model budget into a tool cap.
         const maxTools = boundedChatToolCalls(requestedTools, maxRequests);
         const maxOutputTokens = input.maxOutputTokens ?? snapshot.chatLimits.maxOutputTokens;
         const maxDurationMs = input.maxDurationMs ?? snapshot.chatLimits.maxDurationMs;

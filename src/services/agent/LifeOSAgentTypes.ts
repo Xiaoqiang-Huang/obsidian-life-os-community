@@ -146,7 +146,8 @@ export interface LifeOSAgentToolExecutionContext {
 export interface LifeOSAgentLoopBudget {
   maxSteps: number;
   maxModelCalls: number;
-  maxToolCalls: number;
+  /** null means no tool-call count ceiling; zero disables tools. */
+  maxToolCalls: number | null;
   maxContextChars: number;
   maxRepeatedCalls: number;
 }

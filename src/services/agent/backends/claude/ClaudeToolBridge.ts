@@ -17,7 +17,8 @@ export interface ClaudeBridgePolicy {
   allowNativeModelTools: boolean;
   allowSdkTextModelTools?: boolean;
   allowHostContinuations?: boolean;
-  maxToolCalls: number;
+  /** null removes the call-count ceiling; zero still grants no tools. */
+  maxToolCalls: number | null;
   /** Vault-relative Life OS root used to accept both documented path dialects. */
   lifeOsRoot?: string;
   /** Per-tool deadline for read tools; invalid/absent falls back to the default. */
@@ -104,7 +105,7 @@ export class ClaudeToolBridge {
       ...(hint ? { metadata: { code, hint, ...(shape ? { pathShape: shape } : {}) } } : {}) });
     const rejection = (check: SdkScopedPathCheck): LifeOSAgentToolResult => deny(check.code || "sdk-file-scope-denied", check.hint, check.code || "sdk-file-scope-denied", check.shape);
     if (this.context.signal?.aborted || this.needsConfirmation || this.deferredCall) return deny("sdk-tool-stopped");
-    if (ordinal > this.policy.maxToolCalls) return deny("sdk-tool-budget-exhausted");
+    if (this.policy.maxToolCalls !== null && ordinal > this.policy.maxToolCalls) return deny("sdk-tool-budget-exhausted");
     const descriptor = this.descriptors().find(d => d.id === id);
     if (!descriptor) return deny("sdk-tool-not-authorized");
     // Strip all unknown keys, notably model-controlled operationId. Runtime assigns

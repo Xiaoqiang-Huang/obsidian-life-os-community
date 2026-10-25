@@ -303,7 +303,7 @@ export class SdkExecutionService {
           const ordinal = ++calls;
           const pending = toolTail.then(async () => {
             check();
-            if (ordinal > control.limits.maxToolCalls) {
+            if (control.limits.maxToolCalls !== null && ordinal > control.limits.maxToolCalls) {
               return { content: [{ type: "text" as const, text: toolBudgetNotice(control.limits.maxToolCalls) }] };
             }
             if (!validate(raw)) throw sdkFault("TOOL_SCHEMA");

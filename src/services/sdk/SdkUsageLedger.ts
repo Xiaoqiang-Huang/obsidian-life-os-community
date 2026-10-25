@@ -3,7 +3,7 @@ import { consumeAgentRequest, agentBudgetChain, type AgentRequestBudget } from "
 
 export interface SdkExecutionLimits {
   maxModelRequests: number; maxOutputTokens: number; maxInputBytes: number;
-  maxDurationMs: number; maxToolCalls: number; maxOutputBytes: number;
+  maxDurationMs: number; maxToolCalls: number | null; maxOutputBytes: number;
 }
 export interface SdkLedgerUsage { inputTokens: number; outputTokens: number; totalTokens: number }
 export interface SdkLedgerEvent {
@@ -30,9 +30,14 @@ export interface SdkLedgerStore { load(): Promise<SdkLedgerEvent[]>; append(even
 export function sdkFault(code: string): Error { return new Error("SDK_EXECUTION_" + code); }
 export function validateSdkLimits(l: SdkExecutionLimits): SdkExecutionLimits {
   const caps: Record<keyof SdkExecutionLimits, number> = { maxModelRequests: 100, maxOutputTokens: 131072, maxInputBytes: 32 * 1024 * 1024,
-    maxDurationMs: 600000, maxToolCalls: 100, maxOutputBytes: 8 * 1024 * 1024 };
+    maxDurationMs: 600000, maxToolCalls: Number.MAX_SAFE_INTEGER, maxOutputBytes: 8 * 1024 * 1024 };
   if (!l) throw sdkFault("INVALID_LIMITS");
-  for (const k of Object.keys(caps) as (keyof SdkExecutionLimits)[]) if (!Number.isSafeInteger(l[k]) || l[k] < (k === "maxToolCalls" ? 0 : 1) || l[k] > caps[k]) throw sdkFault("INVALID_LIMITS");
+  for (const k of Object.keys(caps) as (keyof SdkExecutionLimits)[]) {
+    const value = l[k];
+    // Explicit, JSON-safe sentinel. Missing/NaN/Infinity must not become unbounded.
+    if (k === "maxToolCalls" && value === null) continue;
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < (k === "maxToolCalls" ? 0 : 1) || value > caps[k]) throw sdkFault("INVALID_LIMITS");
+  }
   return Object.freeze({ ...l });
 }
 export function sdkUsage(value: unknown): SdkLedgerUsage | undefined {

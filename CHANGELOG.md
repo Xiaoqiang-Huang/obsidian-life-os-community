@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.13 - 2026-10-25
+
+### Changed
+
+- Ordinary desktop and Weixin answers no longer impose a fixed 12-tool-call ceiling. The default is now an explicit `null` sentinel that passes through adapter, bridge, and execution validation; it is not Infinity and survives JSON round-trips.
+- Explicit finite tool policies and `0`/no-tools routes remain exact and keep their existing denial notices.
+- This is not unlimited model turns or unlimited spend: the 16-request chat budget, caller/parent budgets, turn timeout, output/byte limits, path scope, read-only rules, write confirmation, and manual-cancel fences are unchanged.
+- Invalid tool limits (missing, NaN, Infinity, non-integer) remain rejected; only the dedicated tool-count field accepts `null`.
+
 ## 0.4.12 - 2026-10-24
 
 ### Fixed
