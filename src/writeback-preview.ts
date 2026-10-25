@@ -43,8 +43,8 @@ export async function openWritebackPreview(
 export async function appendWritebackItems(app: App, items: WritebackItem[]): Promise<void> {
   await deliverWriteback(app, items, true);
 }
-export async function applyWritebackItems(app: App, items: WritebackItem[]): Promise<void> {
-  await deliverWriteback(app, items);
+export async function applyWritebackItems(app: App, items: WritebackItem[], assertCurrent?: () => void): Promise<void> {
+  await deliverWriteback(app, items, false, assertCurrent);
 }
 
 class WritebackPreviewModal extends Modal {

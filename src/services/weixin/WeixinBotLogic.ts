@@ -535,7 +535,7 @@ export function resolveWeixinReviewWindow(
  * merely mentions a feature intentionally falls through to normal Q&A.
  */
 export function parseWeixinLifeOSAction(value: unknown): WeixinLifeOSAction | null {
-  const source = cleanText(value, 100_000);
+  const source = cleanText(value, 100_000).replace(/^(?:(?:请(?:你)?|帮我|麻烦(?:你)?)\s*){1,3}/u, "");
   if (!source) return null;
   const command = commandAction(source);
   if (command) return command;
@@ -562,7 +562,20 @@ export function parseWeixinLifeOSAction(value: unknown): WeixinLifeOSAction | nu
     return { kind: "diary-read", date: "yesterday", source: "natural" };
   }
 
-  let match = source.match(/^(?:记日记|写日记|记录到日记|把(?:这段|下面|这些)?(?:内容)?记到日记(?:里)?|帮我记(?:到)?日记)\s*[：:,，]?\s*([\s\S]+)$/u);
+  // Both word orders occur in ordinary messages. Capture only the payload;
+  // discussion, negation and quoted examples do not start with these commands.
+  const diary = "(?:(?:今天|今日|当天)的?)?日记(?:里|中)?";
+  let match = source.match(new RegExp(`^(?:把|将)([\\s\\S]+?)(?:记入|记到|记录到|写入|追加到|保存到|存入)${diary}[。！!\\s]*$`, "u"))
+    || source.match(new RegExp(`^(?:(?:把|将)(?:这段|下面|这些)?(?:内容)?)?(?:记入|记到|记录到|写入|追加到|保存到)${diary}\\s*[：:,，]\\s*([\\s\\S]+)$`, "u"));
+  if (match && match[1].trim()) return { kind: "diary-add", content: match[1].trim(), source: "natural" };
+  match = source.match(/^(?:把|将)([\s\S]+?)(?:添加到|加入|记为|保存为)(?:待办|任务)(?:列表)?[。！!\s]*$/u);
+  if (match) {
+    const task = parseNaturalTaskPayload(match[1]);
+    return { kind: "task-add", title: task.title, ...(task.due ? { due: task.due } : {}), source: "natural" };
+  }
+  match = source.match(/^(?:把|将)([\s\S]+?)(?:保存到|存入|加入|收藏到)知识库[。！!\s]*$/u);
+  if (match) return { kind: "knowledge-save", title: "微信知识", content: match[1].trim(), source: "natural" };
+  match = source.match(/^(?:记日记|写日记|记录到日记|把(?:这段|下面|这些)?(?:内容)?记到日记(?:里)?|帮我记(?:到)?日记)\s*[：:,，]?\s*([\s\S]+)$/u);
   if (match) return { kind: "diary-add", content: match[1].trim(), source: "natural" };
   match = source.match(/^(?:添加|新建|创建|帮我加|记下)(?:一个|一条)?(?:待办|任务)\s*[：:,，]?\s*([\s\S]+)$/u);
   if (match) {

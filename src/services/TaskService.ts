@@ -55,7 +55,7 @@ export interface TaskBatchUpdate {
 }
 
 export class TaskService {
-  constructor(private app: App, private fs: FileSystemService, private transaction?: TaskWriteDraft) {}
+  constructor(private app: App, private fs: FileSystemService, private transaction?: TaskWriteDraft, private assertCurrent?: () => void) {}
 
   private get tx(): TaskWriteDraft {
     if (!this.transaction) throw new Error("任务写入必须先进入协调层。");
@@ -64,7 +64,7 @@ export class TaskService {
 
   private async write<T>(operation: string, run: (service: TaskService) => Promise<T>): Promise<T> {
     const result = await withTaskWrite(this.app, this.fs.path("Tasks"), operation,
-      draft => run(new TaskService(this.app, this.fs, draft)));
+      draft => run(new TaskService(this.app, this.fs, draft, this.assertCurrent)), this.assertCurrent);
     if (result.value && typeof result.value === "object" && "succeeded" in result.value) {
       Object.assign(result.value, { receipt: result.receipt });
     }

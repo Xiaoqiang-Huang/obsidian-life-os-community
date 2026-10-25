@@ -117,14 +117,16 @@ async function current(app: App, path: string): Promise<string | null> {
 function checkRecoveryCancellation(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error("任务恢复检查已取消；尚未开始恢复写入。");
 }
-async function compareAndSet(app: App, path: string, before: string | null, after: string, signal?: AbortSignal): Promise<void> {
+async function compareAndSet(app: App, path: string, before: string | null, after: string, signal?: AbortSignal, assertCurrent?: () => void): Promise<void> {
   checkRecoveryCancellation(signal);
+  assertCurrent?.();
   if (typeof app.vault.process !== "function") throw new Error("当前 Obsidian 不支持安全任务写入，请升级后重试。");
   const file = app.vault.getAbstractFileByPath(path);
   if (before === null) {
     if (file) throw new Error(`文件已被创建，未覆盖：${path}`);
     await ensureFolder(app, path.slice(0, path.lastIndexOf("/")));
     checkRecoveryCancellation(signal);
+    assertCurrent?.();
     await app.vault.create(path, after);
   } else {
     if (!(file instanceof TFile)) {
@@ -142,10 +144,12 @@ async function compareAndSet(app: App, path: string, before: string | null, afte
       throw new Error(`文件已被删除或替换：${path}`);
     }
     checkRecoveryCancellation(signal);
+    assertCurrent?.();
     await app.vault.process(file, value => {
       // Obsidian can queue process() itself. Cancellation before this atomic
       // callback must still prevent the first persisted compensation.
       checkRecoveryCancellation(signal);
+      assertCurrent?.();
       if (file.path !== path || app.vault.getAbstractFileByPath(path) !== file || value !== before) {
         throw new Error(`文件内容已变化，未覆盖：${path}`);
       }
@@ -324,7 +328,8 @@ export class TaskWriteDraft {
     if (this.exists(path)) throw new Error(`备份文件已存在：${path}`);
     await this.modify(await this.file(path), text);
   }
-  async commit(operation: string): Promise<TaskWriteReceipt> {
+  async commit(operation: string, assertCurrent?: () => void): Promise<TaskWriteReceipt> {
+    assertCurrent?.();
     const changes: Change[] = [];
     for (const [path, e] of this.entries) {
       if (await current(this.app, path) !== e.before) throw new Error(`文件内容已变化，任务未写入：${path}`);
@@ -338,9 +343,12 @@ export class TaskWriteDraft {
     const path = taskJournalPath(this.root), prepared = encode(j);
     // Failures here cannot remove any task; a post-create rejection leaves an
     // all-before journal which the next recovery safely terminates.
-    await compareAndSet(this.app, path, await current(this.app, path), prepared);
+    await compareAndSet(this.app, path, await current(this.app, path), prepared, undefined, assertCurrent);
     try {
-      for (const c of changes) await compareAndSet(this.app, c.path, c.before, c.after);
+      // Fence the first actual task commit even when Vault.process is queued.
+      // After it starts, finish/compensate the entire transaction atomically;
+      // cancellation never abandons a half-written task/done/deletion ledger.
+      for (const [index, c] of changes.entries()) await compareAndSet(this.app, c.path, c.before, c.after, undefined, index === 0 ? assertCurrent : undefined);
       for (const [target, e] of this.entries) {
         if (await current(this.app, target) !== e.after) throw new Error(`提交期间文件已变化：${target}`);
       }
@@ -366,14 +374,16 @@ export class TaskWriteDraft {
     }
   }
 }
-export async function withTaskWrite<T>(app: App, root: string, operation: string, run: (draft: TaskWriteDraft) => Promise<T>): Promise<{ value: T; receipt: TaskWriteReceipt }> {
+export async function withTaskWrite<T>(app: App, root: string, operation: string, run: (draft: TaskWriteDraft) => Promise<T>, assertCurrent?: () => void): Promise<{ value: T; receipt: TaskWriteReceipt }> {
   const state = stateFor(app, root);
   return enqueue(state, async () => {
+    assertCurrent?.();
     requireCurrentDirectory(state);
     await recover(app, root);
+    assertCurrent?.();
     const draft = new TaskWriteDraft(app, root);
     const value = await run(draft);
-    const receipt = await draft.commit(operation);
+    const receipt = await draft.commit(operation, assertCurrent);
     state.ready = true;
     return { value, receipt };
   });

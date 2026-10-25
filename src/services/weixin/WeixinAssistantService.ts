@@ -55,6 +55,8 @@ import {
   type LifeOSAgentBuildMessagesInput
 } from "../LifeOSAgentService";
 import { parseChatMarkdown } from "../lifeos-logic";
+import type { SdkChannelWritebackTool } from "../sdk/SdkChannelInput";
+import { hasLifeOSWriteIntent } from "../agent/AgentWritebackPolicy";
 import { saveTranscriptMerged, type TranscriptAdapter } from "./ConversationTranscript";
 import { ProjectDocumentService } from "../ProjectDocumentService";
 import { ProjectService } from "../ProjectService";
@@ -893,7 +895,11 @@ export class WeixinAssistantService {
     const delivery = stream?.sendReasoning
       ? new WeixinAnswerStream(stream.sendReasoning, `reasoning-${effectiveRequest.messageId}`, 1200)
       : null;
+    const channelWriteback = this.settings.weixinPermissionMode && this.settings.weixinPermissionMode !== "read-only"
+      ? this.createChannelWriteback(effectiveRequest, scopedProject || boundProject || configuredProject)
+      : undefined;
     const deepOptions = {
+      channelWriteback: channelWriteback?.tool,
       approval: prepared.channelApproval,
       ...(sdkTurnBudget ? { requestBudget: sdkTurnBudget } : {}),
       webSearchMode: channelWebMode,
@@ -920,8 +926,16 @@ export class WeixinAssistantService {
           }
         }, stream.signal)
         : await this.agent.complete(prepared, deepOptions);
+    } catch (error) {
+      const receipt = channelWriteback?.result();
+      if (!receipt) throw error;
+      return { ...receipt, conversationPath: await this.recordOperationalConversation(effectiveRequest, receipt.reply) };
     } finally {
       await delivery?.finishReasoning(stream?.signal.aborted ? "interrupted" : "completed");
+    }
+    const writeReceipt = channelWriteback?.result();
+    if (writeReceipt) {
+      return { ...writeReceipt, conversationPath: await this.recordOperationalConversation(effectiveRequest, writeReceipt.reply) };
     }
     if (!response.ok || !response.text.trim()) {
       // KB-13B: when the turn died after the user's own link could not be read,
@@ -935,6 +949,12 @@ export class WeixinAssistantService {
     }
 
     const parsed = extractWeixinWritebackEnvelope(response.text);
+    if (hasLifeOSWriteIntent(effectiveRequest.content) && !parsed.envelope) {
+      // Model prose is not a persistence receipt. Do not report a successful
+      // write when no host write operation or durable proposal was observed.
+      const reply = "本次尚未执行写入：没有收到宿主写回回执。请明确要保存的正文和目标后重试；未自动重复调用 AI。";
+      return { reply, writebackStatus: "blocked", conversationPath: await this.recordOperationalConversation(effectiveRequest, reply) };
+    }
     if (this.metricTrace) this.metricTrace.toolCount = response.toolResults.length;
     let visibleReply = parsed.visibleText || "处理完成。";
     const answerCheck: WeixinAnswerCheck = { stage: "answer-check", failureKind: "none", repair: "not-needed", issues: [] };
@@ -963,7 +983,7 @@ export class WeixinAssistantService {
         parsed.envelope
       );
       writebackStatus = handled.status;
-      visibleReply = [visibleReply, handled.note].filter(Boolean).join("\n\n");
+      visibleReply = handled.note; // Only the durable receipt may claim a write.
     }
     visibleReply = this.formatCheckedWeixinReply(visibleReply, answerCheck) || "处理完成。";
     // KB-13B: one honest footnote when this successful reply omitted pages that
@@ -1949,10 +1969,20 @@ export class WeixinAssistantService {
 
   private async handleLifeOSAction(
     request: WeixinInboundRequest,
-    action: WeixinLifeOSAction
+    action: WeixinLifeOSAction,
+    assertCurrent?: () => void,
+    hostProject?: LifeOSProject | null
   ): Promise<WeixinAssistantResponse> {
-    const project = await this.resolveProject(request);
+    const project = hostProject === undefined ? await this.resolveProject(request) : hostProject;
+    assertCurrent?.();
     const tasks = new TaskService(this.app, this.fs);
+    const loadScopedTasks = async () => {
+      const open = await tasks.loadOpenTasks();
+      return project ? open.filter(task => task.projectId === project.id) : open;
+    };
+    const mutate: typeof this.prepareMutation = (req, scopedProject, summary, payload, options = {}) => this.prepareMutation(req, scopedProject, summary, payload, {
+      ...options, assertCurrent: () => { assertCurrent?.(); options.assertCurrent?.(); }
+    });
     if (action.kind === "diary-read") {
       const date = action.date === "today"
         ? weixinLocalDate(request.timestamp)
@@ -1971,7 +2001,7 @@ export class WeixinAssistantService {
       };
     }
     if (action.kind === "task-list") {
-      const open = await tasks.loadOpenTasks();
+      const open = await loadScopedTasks();
       const visible = open.slice(0, 30);
       return { reply: visible.length > 0
         ? [
@@ -2009,7 +2039,7 @@ export class WeixinAssistantService {
       if (this.settings.weixinPermissionMode === "read-only") {
         return { reply: `${digest.draft}\n\n当前微信 Bot 为只读模式，以上内容仅供预览，没有写入日记。` };
       }
-      const mutation = await this.prepareMutation(request, project, `更新 ${digest.date} 的 Life OS 日终整理`, {
+      const mutation = await mutate(request, project, `更新 ${digest.date} 的 Life OS 日终整理`, {
         action: { kind: "daily-digest-save", digest }
       });
       mutation.reply = [digest.draft, mutation.reply].filter(Boolean).join("\n\n");
@@ -2027,9 +2057,9 @@ export class WeixinAssistantService {
     if (action.kind === "diary-add") {
       const content = await this.materializeMediaActionText(request, action.content, "把图片内容整理成一段忠实、简洁的日记记录；不要猜测看不见的信息。");
       if (!content) return { reply: "请告诉我要记录的内容；也可以先发送图片，再说“把这张图记到日记里”。" };
-      const item = this.writebackItem({ kind: "daily", title: "微信记录", content, target: "" }, project);
+      const item = this.writebackItem({ kind: "daily", title: "微信记录", content, target: "" }, project, request);
       return item
-        ? this.prepareMutation(request, project, `写入今日日记：${this.preview(content)}`, { item })
+        ? mutate(request, project, `写入今日日记：${this.preview(content)}`, { item })
         : { reply: "无法确定今日日记路径，未写入。" };
     }
 
@@ -2046,7 +2076,7 @@ export class WeixinAssistantService {
         reminderRouteRef = await this.ensureReminderRoute(request);
       }
       const summary = `新增待办：${this.preview(title, 120)}${reminderDueAt ? `\n提醒：${this.localDateTime(reminderDueAt)}` : ""}`;
-      return this.prepareMutation(request, project, summary, {
+      return mutate(request, project, summary, {
         action: {
           kind: "task-add",
           title: title.replace(/\r?\n+/g, " ").slice(0, 500),
@@ -2060,17 +2090,17 @@ export class WeixinAssistantService {
     }
 
     if (action.kind === "task-complete") {
-      const open = await tasks.loadOpenTasks();
+      const open = await loadScopedTasks();
       const selected = this.resolveTask(open, action.query);
       if (selected.error) return { reply: selected.error };
       if (!selected.task) return { reply: "没有找到要完成的待办。" };
-      return this.prepareMutation(request, project, `完成待办：${selected.task.text}`, {
+      return mutate(request, project, `完成待办：${selected.task.text}`, {
         action: { kind: "task-complete", taskLine: selected.task.line, title: selected.task.text }
       });
     }
 
     if (action.kind === "task-update") {
-      const open = await tasks.loadOpenTasks();
+      const open = await loadScopedTasks();
       const selected = this.resolveTask(open, action.query);
       if (selected.error) return { reply: selected.error };
       if (!selected.task) return { reply: "没有找到要修改的待办。" };
@@ -2082,7 +2112,7 @@ export class WeixinAssistantService {
         if (parsed.error) return { reply: parsed.error };
         dueDate = this.localDate(parsed.dueAt);
       }
-      return this.prepareMutation(
+      return mutate(
         request,
         project,
         `修改待办：${selected.task.text} → ${title}${dueDate ? `（截止 ${dueDate}）` : ""}`,
@@ -2091,19 +2121,20 @@ export class WeixinAssistantService {
     }
 
     if (action.kind === "task-delete") {
-      const open = await tasks.loadOpenTasks();
+      const open = await loadScopedTasks();
       const selected = this.resolveTask(open, action.query);
       if (selected.error) return { reply: selected.error };
       if (!selected.task) return { reply: "没有找到要删除的待办。" };
-      return this.prepareMutation(request, project, `删除待办：${selected.task.text}`, {
+      return mutate(request, project, `删除待办：${selected.task.text}`, {
         action: { kind: "task-delete", taskLine: selected.task.line, title: selected.task.text }
       });
     }
 
     if (action.kind === "task-clear-all") {
-      const open = await tasks.loadOpenTasks();
+      if (project) return { reply: "项目会话不能清空全局待办；请切换到全部项目并单独确认。", writebackStatus: "blocked" };
+      const open = await loadScopedTasks();
       if (open.length === 0) return { reply: "当前没有未完成待办，无需清空。" };
-      return this.prepareMutation(
+      return mutate(
         request,
         project,
         `完整备份后清空全部 ${open.length} 条未完成待办`,
@@ -2114,7 +2145,7 @@ export class WeixinAssistantService {
 
     if (action.kind === "review-generate") {
       const result = await this.generatePeriodReview(action.period, action.start, action.end, request.timestamp, request);
-      const mutation = await this.prepareMutation(request, project, `保存${this.periodLabel(action.period)}复盘`, {
+      const mutation = await mutate(request, project, `保存${this.periodLabel(action.period)}复盘`, {
         action: { kind: "review-save", facts: result.facts, draft: result.draft }
       });
       mutation.reply = [result.draft, mutation.reply].filter(Boolean).join("\n\n");
@@ -2142,7 +2173,7 @@ export class WeixinAssistantService {
         "",
         readable
       ].join("\n"), "web_clipper", action.url, this.operationKey(request, "link"), request.timestamp);
-      return this.prepareMutation(request, project, `收藏链接到知识库：${title}`, { item });
+      return mutate(request, project, `收藏链接到知识库：${title}`, { item });
     }
 
     if (action.kind === "knowledge-save") {
@@ -2160,7 +2191,7 @@ export class WeixinAssistantService {
         this.operationKey(request, "knowledge"),
         request.timestamp
       );
-      return this.prepareMutation(request, project, `存入知识库：${title}`, { item });
+      return mutate(request, project, `存入知识库：${title}`, { item });
     }
 
     if (action.kind === "reminder-add") {
@@ -2169,7 +2200,7 @@ export class WeixinAssistantService {
       if (parsed.error) return { reply: parsed.error };
       if (!action.content.trim()) return { reply: "提醒内容不能为空。例如：“明天 09:00 提醒我提交周报”。" };
       const routeRef = await this.ensureReminderRoute(request);
-      return this.prepareMutation(request, project, `创建提醒：${this.localDateTime(parsed.dueAt)}｜${action.content}`, {
+      return mutate(request, project, `创建提醒：${this.localDateTime(parsed.dueAt)}｜${action.content}`, {
         action: {
           kind: "reminder-add",
           routeRef,
@@ -2187,7 +2218,7 @@ export class WeixinAssistantService {
       if (!reminder) return { reply: "没有找到属于当前微信会话的提醒。" };
       if (reminder.status === "delivered") return { reply: "该提醒已经发送，不能再取消。" };
       if (reminder.status === "cancelled") return { reply: "该提醒已取消。" };
-      return this.prepareMutation(request, project, `取消提醒：${action.id}｜${reminder.content}`, {
+      return mutate(request, project, `取消提醒：${action.id}｜${reminder.content}`, {
         action: { kind: "reminder-cancel", routeRef, id: action.id }
       });
     }
@@ -2195,15 +2226,27 @@ export class WeixinAssistantService {
     return { reply: "暂时无法确定要执行的操作。请用一句自然语言说明目标、内容和时间。" };
   }
 
+  private assertWriteAuthorization(request: WeixinInboundRequest): void {
+    if (!this.settings.weixinBotEnabled || this.settings.weixinPermissionMode === "read-only" || !this.canWriteToLifeOS()
+      || !evaluateWeixinAccess({ senderPolicy: this.settings.weixinSenderPolicy, approvedSenders: this.settings.weixinApprovedSenders, allowedGroups: this.settings.weixinAllowedGroups }, request).allowed) {
+      throw new Error("微信写入授权已失效，未执行新的写入。");
+    }
+  }
+
   private async prepareMutation(
     request: WeixinInboundRequest,
     project: LifeOSProject | null,
     summary: string,
     payload: { item?: WritebackItem; action?: WeixinProposalAction },
-    options: { forceConfirm?: boolean } = {}
+    options: { forceConfirm?: boolean; assertCurrent?: () => void } = {}
   ): Promise<WeixinAssistantResponse> {
     if (!this.canWriteToLifeOS()) return this.writeEntitlementBlockedResponse();
     if (this.settings.weixinPermissionMode === "read-only") return { reply: "当前权限为只读，未执行写入。", writebackStatus: "blocked" };
+    const assertCurrent = () => {
+      options.assertCurrent?.();
+      this.assertWriteAuthorization(request);
+    };
+    assertCurrent();
     const executablePayload = this.withMutationOperationId(request, payload);
     const isApprovedPrivate = !request.isGroup
       && this.settings.weixinApprovedSenders.some((sender) => sender.key === weixinSenderKey(request));
@@ -2215,7 +2258,7 @@ export class WeixinAssistantService {
       trustedPrivate: isApprovedPrivate
     });
     if (canAutoApply) {
-      const detail = await this.executeProposalPayload(executablePayload);
+      const detail = await this.executeProposalPayload(executablePayload, assertCurrent);
       return { reply: `${summary}\n已完成。${detail ? `\n${detail}` : ""}`, writebackStatus: "applied" };
     }
     const proposal = await this.saveMutationProposal(request, project, summary, executablePayload);
@@ -2229,7 +2272,8 @@ export class WeixinAssistantService {
     };
   }
 
-  private async executeProposalPayload(payload: { item?: WritebackItem; action?: WeixinProposalAction }): Promise<string> {
+  private async executeProposalPayload(payload: { item?: WritebackItem; action?: WeixinProposalAction }, assertCurrent?: () => void): Promise<string> {
+    assertCurrent?.();
     if (!this.canWriteToLifeOS()) throw new Error(this.writeEntitlementBlockedMessage());
     if (payload.item) {
       const marker = `lifeos-weixin-writeback:${payload.item.id}`;
@@ -2244,19 +2288,22 @@ export class WeixinAssistantService {
           throw new Error("目标文件在确认前已出现，为避免覆盖现有内容，请重新执行该操作。");
         }
       }
-      await applyWritebackItems(this.app, [item]);
+      assertCurrent?.();
+      if (!this.canWriteToLifeOS()) throw new Error(this.writeEntitlementBlockedMessage());
+      await applyWritebackItems(this.app, [item], assertCurrent);
       return `已写入：${item.targetPath}`;
     }
     const action = payload.action;
     if (!action) throw new Error("待执行内容为空。");
     if (action.kind === "task-add") {
-      const service = new TaskService(this.app, this.fs);
+      const service = new TaskService(this.app, this.fs, undefined, assertCurrent);
       const source = action.operationId ? `weixin-${action.operationId.toLowerCase()}` : "weixin";
       const alreadyCreated = action.operationId
         ? (await service.loadAllTasks()).some((item) => item.line.includes(`source:${source}`))
         : false;
       if (!alreadyCreated) {
-        await service.createTask({
+        assertCurrent?.();
+      await service.createTask({
           title: action.title,
           projectId: action.projectId,
           dueDate: action.dueDate,
@@ -2264,7 +2311,8 @@ export class WeixinAssistantService {
         });
       }
       if (action.reminderRouteRef && action.reminderDueAt) {
-        const reminder = await this.reminders.create(
+        assertCurrent?.();
+      const reminder = await this.reminders.create(
           action.reminderRouteRef,
           action.reminderDueAt,
           `待办：${action.title}`,
@@ -2275,7 +2323,7 @@ export class WeixinAssistantService {
       return "已加入未完成待办。";
     }
     if (action.kind === "task-complete") {
-      const service = new TaskService(this.app, this.fs);
+      const service = new TaskService(this.app, this.fs, undefined, assertCurrent);
       const current = (await service.loadOpenTasks()).find((item) => item.line === action.taskLine);
       if (!current) {
         const blockId = action.taskLine.match(/\^([^\s]+)$/u)?.[1] || "";
@@ -2283,11 +2331,12 @@ export class WeixinAssistantService {
         if (completed) return "该待办已经完成。";
         throw new Error("待办已变化或已完成，请重新查看待办后操作。");
       }
+      assertCurrent?.();
       await service.completeTask(current);
       return "已归档到已完成待办。";
     }
     if (action.kind === "task-update") {
-      const service = new TaskService(this.app, this.fs);
+      const service = new TaskService(this.app, this.fs, undefined, assertCurrent);
       const open = await service.loadOpenTasks();
       const current = open.find((item) => item.line === action.taskLine);
       if (!current) {
@@ -2298,11 +2347,12 @@ export class WeixinAssistantService {
         }
         throw new Error("待办已变化或已不存在，请重新查看待办后操作。");
       }
+      assertCurrent?.();
       await service.updateOpenTask(current, { title: action.title, dueDate: action.dueDate });
       return "已更新未完成待办。";
     }
     if (action.kind === "task-delete") {
-      const service = new TaskService(this.app, this.fs);
+      const service = new TaskService(this.app, this.fs, undefined, assertCurrent);
       const open = await service.loadOpenTasks();
       const current = open.find((item) => item.line === action.taskLine);
       if (!current) {
@@ -2312,11 +2362,12 @@ export class WeixinAssistantService {
         }
         throw new Error("待办已变化或已不存在，请重新查看待办后操作。");
       }
+      assertCurrent?.();
       await service.deleteOpenTask(current);
       return "已删除未完成待办。";
     }
     if (action.kind === "task-clear-all") {
-      const service = new TaskService(this.app, this.fs);
+      const service = new TaskService(this.app, this.fs, undefined, assertCurrent);
       const open = await service.loadOpenTasks();
       if (open.length === 0) return "当前没有未完成待办；该操作已经完成或无需执行。";
       const expected = [...action.taskLines].sort();
@@ -2324,6 +2375,7 @@ export class WeixinAssistantService {
       if (expected.length !== actual.length || expected.some((line, index) => line !== actual[index])) {
         throw new Error("未完成待办在确认前已变化。为避免误删，请重新发起清空操作并再次确认。");
       }
+      assertCurrent?.();
       const result = await service.archiveAndClearOpenTasks();
       return `已完整备份并清空 ${result.cleared} 条未完成待办。备份文件：${result.backupPath}`;
     }
@@ -2352,10 +2404,12 @@ export class WeixinAssistantService {
       return `已更新当日日记的 Life OS 日终整理：${path}`;
     }
     if (action.kind === "reminder-add") {
+      assertCurrent?.();
       const reminder = await this.reminders.create(action.routeRef, action.dueAt, action.content, action.reminderId);
       return `提醒编号：${reminder.id}`;
     }
-    const reminder = await this.reminders.cancel(action.routeRef, action.id);
+    assertCurrent?.();
+      const reminder = await this.reminders.cancel(action.routeRef, action.id);
     if (!reminder) throw new Error("提醒不存在或不属于当前微信会话。");
     return `已取消提醒：${action.id}`;
   }
@@ -2416,7 +2470,14 @@ export class WeixinAssistantService {
   ): Promise<string> {
     const images = getWeixinImageContentParts(request.media);
     const base = baseText.trim();
-    if (images.length === 0) return base;
+    if (images.length === 0) {
+      if (/^(?:你|我)?(?:刚才|刚刚|之前|上面|前面|上一条|这段|这些|以上)(?:的|发的|说的)?(?:内容|回答|回复|记录|文字|消息)?[。！!\s]*$/u.test(base)) {
+        const history = await this.loadConversation(request);
+        const role = base.startsWith("你") ? "ai" : base.startsWith("我") ? "user" : "";
+        return [...history].reverse().find(message => (!role || message.role === role) && message.content.trim() && message.content !== request.content)?.content.trim() || "";
+      }
+      return base;
+    }
     const response = await this.agent.workflowClient({ purpose: "weixin-media-action", channel: "weixin", accountScopeId: request.accountId || "default", executionId: JSON.stringify([request.conversationId, request.threadId, request.senderId, request.messageId, "weixin-media-action"]), approval: () => this.settings.weixinBotEnabled && evaluateWeixinAccess({ senderPolicy: this.settings.weixinSenderPolicy, approvedSenders: this.settings.weixinApprovedSenders, allowedGroups: this.settings.weixinAllowedGroups }, request).allowed }).complete({
       model: resolveVisionSettings(this.settings)?.aiModel || undefined,
       reasoningEffort: this.settings.aiReasoningEffort,
@@ -2811,6 +2872,8 @@ export class WeixinAssistantService {
     request: WeixinInboundRequest,
     payload: { item?: WritebackItem; action?: WeixinProposalAction }
   ): { item?: WritebackItem; action?: WeixinProposalAction } {
+    if (payload.item) payload = { ...payload, item: { ...payload.item,
+      id: `weixin-${this.stableHash(`${this.operationKey(request, "item")}\n${payload.item.id}`)}` } };
     if (!payload.action || payload.action.kind === "reminder-cancel" || payload.action.operationId) return payload;
     return {
       ...payload,
@@ -2911,7 +2974,8 @@ export class WeixinAssistantService {
     const writebackRule = this.settings.weixinPermissionMode === "read-only"
       ? "当前远程渠道是只读模式。不得输出 lifeos_writeback 标记；若用户要求写入，说明需在设置中提高权限。"
       : [
-        "只有用户在本条消息中明确要求写入 Life OS 时，才允许在回复末尾输出一个机器控制标记。",
+        "只有用户在本条消息中明确要求写入 Life OS 时才能写回。优先调用 weixin-writeback 宿主工具；原始 SDK 文件工具只读不等于此持久化入口不可写。以工具回执为准，待确认不得声称已保存。若已调用宿主写回工具，不得再输出写回标记。",
+        "没有宿主写回工具时，才允许在回复末尾输出一个机器控制标记。",
         "标记格式：<lifeos_writeback>{\"kind\":\"daily|knowledge|memory|project-document\",\"title\":\"标题\",\"target\":\"相对文件名\",\"content\":\"完整 Markdown\"}</lifeos_writeback>。",
         "标记之外仍需给用户可读回复；不要展示或解释控制标记。目标不明确时先提问，不输出标记。"
       ].join("\n");
@@ -3202,6 +3266,78 @@ export class WeixinAssistantService {
     return tail.length > 18 ? `${tail.slice(0, 8)}…${tail.slice(-6)}` : tail;
   }
 
+  private createChannelWriteback(request: WeixinInboundRequest, project: LifeOSProject | null): {
+    tool: SdkChannelWritebackTool; result: () => WeixinAssistantResponse | undefined;
+  } | undefined {
+    const authorized = () => this.settings.weixinBotEnabled && this.settings.weixinPermissionMode !== "read-only"
+      && this.canWriteToLifeOS() && hasLifeOSWriteIntent(request.content)
+      && evaluateWeixinAccess({ senderPolicy: this.settings.weixinSenderPolicy, approvedSenders: this.settings.weixinApprovedSenders, allowedGroups: this.settings.weixinAllowedGroups }, request).allowed;
+    if (!authorized()) return undefined;
+    let result: WeixinAssistantResponse | undefined;
+    let executionInput: string | undefined;
+    let execution: Promise<import("../agent/LifeOSAgentTypes").LifeOSAgentToolResult> | undefined;
+    const tool: SdkChannelWritebackTool = {
+      name: "weixin-writeback",
+      description: "微信宿主持久化执行入口：明确命令可写入当天日记、知识库、记忆或已绑定项目文档；可新增/修改/完成待办、创建/取消当前会话提醒。task-update/complete用query指定待办序号或关键词，reminder-add用when指定时间，reminder-cancel用query指定WR编号；content为正文或标题。不负责批量删除或模型生成。原始文件工具仍只读；按渠道权限执行或保存持久化待确认提案，以实际回执为准，pending不得说已执行。同一入口本轮只承接一项写操作；第二项不同操作需另发消息，不能复用第一项回执。",
+      parameters: { type: "object", additionalProperties: false, required: ["kind", "content"], properties: {
+        kind: { type: "string", enum: ["daily", "knowledge", "memory", "project-document", "task-add", "task-update", "task-complete", "reminder-add", "reminder-cancel"] },
+        title: { type: "string", maxLength: 200 }, content: { type: "string", minLength: 1, maxLength: 100000 }, target: { type: "string", maxLength: 400 },
+        query: { type: "string", maxLength: 500 }, when: { type: "string", maxLength: 120 }
+      } },
+      authorize: (_raw, call) => {
+        call.assertCurrent();
+        return authorized() && call.scope.accountScopeId === (request.accountId || "default")
+          && call.scope.sessionId === `weixin:${weixinConversationKey(request)}`;
+      },
+      execute: async (raw, call) => {
+        const assertCurrent = () => {
+          call.assertCurrent();
+          if (call.signal.aborted || !authorized() || call.scope.accountScopeId !== (request.accountId || "default")
+            || call.scope.sessionId !== `weixin:${weixinConversationKey(request)}`) throw new Error("微信写回请求已取消或授权失效。");
+        };
+        assertCurrent();
+        const signature = JSON.stringify([raw.kind, raw.title || "", raw.content, raw.target || "", raw.query || "", raw.when || ""]);
+        if (execution && executionInput !== signature) throw new Error("本轮已有一项写操作，不能将旧回执用于另一操作；请单独发送下一项命令。");
+        if (!execution) {
+          executionInput = signature;
+          execution = (async () => {
+          if (typeof raw.content !== "string" || !raw.content.trim()) throw new Error("写入正文或标题无效。");
+          const content = raw.content.trim(), query = String(raw.query || "").trim(), when = String(raw.when || "").trim();
+          let action: WeixinLifeOSAction | undefined;
+          switch (raw.kind) {
+            case "task-add": action = { source: "semantic", kind: "task-add", title: String(raw.title || content), ...(when ? { due: when } : {}) }; break;
+            case "task-update":
+              if (!query) throw new Error("修改待办需要原待办序号或关键词。");
+              action = { source: "semantic", kind: "task-update", query, title: String(raw.title || content), ...(when ? { due: when } : {}) }; break;
+            case "task-complete": action = { source: "semantic", kind: "task-complete", query: query || content }; break;
+            case "reminder-add":
+              if (!when) throw new Error("创建提醒需要明确时间，未创建。");
+              action = { source: "semantic", kind: "reminder-add", when, content }; break;
+            case "reminder-cancel": action = { source: "semantic", kind: "reminder-cancel", id: (query || content).toUpperCase() }; break;
+          }
+          if (action) {
+            // Reuse durable typed actions and the real sender-bound reminder
+            // route. Text has already been prepared by this SDK request; do not
+            // re-enter image/model generation while its tool slot is occupied.
+            result = await this.handleLifeOSAction({ ...request, media: [] }, action, assertCurrent, project);
+            if (!result.writebackStatus) result = { ...result, writebackStatus: "blocked" };
+          } else {
+            if (!["daily", "knowledge", "memory", "project-document"].includes(String(raw.kind))) throw new Error("当前渠道不支持该操作类型。");
+            const item = this.writebackItem({ kind: raw.kind as WeixinWritebackEnvelope["kind"], title: String(raw.title || "微信记录"), target: String(raw.target || ""), content }, project, request);
+            result = item ? await this.prepareMutation(request, project, `写入${item.title}：${this.preview(content)}`, { item }, { assertCurrent })
+              : { reply: "写入目标不明确或不在安全目录内，未写入。", writebackStatus: "blocked" };
+          }
+          return { callId: call.operationId, toolId: "weixin-writeback", ok: result.writebackStatus !== "blocked", output: result.reply,
+            durationMs: 0, needsConfirmation: result.writebackStatus === "pending", confirmationSummary: result.reply,
+            metadata: { writebackStatus: result.writebackStatus || "blocked" } };
+          })();
+        }
+        return execution;
+      }
+    };
+    return { tool, result: () => result };
+  }
+
   private async handleWriteback(
     request: WeixinInboundRequest,
     project: LifeOSProject | null,
@@ -3213,29 +3349,15 @@ export class WeixinAssistantService {
     if (!this.canWriteToLifeOS()) {
       return { status: "blocked", note: this.writeEntitlementBlockedMessage() };
     }
-    const item = this.writebackItem(envelope, project);
-    if (!item) {
-      return { status: "blocked", note: "写入目标不明确或不在 Life OS 安全目录内，未执行写入。" };
-    }
-    const canAutoApply = mayAutoApplyAgentWrite({
-      mode: this.settings.weixinPermissionMode,
-      explicitIntent: this.isExplicitWriteRequest(request.content),
-      trustedPrivate: !request.isGroup && this.settings.weixinApprovedSenders.some((sender) => sender.key === weixinSenderKey(request))
-    });
-    if (canAutoApply) {
-      const detail = await this.executeProposalPayload({ item });
-      return { status: "applied", note: detail };
-    }
-    const proposal = await this.saveWritebackProposal(request, project, item);
-    return {
-      status: "pending",
-      note: `我已准备写入：${item.title}\n请直接回复“确认”执行，或回复“取消”放弃；确认前不会修改 Life OS。`
-    };
+    const item = this.writebackItem(envelope, project, request);
+    if (!item) return { status: "blocked", note: "写入目标不明确或不在 Life OS 安全目录内，未执行写入。" };
+    const receipt = await this.prepareMutation(request, project, `准备写入：${item.title}`, { item });
+    return { status: receipt.writebackStatus || "blocked", note: receipt.reply };
   }
 
-  private writebackItem(envelope: WeixinWritebackEnvelope, project: LifeOSProject | null): WritebackItem | null {
+  private writebackItem(envelope: WeixinWritebackEnvelope, project: LifeOSProject | null, request?: WeixinInboundRequest): WritebackItem | null {
     const title = envelope.title || "微信写入";
-    const date = today();
+    const date = request ? weixinLocalDate(request.timestamp) : today();
     let targetPath = "";
     let kind: WritebackItem["kind"] = "append";
     let content = envelope.content.trim();
@@ -3259,7 +3381,7 @@ export class WeixinAssistantService {
     }
     if (!targetPath || !targetPath.startsWith(`${this.fs.root}/`)) return null;
     return {
-      id: `weixin-${this.stableHash(`${targetPath}:${content}`)}`,
+      id: `weixin-${this.stableHash(`${request ? this.operationKey(request, envelope.kind) : "legacy"}:${targetPath}:${content}`)}`,
       kind,
       title,
       content,
@@ -3354,16 +3476,16 @@ export class WeixinAssistantService {
     if (approve) {
       if (!proposal.item && !proposal.action) return { reply: "待写入记录缺少执行内容，已停止处理。" };
       try {
-        detail = await this.executeProposalPayload({ item: proposal.item, action: proposal.action });
+        detail = await this.executeProposalPayload({ item: proposal.item, action: proposal.action }, () => this.assertWriteAuthorization(request));
       } catch (error) {
-        return { reply: `确认失败，尚未标记为已执行：${this.errorMessage(error)}` };
+        return { reply: `确认失败，尚未标记为已执行：${this.errorMessage(error)}`, writebackStatus: "blocked" };
       }
     }
     proposal.status = approve ? "approved" : "denied";
     proposal.updatedAt = new Date().toISOString();
     await this.app.vault.modify(file, `${JSON.stringify(proposal, null, 2)}\n`);
     const label = proposal.summary || proposal.item?.title || proposal.action?.kind || normalizedId;
-    return { reply: approve ? `已确认执行：${label}${detail ? `\n${detail}` : ""}` : `已拒绝：${label}` };
+    return { reply: approve ? `已确认执行：${label}${detail ? `\n${detail}` : ""}` : `已拒绝：${label}`, writebackStatus: approve ? "applied" : "blocked" };
   }
 
   private proposalPath(id: string): string {
@@ -3391,7 +3513,7 @@ export class WeixinAssistantService {
   }
 
   private isExplicitWriteRequest(content: string): boolean {
-    return /(写入|保存到|记入|加入|追加到|存入|记录到|write\s+(?:to|into)|save\s+(?:to|into)|append\s+to)/iu.test(content);
+    return hasLifeOSWriteIntent(content);
   }
 
   private remoteUserContent(request: WeixinInboundRequest): string {
@@ -3404,7 +3526,7 @@ export class WeixinAssistantService {
 
   private permissionLabel(): string {
     if (this.settings.weixinPermissionMode === "explicit-auto") return "明确指定目标时自动写入";
-    if (this.settings.weixinPermissionMode === "confirm") return "自然语言授权（明确操作直接执行，推断操作先确认）";
+    if (this.settings.weixinPermissionMode === "confirm") return "写入前确认（确认前不会修改 Life OS）";
     return "只读";
   }
 

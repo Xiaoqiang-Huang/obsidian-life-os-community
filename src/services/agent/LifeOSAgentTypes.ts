@@ -116,6 +116,8 @@ export interface LifeOSAgentToolExecutionContext {
   sdkWorkflowIdentity?: string;
   /** Host-owned effective SDK catalog, never accepted from model arguments. */
   sdkAvailableToolIds?: readonly string[];
+  /** Host-owned effective catalog supplement; never accepted from model arguments. */
+  sdkHostToolDescriptors?: readonly import("../LifeOSAgentToolRegistry").LifeOSAgentToolDescriptor[];
   requestBudget?: AgentRequestBudget;
   channel: LifeOSAgentChannel;
   /** Public conversation identity used by tools, routes, logs, and UI events. */

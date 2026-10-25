@@ -51,10 +51,20 @@ export class AgentToolRuntime {
   private readonly descriptors = new Map<string, LifeOSAgentToolDescriptor>();
   private readonly executors = new Map<string, LifeOSAgentToolExecutor>();
   private readonly resultCache = new Map<string, LifeOSAgentToolResult>();
+  private cacheGeneration = 0;
   private readonly pendingWrites = new Map<string, LifeOSAgentPendingWrite>();
 
   constructor(descriptors: readonly LifeOSAgentToolDescriptor[]) {
     descriptors.forEach((descriptor) => this.descriptors.set(descriptor.id, descriptor));
+  }
+
+  /** Also called by trusted durable channel hosts, which bypass raw Runtime writes. */
+  invalidateAfterWrite(context: LifeOSAgentToolExecutionContext): void {
+    this.cacheGeneration++;
+    const sessionPrefix = `${this.runtimeSessionKey(context)}\u001f`;
+    for (const [key, result] of this.resultCache) {
+      if (key.startsWith(sessionPrefix) || this.descriptors.get(result.toolId)?.mode !== "write") this.resultCache.delete(key);
+    }
   }
 
   register(id: string, executor: LifeOSAgentToolExecutor): void {
@@ -235,6 +245,7 @@ export class AgentToolRuntime {
     if (validationError) return this.failure(call, startedAt, validationError);
     if (context.signal?.aborted) return this.failure(call, startedAt, "执行已取消。");
 
+    const cacheGeneration = this.cacheGeneration;
     const cacheKey = this.cacheKey(call, context);
     const cached = this.resultCache.get(cacheKey);
     if (cached) return { ...cached, callId: call.id, cached: true, durationMs: Date.now() - startedAt };
@@ -308,7 +319,14 @@ export class AgentToolRuntime {
       result.callId = call.id;
       if (descriptor.mode === "write") result.metadata = { ...result.metadata, operationId };
 
-      this.resultCache.set(cacheKey, result);
+      // Any successful mutation can change shared task/UI/Vault state. Drop
+      // cached observations and earlier write signatures; a read started before
+      // this write must not repopulate the cache when it eventually returns.
+      // The durable write journal remains the authority for operation replay.
+      if (descriptor.mode === "write" && result.ok) {
+        this.invalidateAfterWrite(context);
+      }
+      if (descriptor.mode === "write" || cacheGeneration === this.cacheGeneration) this.resultCache.set(cacheKey, result);
       if (this.resultCache.size > 400) this.resultCache.delete(this.resultCache.keys().next().value as string);
       return result;
     } catch (error) {

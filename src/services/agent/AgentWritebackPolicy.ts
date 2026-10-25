@@ -33,12 +33,16 @@ export function shouldRunLegacyChatWriteback(
  * reverse) because two UI/service regexes drifted apart.
  */
 export function hasLifeOSWriteIntent(value: string): boolean {
-  const text = String(value || "").replace(/\s+/gu, " ").trim();
+  // Quoted examples/data are not permission. Keep the outer imperative, e.g.
+  // 把“今天很开心”记入日记 still contains its user-authored mutation verb.
+  const text = String(value || "").replace(/“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』|"[^"]*"|'[^']*'|`[^`]*`/gu, " ").replace(/\s+/gu, " ").trim();
   if (!text) return false;
+  const directText = text.replace(/^(?:(?:请(?:你)?|帮我|麻烦(?:你)?)\s*){1,3}/u, "");
+  if (/^(?:先|暂时)?(?:不要|别|禁止|勿|无需|不需要)(?:再)?\s*(?:把|将|写|记|记录|保存|存|追加|添加|创建|修改|更新|删除|清空|收藏|提醒|叫我|设|隐藏|显示|恢复|完成|取消|清除|移除|生成|归档|沉淀)/u.test(directText)) return false;
   if (/(?:(?:隐藏|不显示|移除|去掉|收起|恢复显示|重新显示|显示).{0,16}(?:已完成|完成的).{0,12}(?:任务|待办)|(?:已完成|完成的).{0,12}(?:任务|待办).{0,16}(?:隐藏|不显示|移除|去掉|收起|恢复显示|重新显示|显示))/u.test(text)) {
     return true;
   }
-  const mutation = "(?:写入|记入|保存|存入|收藏|归档|沉淀|放到|生成|新增|添加|创建|修改|更新|完成|删除|清空|清除|移除|取消)";
+  const mutation = "(?:写入|记入|记到|记录到|追加|存到|保存|存入|收藏|归档|沉淀|放到|生成|新增|添加|创建|修改|更新|完成|删除|清空|清除|移除|取消|设置|设为)";
   const destination = "(?:今天的?日记|今日日记|日记|待办|任务|知识库|项目(?:文档|记录|交接)?|文档|记忆|复盘|周报|月报|提醒|Life\\s*OS)";
   const directActionAfterAssist = new RegExp(
     `(?:请|帮我|给我|替我|直接|现在|马上|立即|我要|需要你)(?:(?!(?:解释|说明|介绍|为什么|为何|如何|怎么|怎样)).){0,32}${mutation}`,

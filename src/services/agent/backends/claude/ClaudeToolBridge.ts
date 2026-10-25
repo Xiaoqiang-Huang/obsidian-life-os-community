@@ -91,7 +91,7 @@ export class ClaudeToolBridge {
       && (d.mode !== "write" || this.context.permissionMode !== "read-only")
       && (d.id !== "memory-search" || this.context.memoryMode !== "disabled" && this.context.memoryMode !== "temporary")
       && !d.id.startsWith("custom-") && !["tool-compose", "tool-delete"].includes(d.id)
-      && (!this.context.projectScopeId || d.family === "project" || d.family === "web" || d.family === "vault" || d.family === "skill" || d.family === "tooling" || d.family === "memory")
+      && (!this.context.projectScopeId || (d.family === "task" && d.id !== "task-clear-all") || d.id === "task-view-configure" || d.family === "project" || d.family === "web" || d.family === "vault" || d.family === "skill" || d.family === "tooling" || d.family === "memory")
       && (this.policy.allowNativeModelTools || !(d.modelCallCost && d.modelCallCost > 0)
         || this.policy.allowHostContinuations === true && SDK_HOST_CONTINUATION_TOOLS.has(d.id)
         || this.policy.allowSdkTextModelTools === true && SDK_TEXT_MODEL_TOOLS.has(d.id))

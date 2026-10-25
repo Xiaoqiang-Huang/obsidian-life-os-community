@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.15 - 2026-10-25
+
+### Added
+
+- AI agents can add, update, complete, and delete tasks within their explicit project scope, and persist task display preferences. Cross-project task access and global project-session clearing are refused.
+- Task lists are paged with total counts and a continuation position; long titles cannot truncate the JSON result and are explicitly marked when overlong.
+- Weixin hosts can add/update/complete tasks and create/cancel session reminders through the existing durable confirmation and routing path; the raw SDK remains read-only.
+
+### Fixed
+
+- Read-after-write, display toggles, and stale read caches are invalidated for the same turn; durable receipts remain idempotent across sessions and restarts.
+- Task ordinals accept only complete integers; 2FA and similar words remain keywords, and an empty query no longer selects the sole task.
+- Confirmation/execution/blocked responses reflect the actual operation instead of reusing another receipt; live entitlement, cancellation, approval, and session scope are rechecked before the first commit.
+- Inherits the earlier diary-write, SDK cleanup, Weixin formal-answer, sidebar, and unbounded tool-count fixes.
+
 ## 0.4.13 - 2026-10-25
 
 ### Changed

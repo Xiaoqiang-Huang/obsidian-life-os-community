@@ -222,7 +222,7 @@ export class SdkWorkflowAdapter {
           onToolStart: async call => { fresh(); await input.toolOptions?.onToolStart?.(call); await emit("tool-started", `执行 ${call.name}`, call.name, { callId: call.id, metadata: toolInputMetadata(call.input) }); }
         });
         const descriptors = bridge.descriptors();
-        context.sdkAvailableToolIds = descriptors.map(d => d.id);
+
         const schemas = nativeToolSchemas(descriptors);
         const tools: SdkHostTool[] = schemas.map(schema => ({ ...schema,
           authorize: (_raw, call) => { call.assertCurrent(); fresh(); permission(); const d = bridge!.descriptors().find(d => d.id === schema.name); return !!d && !bridge!.needsConfirmation && !bridge!.deferredCall && (d.mode !== "write" || context.permissionMode !== "read-only"); },
@@ -240,6 +240,39 @@ export class SdkWorkflowAdapter {
             return receipt;
           }
         }));
+        // Remote writes are requests to the host's durable proposal adapter,
+        // never direct Runtime writes or in-memory remote confirmations.
+        const channelWriteback = input.enableTools !== false && maxTools !== 0 && context.channel === "weixin" && input.channelWriteback?.name === "weixin-writeback"
+          && this.host.hasWriteEntitlement() ? input.channelWriteback : undefined;
+        if (channelWriteback) tools.push({
+          ...channelWriteback,
+          authorize: async (raw, call) => {
+            call.assertCurrent(); fresh();
+            if (!this.host.hasWriteEntitlement()) return false;
+            const allowed = await channelWriteback.authorize(raw, call);
+            call.assertCurrent(); fresh();
+            return this.host.hasWriteEntitlement() && allowed;
+          },
+          execute: async (raw, call) => {
+            call.assertCurrent(); fresh();
+            if (!this.host.hasWriteEntitlement() || !await channelWriteback.authorize(raw, call)) throw Error("SDK_CHANNEL_WRITE_DENIED");
+            call.assertCurrent(); fresh();
+            const receipt = await channelWriteback.execute(raw, call);
+            if (receipt.ok && !receipt.needsConfirmation && receipt.metadata?.writebackStatus === "applied") this.host.tools.invalidateAfterWrite(context);
+            bridge!.results.push(receipt);
+            if (receipt.needsConfirmation) bridge!.needsConfirmation = true;
+            // A committed receipt must remain observable even if the model's
+            // next iteration fails. The channel owns acknowledgement/recovery.
+            fresh();
+            await emit(receipt.needsConfirmation ? "tool-confirmation-required" : receipt.ok ? "tool-completed" : "tool-failed", receipt.output || receipt.error || "渠道写回未完成", receipt.toolId,
+              { callId: receipt.callId, durationMs: receipt.durationMs });
+            if (receipt.needsConfirmation) controller.abort();
+            return receipt;
+          }
+        });
+        context.sdkAvailableToolIds = tools.map(tool => tool.name);
+        context.sdkHostToolDescriptors = channelWriteback ? [{ id: channelWriteback.name, mode: "write", family: "tooling",
+          channels: ["weixin"], description: channelWriteback.description, input: {} }] : [];
         const operationId = await hash(JSON.stringify([context.channel, namespace, context.turnId])); fresh();
         const request: AiRequest = { messages: [
           ...input.messages.filter(m => m.role === "system"),

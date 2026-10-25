@@ -18,15 +18,18 @@ async function sha(text: string): Promise<string> {
   return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))), n => n.toString(16).padStart(2, "0")).join("");
 }
 /** Per-target acknowledgement lives with the bytes, so partial retries survive a restart. */
-export async function deliverWriteback(app: App, items: WritebackItem[], appendOnly = false): Promise<WritebackReceipt> {
+export async function deliverWriteback(app: App, items: WritebackItem[], appendOnly = false, assertCurrent?: () => void): Promise<WritebackReceipt> {
   const run = async () => {
+    assertCurrent?.();
     const targets: WritebackTargetReceipt[] = [];
     for (const item of items) {
       try {
+        assertCurrent?.();
         if (!item.id || !item.targetPath || item.targetPath.startsWith("/") || /[\\:\u0000-\u001f]/u.test(item.targetPath)
           || item.targetPath.split("/").some(p => !p || p === "." || p === "..")) throw new Error("无效写回目标，未写入。");
         const key = await sha(`${item.id}\n${item.targetPath}`), contentHash = await sha(`${appendOnly ? "append" : item.kind}\n${item.content}`);
         const prefix = `<!-- lifeos-writeback:v1:${key}:`, marker = `${prefix}${contentHash} -->`;
+        assertCurrent?.();
         const existing = app.vault.getAbstractFileByPath(item.targetPath);
         if (existing && !(existing instanceof TFile)) throw new Error("写回目标不是文件。");
         const before = existing instanceof TFile ? await app.vault.read(existing) : null;
@@ -41,13 +44,16 @@ export async function deliverWriteback(app: App, items: WritebackItem[], appendO
           const after = !appendOnly && item.kind === "replace" ? delivered.content : (before ?? "") + delivered.content;
           if (existing instanceof TFile) {
             if (typeof app.vault.process !== "function") throw new Error("当前宿主不支持安全写入，请升级 Obsidian。");
+            assertCurrent?.();
             await app.vault.process(existing, current => {
+              assertCurrent?.();
               if (current !== before || existing.path !== item.targetPath || app.vault.getAbstractFileByPath(item.targetPath) !== existing) throw new Error("保存期间原文变化，未覆盖。");
               return after;
             });
           } else {
             const slash = item.targetPath.lastIndexOf("/");
             if (slash > 0) await ensureFolder(app, item.targetPath.slice(0, slash));
+            assertCurrent?.();
             await app.vault.create(item.targetPath, after);
           }
           const file = app.vault.getAbstractFileByPath(item.targetPath);

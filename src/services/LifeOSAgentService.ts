@@ -249,6 +249,7 @@ export interface LifeOSAgentRunOptions {
   webSearchMode?: WebSearchMode;
   explicitWriteIntent?: boolean;
   confirmWrite?: AgentToolRuntimeOptions["confirmWrite"];
+  channelWriteback?: SdkChannelInput["channelWriteback"];
   onAgentEvent?: (event: LifeOSAgentEvent) => void | Promise<void>;
 }
 
@@ -1310,6 +1311,7 @@ export class LifeOSAgentService {
       maxOutputTokens: options.maxOutputTokens,
       maxDurationMs: options.maxDurationMs,
       temperature: options.temperature,
+      channelWriteback: options.channelWriteback,
       toolOptions: { confirmWrite: options.confirmWrite, writeJournal: this.writeJournal },
       onEvent: async (event) => {
         if (prepared.persistEvents !== false) await this.events.append(event);
@@ -1573,13 +1575,25 @@ export class LifeOSAgentService {
       await new DailyNoteService(this.app, this.fileSystem(), this.getSettings()).appendQuickRecord(`AI 日终整理\n${text}`, date);
       return `已生成并追加 ${date} 的日终整理。\n${text.slice(0, 3_000)}`;
     });
-    register("task-list", async () => {
-      const tasks = await new TaskService(this.app, this.fileSystem()).loadOpenTasks();
-      return tasks.length
-        ? tasks.slice(0, 60).map((task, index) => `${index + 1}. ${task.text}${task.date ? `（截止 ${task.date}）` : ""}${task.projectId ? ` [${task.projectId}]` : ""}`).join("\n")
-        : "当前没有未完成待办。";
+    register("task-list", async (input, context) => {
+      const tasks = this.scopedTasks(await new TaskService(this.app, this.fileSystem()).loadOpenTasks(), context.projectScopeId);
+      const offset = typeof input.offset === "number" && Number.isSafeInteger(input.offset) && input.offset >= 0 ? input.offset : 0;
+      const limit = typeof input.limit === "number" && Number.isSafeInteger(input.limit) && input.limit > 0 ? Math.min(input.limit, 100) : 60;
+      const page: Array<{ index: number; title: string; titleTruncated?: boolean; dueDate: string; projectId: string }> = [];
+      let chars = 0;
+      for (const task of tasks.slice(offset, offset + limit)) {
+        const row = { index: offset + page.length + 1, title: task.text.slice(0, 4000), ...(task.text.length > 4000 ? { titleTruncated: true } : {}), dueDate: task.date || "", projectId: task.projectId || "" };
+        const size = JSON.stringify(row).length + 1;
+        // Stay below Runtime's output bound without cutting JSON or silently
+        // losing tasks. Continue from nextOffset; ordinals stay scope-relative.
+        if (page.length && chars + size > 26000) break;
+        page.push(row); chars += size;
+      }
+      const hasMore = offset + page.length < tasks.length;
+      return JSON.stringify({ total: tasks.length, offset, hasMore, nextOffset: hasMore ? offset + page.length : null, tasks: page });
     });
-    register("task-view-configure", async (input) => {
+    register("task-view-configure", async (input, context) => {
+      this.assertTaskWriteCurrent(context);
       const showCompleted = input.showCompleted === true;
       this.getSettings().taskManagerShowCompleted = showCompleted;
       await this.persistSettings();
@@ -1593,7 +1607,9 @@ export class LifeOSAgentService {
         : "已隐藏已完成任务；只修改了任务页面显示偏好，不删除任务，done.md 未修改。";
     });
     register("task-add", async (input, context) => {
-      const line = await new TaskService(this.app, this.fileSystem()).createTask({
+      if (context.projectScopeId && input.projectScopeId && input.projectScopeId !== context.projectScopeId) throw new Error("不能在当前项目会话中写入其他项目待办。");
+      this.assertTaskWriteCurrent(context);
+      const line = await new TaskService(this.app, this.fileSystem(), undefined, () => this.assertTaskWriteCurrent(context)).createTask({
         title: String(input.title || ""),
         dueDate: String(input.dueDate || "") || undefined,
         projectId: String(input.projectScopeId || context.projectScopeId || "") || undefined,
@@ -1601,29 +1617,34 @@ export class LifeOSAgentService {
       });
       return `已新增待办：${line.trim()}`;
     });
-    register("task-complete", async (input) => {
-      const tasks = new TaskService(this.app, this.fileSystem());
-      const selected = this.resolveTask(await tasks.loadOpenTasks(), String(input.query || ""));
+    register("task-complete", async (input, context) => {
+      const tasks = new TaskService(this.app, this.fileSystem(), undefined, () => this.assertTaskWriteCurrent(context));
+      const selected = this.resolveTask(this.scopedTasks(await tasks.loadOpenTasks(), context.projectScopeId), String(input.query || ""));
+      this.assertTaskWriteCurrent(context);
       if (!selected) throw new Error("没有唯一匹配的待办，请提供序号或更完整关键词。");
       await tasks.completeTask(selected);
       return `已完成待办：${selected.text}`;
     });
-    register("task-update", async (input) => {
-      const tasks = new TaskService(this.app, this.fileSystem());
-      const selected = this.resolveTask(await tasks.loadOpenTasks(), String(input.query || ""));
+    register("task-update", async (input, context) => {
+      const tasks = new TaskService(this.app, this.fileSystem(), undefined, () => this.assertTaskWriteCurrent(context));
+      const selected = this.resolveTask(this.scopedTasks(await tasks.loadOpenTasks(), context.projectScopeId), String(input.query || ""));
+      this.assertTaskWriteCurrent(context);
       if (!selected) throw new Error("没有唯一匹配的待办，请提供序号或更完整关键词。");
       const line = await tasks.updateOpenTask(selected, { title: String(input.title || ""), dueDate: input.dueDate === undefined ? undefined : String(input.dueDate || "") });
       return `已修改待办：${line}`;
     });
-    register("task-delete", async (input) => {
-      const tasks = new TaskService(this.app, this.fileSystem());
-      const selected = this.resolveTask(await tasks.loadOpenTasks(), String(input.query || ""));
+    register("task-delete", async (input, context) => {
+      const tasks = new TaskService(this.app, this.fileSystem(), undefined, () => this.assertTaskWriteCurrent(context));
+      const selected = this.resolveTask(this.scopedTasks(await tasks.loadOpenTasks(), context.projectScopeId), String(input.query || ""));
+      this.assertTaskWriteCurrent(context);
       if (!selected) throw new Error("没有唯一匹配的待办，请提供序号或更完整关键词。");
       await tasks.deleteOpenTask(selected);
       return `已删除待办：${selected.text}`;
     });
-    register("task-clear-all", async () => {
-      const result = await new TaskService(this.app, this.fileSystem()).archiveAndClearOpenTasks();
+    register("task-clear-all", async (_input, context) => {
+      if (context.projectScopeId) throw new Error("项目会话不能清空全局待办；请切换到全部项目并单独确认。");
+      this.assertTaskWriteCurrent(context);
+      const result = await new TaskService(this.app, this.fileSystem(), undefined, () => this.assertTaskWriteCurrent(context)).archiveAndClearOpenTasks();
       if (result.cleared === 0) return "当前没有未完成待办，无需清空。";
       return `已完整备份并清空 ${result.cleared} 条未完成待办。\n备份文件：${result.backupPath}`;
     });
@@ -1712,7 +1733,9 @@ export class LifeOSAgentService {
     });
     register("tool-capabilities", async (input, context) => {
       const query = String(input.query || "").trim().toLocaleLowerCase();
-      const tools = this.tools.available(context.channel)
+      // Host-owned descriptors describe only tools actually offered this turn;
+      // they do not register executors or grant raw channel write permission.
+      const tools = [...this.tools.available(context.channel), ...(context.sdkHostToolDescriptors || [])]
         .filter((tool) => isAgentWebToolAllowed(tool, context))
         .filter((tool) => context.sdkAvailableToolIds ? context.sdkAvailableToolIds.includes(tool.id) : tool.mode !== "write" || context.permissionMode !== "read-only")
         .filter((tool) => !query || `${tool.id} ${tool.description} ${tool.family || ""}`.toLocaleLowerCase().includes(query))
@@ -2060,10 +2083,21 @@ export class LifeOSAgentService {
     return bundle.sources[0]?.title || fallback.replace(/^https?:\/\//iu, "").split(/[/?#]/u)[0] || "网页收藏";
   }
 
+  private assertTaskWriteCurrent(context: LifeOSAgentToolExecutionContext): void {
+    if (context.signal?.aborted || context.permissionMode === "read-only" || !this.hasWriteEntitlement() || context.approval && !context.approval()) throw new Error("任务写入已取消或授权失效，未开始新的任务提交。");
+  }
+
+  private scopedTasks<T extends { projectId?: string }>(tasks: T[], projectScopeId?: string): T[] {
+    return projectScopeId ? tasks.filter(task => task.projectId === projectScopeId) : tasks;
+  }
+
   private resolveTask<T extends { text: string }>(tasks: T[], query: string): T | null {
     const clean = query.trim();
-    const index = Number.parseInt(clean, 10);
-    if (Number.isFinite(index) && index > 0 && tasks[index - 1]) return tasks[index - 1];
+    if (!clean) return null;
+    if (/^\d+$/u.test(clean)) {
+      const index = Number(clean);
+      return Number.isSafeInteger(index) && index > 0 ? tasks[index - 1] || null : null;
+    }
     const matches = tasks.filter((task) => task.text.toLowerCase().includes(clean.toLowerCase()));
     return matches.length === 1 ? matches[0] : null;
   }

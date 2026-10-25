@@ -1,3 +1,5 @@
+import { hasLifeOSWriteIntent } from "../agent/AgentWritebackPolicy";
+
 export type AnswerPath = "fast" | "fast_context" | "deep";
 export type FastPathMode = "auto" | "off";
 export type FastIntent = "concept" | "advice" | "local-fact" | "diary" | "search" | "complex";
@@ -66,6 +68,7 @@ export function routeAnswer(input: FastPathInput): AnswerDecision {
   else if (input.forceDeep || /深度回答|深度模式|深入分析/u.test(question)) reason = "forced-deep";
   else if (input.attachments) reason = "attachment";
   else if (input.webAlways) reason = "web";
+  else if (hasLifeOSWriteIntent(question)) reason = "write";
   else if ((question.match(/[?？]/g) || []).length > 1 || /[;；\n]/u.test(question)) reason = "multiple-questions";
   else {
     const contextIntent = input.contextualFast ? fastContextIntent(question) : null;
