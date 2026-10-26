@@ -628,9 +628,8 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
   private renderDailyTemplateSettings(card: HTMLElement): void {
     const row = this.row(card, "每日日记模板", "编辑新建日记使用的 Markdown。支持 {{date}}（日记日期）和 {{assistantName}}（助手名称）；留空使用内置简洁模板。点击顶部“保存设置”后生效，不修改已有日记；“完整版模板”命令仍使用内置完整版。模板中的脚本、嵌入表达式不会执行。");
     row.addClass("lifeos-setting-row-vertical");
-    const editor = row.createEl("textarea", { cls: "lifeos-input", attr: { rows: "14", "aria-label": "每日日记模板", spellcheck: "false" } });
+    const editor = row.createEl("textarea", { cls: "lifeos-input lifeos-daily-template-editor", attr: { rows: "14", "aria-label": "每日日记模板", spellcheck: "false" } });
     editor.value = normalizeDailyNoteTemplate(this.draft.dailyNoteTemplate);
-    editor.style.width = "100%";
     editor.oninput = () => this.setDraft("dailyNoteTemplate", editor.value);
     const actions = row.createDiv({ cls: "lifeos-setting-actions" });
     const load = (value: string) => { editor.value = value; this.setDraft("dailyNoteTemplate", value); };
@@ -638,11 +637,7 @@ export class PersonalLifeSystemSettingTab extends PluginSettingTab {
     this.button(actions, "载入完整版模板", () => load(FULL_DAILY_TEMPLATE));
     this.button(actions, "恢复内置默认", () => load(""));
     row.createDiv({ cls: "lifeos-setting-description", text: "预览（纯文本，仅预览，不创建或修改文件）" });
-    const preview = row.createEl("pre", { attr: { "data-lifeos-daily-template-preview": "true", "aria-live": "polite" } });
-    preview.style.whiteSpace = "pre-wrap";
-    preview.style.overflowWrap = "anywhere";
-    preview.style.maxHeight = "20rem";
-    preview.style.overflow = "auto";
+    const preview = row.createEl("pre", { cls: "lifeos-daily-template-preview", attr: { "data-lifeos-daily-template-preview": "true", "aria-live": "polite" } });
     preview.textContent = renderDailyNoteTemplate(this.draft.dailyNoteTemplate, today(), this.draft.assistantName || "Life OS");
   }
 

@@ -927,3 +927,12 @@
   .lifeos-v3 .lifeos-chat-process-panel,
   .lifeos-v3 .lifeos-chat-process-panel * { transition: none !important; animation: none !important; }
 }
+
+/* Daily-template static presentation; shared by settings surfaces. */
+.lifeos-daily-template-editor { width: 100%; }
+.lifeos-daily-template-preview {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 20rem;
+  overflow: auto;
+}

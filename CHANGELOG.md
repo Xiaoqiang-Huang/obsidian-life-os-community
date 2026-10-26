@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.19 - 2026-10-26
+
+### Fixed
+
+- Replaced the five static inline style assignments in the daily-template settings UI with named `lifeos-daily-template-editor` / `lifeos-daily-template-preview` CSS classes. The layout keeps width 100%, pre-wrap, anywhere wrapping, the 20rem height cap, and automatic scrolling.
+- This is a style/compliance revision of the 0.4.18 daily-template feature; 0.4.18 remains a published release, so the fix ships as 0.4.19 to keep versioned updates intact.
+- Official `eslint-plugin-obsidianmd@0.4.2` rule `no-static-styles-assignment` reports 0 errors for the changed file; typecheck and production build pass. No template behavior, permissions, scope, confirmation, or write boundaries changed.
+
 ## 0.4.18 - 2026-10-25
 
 ### Added
